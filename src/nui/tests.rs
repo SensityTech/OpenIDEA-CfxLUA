@@ -836,3 +836,30 @@ fn nui_callback_events_go_to_the_page() {
     let found = definitions(&fx, &f, "shop/client/events.lua", "closeShop", 1);
     assert!(found.iter().any(|l| l.starts_with("shop/web/src/App.tsx:")), "{found:?}");
 }
+
+#[test]
+fn messages_chosen_by_a_condition_link_both_ways_with_a_plain_page() {
+    let fx = Fixture::new(&[
+        (
+            "shop/fxmanifest.lua",
+            "fx_version 'cerulean'\ngame 'gta5'\nui_page 'web/index.html'\nfiles { 'web/index.html', 'web/app.js' }\n\
+             client_script 'client/*.lua'\n",
+        ),
+        (
+            "shop/client/main.lua",
+            "local function show(bOpen)\n    SetNuiFocus(bOpen, bOpen)\n    SendNUIMessage({ action = bOpen and 'open' or 'close' })\nend\n",
+        ),
+        ("shop/client/probe.lua", "SendNUIMessage({ action = '<caret>' })"),
+        ("shop/web/index.html", "<html><body><script src=\"app.js\"></script></body></html>"),
+        (
+            "shop/web/app.js",
+            "window.addEventListener('message', (event) => {\n  switch (event.data.action) {\n    case 'open':\n      break;\n    case 'close':\n      break;\n  }\n});\n",
+        ),
+    ]);
+    let f = NuiFeature::default();
+    fx.index(&f);
+    assert_eq!(completions(&fx, &f, "shop/client/probe.lua"), ["close", "open"]);
+    assert_eq!(definitions(&fx, &f, "shop/web/app.js", "case 'open'", 6), ["shop/client/main.lua:3"]);
+    assert_eq!(definitions(&fx, &f, "shop/client/main.lua", "'open'", 1), ["shop/web/app.js:3"]);
+    assert_eq!(definitions(&fx, &f, "shop/client/main.lua", "'close'", 1), ["shop/web/app.js:5"]);
+}

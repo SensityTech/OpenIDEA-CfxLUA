@@ -545,9 +545,12 @@ impl Facts {
             {
                 for field in table_fields(src, &an.tree, table) {
                     let Some((key, (va, vb))) = field_key(src, field) else { continue };
-                    if vb == va + 1 && src.toks[va].is_string() {
-                        if let Some(name) = lua_name(src, va).filter(|n| !n.name.is_empty()) {
-                            f.messages.push((key, name));
+                    let strings = value_strings(src, (va, vb));
+                    if !strings.is_empty() {
+                        for s in strings {
+                            if let Some(name) = lua_name(src, s).filter(|n| !n.name.is_empty()) {
+                                f.messages.push((key.clone(), name));
+                            }
                         }
                     } else if vb == va + 1
                         && src.is_name(va)
@@ -621,14 +624,53 @@ pub enum Slot {
     Wrapper { path: String, colon: bool, arg: usize },
 }
 
+fn is_logic(src: &Source, i: usize) -> bool {
+    src.toks[i].kind == Tok::Keyword && matches!(src.tok_text(i), "and" | "or")
+}
+
+/// The `=` of the table field whose value holds the string `k`: `{ action = 'a' }`, or one of the
+/// `and` / `or` operands of `{ action = open and 'a' or 'b' }`.
+fn value_eq(src: &Source, k: usize) -> Option<usize> {
+    if k >= 3 && src.is_op(k - 1, "=") {
+        return Some(k - 1);
+    }
+    if k < 1 || !is_logic(src, k - 1) {
+        return None;
+    }
+    let mut i = k - 1;
+    while i > 0 {
+        i -= 1;
+        if src.toks[i].kind != Tok::Op {
+            continue;
+        }
+        match src.tok_text(i) {
+            ")" | "]" | "}" => i = src.pair[i]?,
+            "=" => return (i >= 2).then_some(i),
+            "," | ";" | "{" | "(" | "[" => return None,
+            _ => {}
+        }
+    }
+    None
+}
+
+/// The string operands of a field value: the value itself, or the strings an `and` / `or` chain picks from.
+fn value_strings(src: &Source, (va, vb): Span) -> Vec<usize> {
+    if vb == va + 1 {
+        return if src.toks[va].is_string() { vec![va] } else { Vec::new() };
+    }
+    (va..vb)
+        .filter(|&i| src.toks[i].is_string() && i > va && is_logic(src, i - 1) && (i + 1 == vb || is_logic(src, i + 1)))
+        .collect()
+}
+
 pub fn slot(an: &Analysis, k: usize, keys: &[String]) -> Option<Slot> {
     let src = an.src;
     // `{ action = '|' }` / `{ ['action'] = '|' }` in a message table.
-    if k >= 3 && src.is_op(k - 1, "=") {
-        let key = if src.is_name(k - 2) {
-            Some((src.tok_text(k - 2).to_owned(), k - 2))
-        } else if src.is_op(k - 2, "]") && src.pair[k - 2].is_some_and(|o| o + 2 == k - 2) {
-            src.pair[k - 2].and_then(|o| string_value(src, o + 1).map(|(v, _)| (v, o)))
+    if let Some(eq) = value_eq(src, k) {
+        let key = if src.is_name(eq - 1) {
+            Some((src.tok_text(eq - 1).to_owned(), eq - 1))
+        } else if src.is_op(eq - 1, "]") && src.pair[eq - 1].is_some_and(|o| o + 2 == eq - 1) {
+            src.pair[eq - 1].and_then(|o| string_value(src, o + 1).map(|(v, _)| (v, o)))
         } else {
             None
         };
