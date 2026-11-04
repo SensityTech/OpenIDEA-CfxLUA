@@ -237,8 +237,21 @@ impl Source {
         }
         let mut s = from;
         let mut i = from;
+        // Blocks of function bodies passed as arguments: their commas (`for k, v in …`) are not separators.
+        let mut blocks = 0usize;
         while i < to {
             let t = self.toks[i];
+            if t.kind == Tok::Keyword {
+                match t.text(&self.text) {
+                    "function" | "if" | "do" | "repeat" => blocks += 1,
+                    "end" | "until" => blocks = blocks.saturating_sub(1),
+                    _ => {}
+                }
+            }
+            if blocks > 0 {
+                i += 1;
+                continue;
+            }
             if t.kind == Tok::Op {
                 match t.text(&self.text) {
                     "(" | "[" | "{" | "?[" => {
@@ -389,6 +402,15 @@ mod tests {
         let set = &calls[1];
         assert_eq!(set.args.len(), 3);
         assert_eq!(s.string_at(s.string_arg(set.args[0]).unwrap()).as_deref(), Some("job"));
+    }
+
+    #[test]
+    fn commas_inside_function_arguments_do_not_split() {
+        let src = "RegisterNUICallback('x', function(d, cb) for _, v in pairs(d) do if v then cb(v, 1) end end end, 3)";
+        let s = Source::new(src);
+        let calls = s.calls(&s.chains());
+        assert_eq!(calls[0].args.len(), 3);
+        assert_eq!(s.tok_text(calls[0].args[2].0), "3");
     }
 
     #[test]

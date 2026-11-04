@@ -153,6 +153,14 @@ impl DevKit {
             };
             ws.set(path, text.as_deref());
         }
+        let zones = self.settings.string("coords.zonesFile", "");
+        if !zones.trim().is_empty() {
+            let zones = slash(zones.trim());
+            let path = if zones.contains(':') || zones.starts_with('/') { zones } else { ws.absolute(&zones) };
+            if let Ok(text) = project.read_file(&path) {
+                ws.set(&path, Some(&text));
+            }
+        }
         ws.scanned = true;
         let ws = &self.workspaces[i];
         for f in ws.files() {

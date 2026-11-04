@@ -89,30 +89,114 @@ impl Token {
         }
     }
 
-    /// A string's value, with the common escapes decoded.
-    pub fn string_value(&self, src: &str) -> String {
+    /// The content as written, escapes included.
+    pub fn raw_value<'a>(&self, src: &'a str) -> &'a str {
         let (s, e) = self.content_range(src);
-        let raw = &src[s..e];
+        &src[s..e]
+    }
+
+    /// A string's value as text (invalid UTF-8 from `\xHH` / `\ddd` escapes is replaced).
+    pub fn string_value(&self, src: &str) -> String {
+        let raw = self.raw_value(src);
         if self.kind == Tok::LongStr || !raw.contains('\\') {
             return raw.to_owned();
         }
-        let mut out = String::with_capacity(raw.len());
-        let mut chars = raw.chars();
-        while let Some(c) = chars.next() {
-            if c != '\\' {
-                out.push(c);
-                continue;
-            }
-            match chars.next() {
-                Some('n') => out.push('\n'),
-                Some('t') => out.push('\t'),
-                Some('r') => out.push('\r'),
-                Some(other) => out.push(other),
-                None => {}
-            }
-        }
-        out
+        String::from_utf8_lossy(&decode_escapes(raw)).into_owned()
     }
+
+    /// A string's value as the bytes the runtime sees (Lua escapes decoded).
+    pub fn string_bytes(&self, src: &str) -> Vec<u8> {
+        let raw = self.raw_value(src);
+        if self.kind == Tok::LongStr { raw.as_bytes().to_vec() } else { decode_escapes(raw) }
+    }
+}
+
+/// Lua 5.4 quoted-string escapes: `\n` `\t` `\\` … `\xHH`, `\ddd`, `\z`, `\u{XXX}`, escaped line breaks.
+pub fn decode_escapes(raw: &str) -> Vec<u8> {
+    let b = raw.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] != b'\\' || i + 1 >= b.len() {
+            out.push(b[i]);
+            i += 1;
+            continue;
+        }
+        let e = b[i + 1];
+        i += 2;
+        match e {
+            b'a' => out.push(0x07),
+            b'b' => out.push(0x08),
+            b'f' => out.push(0x0c),
+            b'n' => out.push(b'\n'),
+            b'r' => out.push(b'\r'),
+            b't' => out.push(b'\t'),
+            b'v' => out.push(0x0b),
+            b'\r' | b'\n' => {
+                out.push(b'\n');
+                if i < b.len() && (b[i] == b'\r' || b[i] == b'\n') && b[i] != e {
+                    i += 1;
+                }
+            }
+            b'z' => {
+                while i < b.len() && b[i].is_ascii_whitespace() {
+                    i += 1;
+                }
+            }
+            b'x' => {
+                let hex = raw.get(i..i + 2).and_then(|h| u8::from_str_radix(h, 16).ok());
+                match hex {
+                    Some(v) => {
+                        out.push(v);
+                        i += 2;
+                    }
+                    None => out.push(b'x'),
+                }
+            }
+            b'u' if b.get(i) == Some(&b'{') => {
+                let end = raw[i..].find('}').map(|n| i + n);
+                match end.and_then(|end| u32::from_str_radix(&raw[i + 1..end], 16).ok().map(|v| (v, end))) {
+                    Some((v, end)) => {
+                        push_utf8_extended(&mut out, v);
+                        i = end + 1;
+                    }
+                    None => out.push(b'u'),
+                }
+            }
+            b'0'..=b'9' => {
+                let mut v = u32::from(e - b'0');
+                let mut n = 1;
+                while n < 3 && i < b.len() && b[i].is_ascii_digit() {
+                    v = v * 10 + u32::from(b[i] - b'0');
+                    i += 1;
+                    n += 1;
+                }
+                out.push(v.min(255) as u8);
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// Lua's `utf8.char` encoding, extended to 31 bits like `\u{7FFFFFFF}`.
+fn push_utf8_extended(out: &mut Vec<u8>, v: u32) {
+    if v < 0x80 {
+        out.push(v as u8);
+        return;
+    }
+    let (mut v, mut mfb) = (v, 0x3fu32);
+    let mut tail = Vec::with_capacity(6);
+    loop {
+        tail.push(0x80 | (v & 0x3f) as u8);
+        v >>= 6;
+        mfb >>= 1;
+        if v <= mfb {
+            break;
+        }
+    }
+    out.push(((!mfb << 1) | v) as u8);
+    out.extend(tail.iter().rev());
 }
 
 pub const KEYWORDS: &[&str] = &[
@@ -184,12 +268,18 @@ pub fn tokenize(src: &str) -> Vec<Token> {
                 let mut closed = false;
                 while i < bytes.len() {
                     match bytes[i] {
-                        b'\\' if c != b'`' => {
-                            // `\z` skips the following whitespace, newlines included.
-                            i += if bytes.get(i + 1) == Some(&b'\r') && bytes.get(i + 2) == Some(&b'\n') {
-                                3
-                            } else {
-                                2
+                        b'\\' => {
+                            i += match bytes.get(i + 1) {
+                                Some(b'\r') if bytes.get(i + 2) == Some(&b'\n') => 3,
+                                Some(b'z') => {
+                                    // `\z` skips the whitespace after it, newlines included.
+                                    let mut j = i + 2;
+                                    while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                                        j += 1;
+                                    }
+                                    j - i
+                                }
+                                _ => 2,
                             };
                         }
                         b'\n' => break,
@@ -309,6 +399,19 @@ mod tests {
         assert_eq!(s.string_value(src), "it's");
         let l = toks.iter().find(|t| t.kind == Tok::LongStr).unwrap();
         assert_eq!(l.string_value(src), "x]]y");
+    }
+
+    #[test]
+    fn escapes_inside_strings_and_hashes() {
+        let src = "a = `it\\`s` b = 'x\\z\n   y' c = 1";
+        let toks = tokenize(src);
+        let hash = toks.iter().find(|t| matches!(t.kind, Tok::Hash { .. })).unwrap();
+        assert_eq!(hash.text(src), "`it\\`s`", "an escaped backtick does not close the literal");
+        let s = toks.iter().find(|t| matches!(t.kind, Tok::Str { .. })).unwrap();
+        assert_eq!(s.kind, Tok::Str { closed: true });
+        assert_eq!(s.string_value(src), "xy");
+        assert!(toks.iter().any(|t| t.is_name(src, "c")));
+        assert_eq!(decode_escapes("\\65\\x42\\u{43}\\n"), b"ABC\n");
     }
 
     #[test]
