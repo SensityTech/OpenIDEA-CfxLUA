@@ -40,7 +40,13 @@ fn sort_text(priority: i32, label: &str) -> String {
     format!("{:03}{label}", 100 - priority)
 }
 
-fn item(label: &str, kind: CompletionKind, detail: Option<&str>, documentation: Option<String>, priority: i32) -> CompletionItem {
+fn item(
+    label: &str,
+    kind: CompletionKind,
+    detail: Option<&str>,
+    documentation: Option<String>,
+    priority: i32,
+) -> CompletionItem {
     let mut it = CompletionItem::new(label, kind);
     it.detail = detail.map(str::to_owned);
     it.documentation = documentation;
@@ -81,7 +87,8 @@ fn directives(cx: &Ctx, at: usize) -> Vec<CompletionItem> {
         } else {
             0
         };
-        let mut it = item(form, CompletionKind::Property, Some(&catalog::value_kind(d)), Some(documentation(d)), priority);
+        let mut it =
+            item(form, CompletionKind::Property, Some(&catalog::value_kind(d)), Some(documentation(d)), priority);
         if !has_value {
             it.insert_text = format!("{form}{}", shape(form, d, &indent));
         }
@@ -277,11 +284,23 @@ fn children(tree: &Tree, rel: &str, lookup: &str, manifest: &str, kind: PathKind
     for e in exts.iter().take(MAX_GLOB_EXTENSIONS) {
         let direct = files.iter().filter(|n| ext(n).as_deref() == Some(e.as_str())).count();
         if direct > 0 {
-            out.push(item(&format!("{lookup}{typed}*.{e}"), CompletionKind::Snippet, Some("glob"), Some(plural_files(direct)), 0));
+            out.push(item(
+                &format!("{lookup}{typed}*.{e}"),
+                CompletionKind::Snippet,
+                Some("glob"),
+                Some(plural_files(direct)),
+                0,
+            ));
         }
         let recursive = deep(e);
         if recursive > direct {
-            out.push(item(&format!("{lookup}{typed}**/*.{e}"), CompletionKind::Snippet, Some("glob"), Some(plural_files(recursive)), 0));
+            out.push(item(
+                &format!("{lookup}{typed}**/*.{e}"),
+                CompletionKind::Snippet,
+                Some("glob"),
+                Some(plural_files(recursive)),
+                0,
+            ));
         }
     }
     out
@@ -305,9 +324,9 @@ fn dependency_items(cx: &Ctx, decl: &Decl, value: &Value) -> Vec<CompletionItem>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::feature::Feature;
     use crate::manifest::ManifestFeature;
     use crate::testing::Fixture;
-    use crate::feature::Feature;
 
     const RES: &[(&str, &str)] = &[
         ("res/client/main.lua", ""),
@@ -414,15 +433,30 @@ mod tests {
         let l = labels("client_scripts { 'client/<caret>' }");
         assert_eq!(l, ["client/sub/", "client/main.lua", "client/utils.lua", "client/*.lua", "client/**/*.lua"]);
         let l = labels("files { 'html/<caret>' }");
-        for want in ["html/index.html", "html/app.js", "html/style.css", "html/logo.png", "html/*.js", "html/*.css", "html/*.png", "html/*.html"] {
+        for want in [
+            "html/index.html",
+            "html/app.js",
+            "html/style.css",
+            "html/logo.png",
+            "html/*.js",
+            "html/*.css",
+            "html/*.png",
+            "html/*.html",
+        ] {
             assert!(l.contains(&want.to_owned()), "{want} in {l:?}");
         }
         let l = labels("ui_page '<caret>'");
-        assert!(l.contains(&"html/".to_owned()) && !l.iter().any(|x| x == "config.lua" || x == "README.txt" || x == "*.lua"));
+        assert!(
+            l.contains(&"html/".to_owned())
+                && !l.iter().any(|x| x == "config.lua" || x == "README.txt" || x == "*.lua")
+        );
         assert_eq!(labels("ui_page 'html/<caret>'"), ["html/index.html"]);
         assert_eq!(labels("data_file 'HANDLING_FILE' 'data/<caret>'"), ["data/handling.meta", "data/*.meta"]);
         assert_eq!(labels("shared_script '@<caret>'"), ["@other/", "@third/"]);
-        assert_eq!(labels("shared_script '@other/<caret>'"), ["@other/lib/", "@other/init.lua", "@other/*.lua", "@other/**/*.lua"]);
+        assert_eq!(
+            labels("shared_script '@other/<caret>'"),
+            ["@other/lib/", "@other/init.lua", "@other/*.lua", "@other/**/*.lua"]
+        );
         assert!(labels("files { '@<caret>' }").is_empty());
         assert_eq!(labels("client_script './client/<caret>'")[0], "./client/sub/");
         let globs = complete("client_script 'client/<caret>'");
@@ -439,6 +473,8 @@ mod tests {
         }
         assert!(!l.contains(&"res".to_owned()));
         let l = labels("dependencies { 'other', '/onesync', '<caret>' }");
-        assert!(!l.contains(&"other".to_owned()) && !l.contains(&"/onesync".to_owned()) && l.contains(&"third".to_owned()));
+        assert!(
+            !l.contains(&"other".to_owned()) && !l.contains(&"/onesync".to_owned()) && l.contains(&"third".to_owned())
+        );
     }
 }

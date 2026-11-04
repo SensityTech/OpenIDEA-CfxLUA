@@ -195,7 +195,16 @@ mod tests {
         assert!(find("escrow_ignores").is_none());
         assert!(find("authors").is_none());
         assert!(is_known("repository") && is_known("file_set") && !is_known("pizza_topping"));
-        for name in ["client_scripts", "server_scripts", "shared_scripts", "files", "games", "exports", "server_exports", "dependencies"] {
+        for name in [
+            "client_scripts",
+            "server_scripts",
+            "shared_scripts",
+            "files",
+            "games",
+            "exports",
+            "server_exports",
+            "dependencies",
+        ] {
             assert!(is_table_form(name), "{name}");
         }
         assert!(!is_table_form("client_script") && !is_table_form("escrow_ignore") && !is_table_form("dependency"));
@@ -207,17 +216,46 @@ mod tests {
     fn summaries_and_value_kinds() {
         assert_eq!(summary(d("fx_version")), "Required");
         assert_eq!(summary(d("game")), "Required with every fx_version");
-        assert_eq!(summary(d("file")), "File(s) downloaded by clients without being executed: NUI pages and assets, data files, JSON read with LoadResourceFile");
+        assert_eq!(
+            summary(d("file")),
+            "File(s) downloaded by clients without being executed: NUI pages and assets, data files, JSON read with LoadResourceFile"
+        );
         assert_eq!(
             summary(d("replace_level_meta")),
             "Replaces the level meta with the given file of the resource (name without the .meta extension)"
         );
         assert!(summary(d("convar_category")).ends_with("{ title, { { label, convar, type, default, .."));
-        let kinds: Vec<(&str, String)> = ["fx_version", "rdr3_warning", "author", "client_script", "ui_page", "ui_page_preload", "nui_callback_strict_mode", "loadscreen", "data_file", "dependencies", "convar_category", "this_is_a_map"]
-            .iter()
-            .map(|n| (*n, value_kind(d(n))))
-            .collect();
-        let expect = ["enum", "enum", "string", "path / glob", "path / URL", "'yes'", "'true'", "path", "enum", "list", "table", "'yes'"];
+        let kinds: Vec<(&str, String)> = [
+            "fx_version",
+            "rdr3_warning",
+            "author",
+            "client_script",
+            "ui_page",
+            "ui_page_preload",
+            "nui_callback_strict_mode",
+            "loadscreen",
+            "data_file",
+            "dependencies",
+            "convar_category",
+            "this_is_a_map",
+        ]
+        .iter()
+        .map(|n| (*n, value_kind(d(n))))
+        .collect();
+        let expect = [
+            "enum",
+            "enum",
+            "string",
+            "path / glob",
+            "path / URL",
+            "'yes'",
+            "'true'",
+            "path",
+            "enum",
+            "list",
+            "table",
+            "'yes'",
+        ];
         for ((name, kind), want) in kinds.iter().zip(expect) {
             assert_eq!(kind, want, "{name}");
         }

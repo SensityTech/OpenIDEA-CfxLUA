@@ -96,7 +96,10 @@ mod tests {
 
     #[test]
     fn layouts() {
-        assert_eq!(add("escrow_ignore {\n  'a.lua', -- open\n}\n"), "escrow_ignore {\n  'a.lua', -- open\n  'b.lua',\n}\n");
+        assert_eq!(
+            add("escrow_ignore {\n  'a.lua', -- open\n}\n"),
+            "escrow_ignore {\n  'a.lua', -- open\n  'b.lua',\n}\n"
+        );
         assert_eq!(add("escrow_ignore {\n    'a.lua'\n}\n"), "escrow_ignore {\n    'a.lua',\n    'b.lua'\n}\n");
         assert_eq!(add("escrow_ignore { \"a.lua\" }\n"), "escrow_ignore { \"a.lua\", \"b.lua\" }\n");
         assert_eq!(add("escrow_ignore({ 'a.lua' })\n"), "escrow_ignore({ 'a.lua', 'b.lua' })\n");
@@ -107,7 +110,10 @@ mod tests {
         assert_eq!(add("fx_version \"cerulean\""), "fx_version \"cerulean\"\n\nescrow_ignore {\n    \"b.lua\",\n}\n");
         assert_eq!(add(""), "escrow_ignore {\n    'b.lua',\n}\n");
         assert_eq!(add("escrow_ignore { 'b.lua' }\n"), "escrow_ignore { 'b.lua' }\n");
-        assert_eq!(add("escrow_ignore {\r\n    'a.lua',\r\n}\r\n"), "escrow_ignore {\r\n    'a.lua',\r\n    'b.lua',\r\n}\r\n");
+        assert_eq!(
+            add("escrow_ignore {\r\n    'a.lua',\r\n}\r\n"),
+            "escrow_ignore {\r\n    'a.lua',\r\n    'b.lua',\r\n}\r\n"
+        );
     }
 
     #[test]
@@ -115,7 +121,10 @@ mod tests {
         let text = "escrow_ignore {\n    'config.lua', -- edited by buyers\n}\n";
         let (s, e, t) = pattern_edit(text, &["data/items.lua".to_owned()]).unwrap();
         assert_eq!((s, e), (s, s), "an insertion");
-        assert_eq!(apply(text, &[(s, e, t)]), "escrow_ignore {\n    'config.lua', -- edited by buyers\n    'data/items.lua',\n}\n");
+        assert_eq!(
+            apply(text, &[(s, e, t)]),
+            "escrow_ignore {\n    'config.lua', -- edited by buyers\n    'data/items.lua',\n}\n"
+        );
         assert!(pattern_edit(text, &["config.lua".to_owned()]).is_none());
         let edit = pattern_text_edit("a 'x'\nescrow_ignore {}\n", &["b".to_owned()]).unwrap();
         assert_eq!((edit.range.start.line, edit.range.start.character, edit.text.as_str()), (1, 15, " 'b' "));

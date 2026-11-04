@@ -38,7 +38,8 @@ pub const UNPROTECTED: &str = "CfxEscrowUnprotectedScript";
 pub const STATUS: &str = "CfxEscrowStatus";
 pub const PROTECTED: &str = "CfxEscrowProtected";
 
-const SCRIPT_DIRECTIVES: [&str; 6] = ["client_script", "client_scripts", "server_script", "server_scripts", "shared_script", "shared_scripts"];
+const SCRIPT_DIRECTIVES: [&str; 6] =
+    ["client_script", "client_scripts", "server_script", "server_scripts", "shared_script", "shared_scripts"];
 
 #[derive(Default)]
 pub struct EscrowFeature {
@@ -90,7 +91,7 @@ impl Feature for EscrowFeature {
             return Vec::new();
         }
         if doc.kind == FileKind::Lua && rules::is_protected(doc.text()) {
-            let message = "This file is protected by Cfx Asset Escrow: its content is encrypted, only FXServer can decrypt it. Sensity DevKit does not parse it.";
+            let message = "This file is protected by Cfx Asset Escrow: its content is encrypted, only FXServer can decrypt it. OpenIDEA-CfxLUA does not parse it.";
             return vec![Problem::new(PROTECTED, Severity::Info, 0, 4, message)];
         }
         let Some(res) = escrow_resource(cx) else { return Vec::new() };
@@ -157,14 +158,22 @@ fn editable_files(cx: &Ctx, res: &Resource, view: &View, out: &mut Vec<Problem>)
         let message = if pattern == group[0].rel {
             format!("'{pattern}' will be encrypted by Asset Escrow: buyers will not be able to edit it")
         } else if group.len() == 1 {
-            format!("'{pattern}' matches a file that will be encrypted by Asset Escrow: buyers will not be able to edit it")
+            format!(
+                "'{pattern}' matches a file that will be encrypted by Asset Escrow: buyers will not be able to edit it"
+            )
         } else {
-            format!("'{pattern}' matches {} files that will be encrypted by Asset Escrow: buyers will not be able to edit them", group.len())
+            format!(
+                "'{pattern}' matches {} files that will be encrypted by Asset Escrow: buyers will not be able to edit them",
+                group.len()
+            )
         };
         // The value listing one of the files, else `escrow_ignore`, else the first directive, else the file.
-        let listing = view.decls.iter().filter(|d| d.name() != "escrow_ignore").flat_map(|d| d.values()).find(|v| {
-            Glob::new(&v.text, CASE_SENSITIVE).is_some_and(|g| group.iter().any(|f| g.matches(&f.rel)))
-        });
+        let listing = view
+            .decls
+            .iter()
+            .filter(|d| d.name() != "escrow_ignore")
+            .flat_map(|d| d.values())
+            .find(|v| Glob::new(&v.text, CASE_SENSITIVE).is_some_and(|g| group.iter().any(|f| g.matches(&f.rel))));
         let (start, end) = match listing {
             Some(v) => (v.start, v.end),
             None => view
@@ -205,7 +214,9 @@ fn loaded_files(cx: &Ctx, res: &Resource, out: &mut Vec<Problem>) {
             Some(callee) => format!(
                 "'{target}' will be encrypted by Asset Escrow: {callee} reads it with LoadResourceFile and cannot load it in the protected build"
             ),
-            None => format!("'{target}' will be encrypted by Asset Escrow: LoadResourceFile returns its encrypted bytes in the protected build"),
+            None => format!(
+                "'{target}' will be encrypted by Asset Escrow: LoadResourceFile returns its encrypted bytes in the protected build"
+            ),
         };
         let mut p = Problem::new(LOADED, Severity::Warning, load.start, load.end, message);
         // The fix edits the manifest, another file than the problem's.
@@ -238,7 +249,9 @@ mod tests {
             .collect()
     }
 
-    fn without_status(p: Vec<(&'static str, Severity, String, String)>) -> Vec<(&'static str, Severity, String, String)> {
+    fn without_status(
+        p: Vec<(&'static str, Severity, String, String)>,
+    ) -> Vec<(&'static str, Severity, String, String)> {
         p.into_iter().filter(|p| p.0 != STATUS).collect()
     }
 
@@ -259,11 +272,20 @@ mod tests {
         let p = without_status(problems(&fx, "res/fxmanifest.lua"));
         assert_eq!(
             p,
-            [(EDITABLE, Severity::Warning, "'config.lua' will be encrypted by Asset Escrow: buyers will not be able to edit it".to_owned(), "'config.lua'".to_owned())]
+            [(
+                EDITABLE,
+                Severity::Warning,
+                "'config.lua' will be encrypted by Asset Escrow: buyers will not be able to edit it".to_owned(),
+                "'config.lua'".to_owned()
+            )]
         );
-        assert_eq!(fixed_manifest(&fx, "'config.lua'"), "shared_script 'config.lua'\nescrow_ignore {\n    'client/open.lua',\n    'config.lua',\n}\n");
+        assert_eq!(
+            fixed_manifest(&fx, "'config.lua'"),
+            "shared_script 'config.lua'\nescrow_ignore {\n    'client/open.lua',\n    'config.lua',\n}\n"
+        );
 
-        let manifest = "shared_scripts { 'locales/*.lua', 'shared/*.lua', 'config/**/*.lua' }\nescrow_ignore 'client/main.lua'\n";
+        let manifest =
+            "shared_scripts { 'locales/*.lua', 'shared/*.lua', 'config/**/*.lua' }\nescrow_ignore 'client/main.lua'\n";
         let fx = Fixture::new(&[
             ("res/fxmanifest.lua", manifest),
             ("res/locales/en.lua", ""),
@@ -272,11 +294,21 @@ mod tests {
             ("res/config/jobs/police.lua", ""),
             ("res/client/configure.lua", ""),
         ]);
-        let p: Vec<(String, String)> = without_status(problems(&fx, "res/fxmanifest.lua")).into_iter().map(|p| (p.2, p.3)).collect();
+        let p: Vec<(String, String)> =
+            without_status(problems(&fx, "res/fxmanifest.lua")).into_iter().map(|p| (p.2, p.3)).collect();
         let want = [
-            ("'config/**/*.lua' matches a file that will be encrypted by Asset Escrow: buyers will not be able to edit it", "'config/**/*.lua'"),
-            ("'locales/*.lua' matches 2 files that will be encrypted by Asset Escrow: buyers will not be able to edit them", "'locales/*.lua'"),
-            ("'shared/sh_config.lua' will be encrypted by Asset Escrow: buyers will not be able to edit it", "'shared/*.lua'"),
+            (
+                "'config/**/*.lua' matches a file that will be encrypted by Asset Escrow: buyers will not be able to edit it",
+                "'config/**/*.lua'",
+            ),
+            (
+                "'locales/*.lua' matches 2 files that will be encrypted by Asset Escrow: buyers will not be able to edit them",
+                "'locales/*.lua'",
+            ),
+            (
+                "'shared/sh_config.lua' will be encrypted by Asset Escrow: buyers will not be able to edit it",
+                "'shared/*.lua'",
+            ),
         ];
         assert_eq!(p, want.map(|(a, b)| (a.to_owned(), b.to_owned())));
         assert_eq!(
@@ -284,7 +316,10 @@ mod tests {
             manifest.replace("escrow_ignore 'client/main.lua'", "escrow_ignore { 'client/main.lua', 'locales/*.lua' }")
         );
 
-        let fx = Fixture::new(&[("res/fxmanifest.lua", "fx_version 'cerulean'\nescrow_ignore {}\n"), ("res/settings.lua", "")]);
+        let fx = Fixture::new(&[
+            ("res/fxmanifest.lua", "fx_version 'cerulean'\nescrow_ignore {}\n"),
+            ("res/settings.lua", ""),
+        ]);
         let p = without_status(problems(&fx, "res/fxmanifest.lua"));
         assert_eq!(p[0].3, "escrow_ignore");
         assert_eq!(fixed_manifest(&fx, "'settings.lua'"), "fx_version 'cerulean'\nescrow_ignore { 'settings.lua' }\n");
@@ -301,7 +336,10 @@ mod tests {
         let fx = Fixture::new(&files).with_settings(Settings::defaults().with(keys::ASSUME_ESCROW, Value::Bool(true)));
         let p = without_status(problems(&fx, "res/fxmanifest.lua"));
         assert_eq!(p.len(), 2);
-        assert_eq!((p[1].0, p[1].1, p[1].2.as_str()), (UNPROTECTED, Severity::Info, "Asset Escrow does not encrypt JavaScript: 'ui.js' ships readable"));
+        assert_eq!(
+            (p[1].0, p[1].1, p[1].2.as_str()),
+            (UNPROTECTED, Severity::Info, "Asset Escrow does not encrypt JavaScript: 'ui.js' ships readable")
+        );
         assert_eq!(
             fixed_manifest(&fx, "'config.lua'"),
             "fx_version 'cerulean'\nshared_script 'config.lua'\nclient_script 'ui.js'\n\nescrow_ignore {\n    'config.lua',\n}\n"
@@ -311,7 +349,10 @@ mod tests {
             ("res/.fxap", ""),
         ]);
         let p = without_status(problems(&fx, "res/fxmanifest.lua"));
-        assert_eq!(p.iter().map(|p| p.2.as_str()).collect::<Vec<_>>(), ["Asset Escrow does not encrypt C# assemblies: 'server/Bank.net.dll' ships as is"]);
+        assert_eq!(
+            p.iter().map(|p| p.2.as_str()).collect::<Vec<_>>(),
+            ["Asset Escrow does not encrypt C# assemblies: 'server/Bank.net.dll' ships as is"]
+        );
     }
 
     #[test]
@@ -326,10 +367,19 @@ mod tests {
         let status = |rel: &str| problems(&fx, rel).into_iter().find(|p| p.0 == STATUS).map(|p| (p.1, p.2));
         assert_eq!(
             status("res/client.lua"),
-            Some((Severity::Hint, "escrow: encrypted (Asset Escrow encrypts this file: buyers can neither read nor edit it)".to_owned()))
+            Some((
+                Severity::Hint,
+                "escrow: encrypted (Asset Escrow encrypts this file: buyers can neither read nor edit it)".to_owned()
+            ))
         );
-        assert_eq!(status("res/config.lua").unwrap().1, "escrow: open (Listed in escrow_ignore: shipped readable and editable)");
-        assert_eq!(status("res/fxmanifest.lua").unwrap().1, "escrow: open (Asset Escrow does not encrypt this file type: shipped readable)");
+        assert_eq!(
+            status("res/config.lua").unwrap().1,
+            "escrow: open (Listed in escrow_ignore: shipped readable and editable)"
+        );
+        assert_eq!(
+            status("res/fxmanifest.lua").unwrap().1,
+            "escrow: open (Asset Escrow does not encrypt this file type: shipped readable)"
+        );
         assert_eq!(status("plain/client.lua"), None);
         let fx = Fixture::new(&[("res/fxmanifest.lua", "escrow_ignore {}"), ("res/client.lua", "")])
             .with_settings(Settings::defaults().with(keys::SHOW_STATUS, Value::Bool(false)));
@@ -338,7 +388,11 @@ mod tests {
 
     #[test]
     fn protected_files() {
-        let fx = Fixture::new(&[("res/fxmanifest.lua", "escrow_ignore {}"), ("res/client.lua", "FXAP\u{1}LoadResourceFile(x)"), ("res/b.lua", "-- FXAP")]);
+        let fx = Fixture::new(&[
+            ("res/fxmanifest.lua", "escrow_ignore {}"),
+            ("res/client.lua", "FXAP\u{1}LoadResourceFile(x)"),
+            ("res/b.lua", "-- FXAP"),
+        ]);
         let p = problems(&fx, "res/client.lua");
         assert_eq!(p.len(), 1);
         assert_eq!((p[0].0, p[0].1, p[0].3.as_str()), (PROTECTED, Severity::Info, "FXAP"));
@@ -353,7 +407,10 @@ mod tests {
 
     fn loading_fixture() -> Fixture {
         Fixture::new(&[
-            ("res/fxmanifest.lua", "escrow_ignore {\n    'config.lua', -- edited by buyers\n    'modules/open.lua',\n}\n"),
+            (
+                "res/fxmanifest.lua",
+                "escrow_ignore {\n    'config.lua', -- edited by buyers\n    'modules/open.lua',\n}\n",
+            ),
             ("res/client/main.lua", LOADING),
             ("res/config.lua", ""),
             ("res/data/items.lua", ""),
@@ -367,9 +424,15 @@ mod tests {
     #[test]
     fn loaded_files_in_scripts() {
         let fx = loading_fixture();
-        let p: Vec<(String, String)> = without_status(problems(&fx, "res/client/main.lua")).into_iter().map(|p| (p.2, p.3)).collect();
-        let file = "will be encrypted by Asset Escrow: LoadResourceFile returns its encrypted bytes in the protected build";
-        let module = |callee: &str| format!("will be encrypted by Asset Escrow: {callee} reads it with LoadResourceFile and cannot load it in the protected build");
+        let p: Vec<(String, String)> =
+            without_status(problems(&fx, "res/client/main.lua")).into_iter().map(|p| (p.2, p.3)).collect();
+        let file =
+            "will be encrypted by Asset Escrow: LoadResourceFile returns its encrypted bytes in the protected build";
+        let module = |callee: &str| {
+            format!(
+                "will be encrypted by Asset Escrow: {callee} reads it with LoadResourceFile and cannot load it in the protected build"
+            )
+        };
         assert_eq!(
             p,
             [
@@ -429,11 +492,22 @@ mod tests {
         let report = run(Some(&doc), Some(&fx.ws)).expect("a report");
         assert!(report.starts_with("# Escrow pre-publish check: res\n"));
         let n = host.notifications();
-        assert_eq!((n[0].level, n[0].title.as_str()), (openidea_plugin::NotificationLevel::Error, "Escrow check of res"));
+        assert_eq!(
+            (n[0].level, n[0].title.as_str()),
+            (openidea_plugin::NotificationLevel::Error, "Escrow check of res")
+        );
         assert!(n[0].body.starts_with("2 blockers, 5 warnings\nBlockers\n"), "{}", n[0].body);
         assert!(run(None, None).is_none());
         assert_eq!(host.notifications()[1].title, "Escrow check: no resource (folder with an fxmanifest.lua) found");
-        assert!(EscrowFeature::default().command(&CommandCx { ws: None, settings: &fx.settings, natives: &fx.natives, doc: None, inv: &inv }, "other", None).is_none());
+        assert!(
+            EscrowFeature::default()
+                .command(
+                    &CommandCx { ws: None, settings: &fx.settings, natives: &fx.natives, doc: None, inv: &inv },
+                    "other",
+                    None
+                )
+                .is_none()
+        );
     }
 
     fn loading_fixture_files() -> Vec<(&'static str, &'static str)> {

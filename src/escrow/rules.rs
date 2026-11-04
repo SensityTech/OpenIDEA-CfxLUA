@@ -125,9 +125,7 @@ pub fn editable_pattern(rel: &str) -> Option<String> {
     }
     let name = segs[segs.len() - 1];
     let stem = name.rsplit_once('.').map_or(name, |(s, _)| s);
-    stem.split(['_', '.', '-'])
-        .any(|w| CONFIG_NAMES.contains(&w.to_ascii_lowercase().as_str()))
-        .then(|| rel.to_owned())
+    stem.split(['_', '.', '-']).any(|w| CONFIG_NAMES.contains(&w.to_ascii_lowercase().as_str())).then(|| rel.to_owned())
 }
 
 /// Encrypted configuration and translation files, grouped by the pattern that keeps them open (first appearance first).
@@ -239,7 +237,10 @@ pub fn target(ws: &Workspace, res: &Resource, load: &Load) -> Option<(String, St
         let rel = if ws.exists(&format!("{prefix}{c}")) {
             c
         } else {
-            ws.files_under(&res.dir).filter_map(|f| f.path.strip_prefix(&prefix)).find(|r| r.eq_ignore_ascii_case(&c))?.to_owned()
+            ws.files_under(&res.dir)
+                .filter_map(|f| f.path.strip_prefix(&prefix))
+                .find(|r| r.eq_ignore_ascii_case(&c))?
+                .to_owned()
         };
         let status = status(res, &rel);
         Some((rel, status))
@@ -254,7 +255,10 @@ mod tests {
     fn statuses() {
         let ws = Workspace::from_files(
             "/p",
-            &[("res/fxmanifest.lua", "escrow_ignore { 'config.lua', 'locales/*.lua', 'stream/**/*.yft', 'client/open_*.lua' }")],
+            &[(
+                "res/fxmanifest.lua",
+                "escrow_ignore { 'config.lua', 'locales/*.lua', 'stream/**/*.yft', 'client/open_*.lua' }",
+            )],
         );
         let res = ws.resource("/p/res").unwrap();
         let cases = [
@@ -321,7 +325,8 @@ mod tests {
              LoadResourceFile(cache.resource, 'a.lua')\nLoadResourceFile(other, 'b.lua')\nLoadResourceFile('other_resource', 'c.lua')\n\
              require 'modules.utils'\nlib.require('@res.modules.menu')\nlib.load '@res/modules/utils'\nrequire '@ox_core.modules.utils'\nx.require 'y'\n",
         );
-        let all: Vec<(Option<&str>, Vec<String>)> = loads(&src).iter().map(|l| (l.module, l.candidates("res"))).collect();
+        let all: Vec<(Option<&str>, Vec<String>)> =
+            loads(&src).iter().map(|l| (l.module, l.candidates("res"))).collect();
         let c = |v: &[&str]| v.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
         assert_eq!(
             all,

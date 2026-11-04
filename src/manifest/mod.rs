@@ -66,12 +66,18 @@ fn definition(cx: &Ctx, at: usize) -> Vec<Location> {
             }
             let (dirs, path): (Vec<&str>, &str) = match split_resource_path(text) {
                 Some(_) if !kind.other_resources() => return Vec::new(),
-                Some((res, path)) => (cx.ws.resources().filter(|r| r.name == res).map(|r| r.dir.as_str()).collect(), path),
+                Some((res, path)) => {
+                    (cx.ws.resources().filter(|r| r.name == res).map(|r| r.dir.as_str()).collect(), path)
+                }
                 None => (vec![parent(&cx.doc.path)], text),
             };
             dirs.into_iter()
                 .flat_map(|dir| {
-                    Tree::new(cx.ws, dir).matches(path, kind).into_iter().filter(|m| !m.dir).map(move |m| file(dir, &m.rel))
+                    Tree::new(cx.ws, dir)
+                        .matches(path, kind)
+                        .into_iter()
+                        .filter(|m| !m.dir)
+                        .map(move |m| file(dir, &m.rel))
                 })
                 .collect()
         }
@@ -121,7 +127,10 @@ mod tests {
     fn navigation() {
         assert_eq!(definitions("client_script 'client/ma<caret>in.lua'"), ["/p/res/client/main.lua"]);
         assert_eq!(definitions("client_script './server/<caret>main.lua'"), ["/p/res/server/main.lua"]);
-        assert_eq!(definitions("client_scripts { 'client/*<caret>.lua' }"), ["/p/res/client/main.lua", "/p/res/client/utils.lua"]);
+        assert_eq!(
+            definitions("client_scripts { 'client/*<caret>.lua' }"),
+            ["/p/res/client/main.lua", "/p/res/client/utils.lua"]
+        );
         assert_eq!(definitions("client_scripts { 'client/**/*<caret>.lua' }").len(), 3);
         assert_eq!(definitions("data_file 'AUDIO_GAMEDATA' 'audio/game<caret>.dat'"), ["/p/res/audio/game.dat151.rel"]);
         assert!(definitions("data_file 'AUDIO_WAVEPACK' 'au<caret>dio'").is_empty(), "directories are not opened");
@@ -154,7 +163,10 @@ mod tests {
         let (fx, rel) = fixture(name, manifest);
         let doc = fx.doc(&rel);
         let problems = ManifestFeature.problems(&fx.cx(&doc));
-        let p = problems.iter().find(|p| p.message.starts_with(message)).unwrap_or_else(|| panic!("no {message}: {problems:?}"));
+        let p = problems
+            .iter()
+            .find(|p| p.message.starts_with(message))
+            .unwrap_or_else(|| panic!("no {message}: {problems:?}"));
         let f = p.fixes.iter().find(|f| f.title == title).unwrap_or_else(|| panic!("no fix {title}: {:?}", p.fixes));
         apply(doc.text(), &f.edits)
     }
@@ -173,10 +185,26 @@ mod tests {
         );
         let text = "fx_version 'cerulan'\ngame 'gta5'\nfx_version 'cerulean'\n";
         let p = problems("fxmanifest.lua", text);
-        assert_eq!((p[0].1, p[0].2.as_str(), p[0].3.as_str()), (Severity::Error, "Unknown fx_version 'cerulan': FXServer accepts adamant, bodacious, cerulean", "'cerulan'"));
-        assert_eq!((p[1].1, p[1].2.as_str()), (Severity::Warning, "Duplicate fx_version: a resource has a single manifest version"));
-        assert_eq!(fixed("fxmanifest.lua", text, "Unknown fx_version", "Replace with 'cerulean'"), text.replacen("cerulan", "cerulean", 1));
-        assert_eq!(fixed("fxmanifest.lua", text, "Duplicate fx_version", "Remove the duplicate fx_version"), "fx_version 'cerulan'\ngame 'gta5'\n");
+        assert_eq!(
+            (p[0].1, p[0].2.as_str(), p[0].3.as_str()),
+            (
+                Severity::Error,
+                "Unknown fx_version 'cerulan': FXServer accepts adamant, bodacious, cerulean",
+                "'cerulan'"
+            )
+        );
+        assert_eq!(
+            (p[1].1, p[1].2.as_str()),
+            (Severity::Warning, "Duplicate fx_version: a resource has a single manifest version")
+        );
+        assert_eq!(
+            fixed("fxmanifest.lua", text, "Unknown fx_version", "Replace with 'cerulean'"),
+            text.replacen("cerulan", "cerulean", 1)
+        );
+        assert_eq!(
+            fixed("fxmanifest.lua", text, "Duplicate fx_version", "Remove the duplicate fx_version"),
+            "fx_version 'cerulan'\ngame 'gta5'\n"
+        );
         assert!(problems("__resource.lua", "game 'gta5'").iter().all(|p| p.0 != checks::FX_VERSION));
         assert!(messages(OK).is_empty(), "{:?}", messages(OK));
     }
@@ -185,8 +213,14 @@ mod tests {
     fn game_checks() {
         let text = "fx_version 'cerulean'\nauthor 'me'";
         let p = problems("fxmanifest.lua", text);
-        assert_eq!((p[0].2.as_str(), p[0].3.as_str()), ("Missing game: FXServer only starts resources that declare the game they run on", "fx_version"));
-        assert_eq!(fixed("fxmanifest.lua", text, "Missing game", "Add game 'gta5' (FiveM)"), "fx_version 'cerulean'\ngame 'gta5'\nauthor 'me'");
+        assert_eq!(
+            (p[0].2.as_str(), p[0].3.as_str()),
+            ("Missing game: FXServer only starts resources that declare the game they run on", "fx_version")
+        );
+        assert_eq!(
+            fixed("fxmanifest.lua", text, "Missing game", "Add game 'gta5' (FiveM)"),
+            "fx_version 'cerulean'\ngame 'gta5'\nauthor 'me'"
+        );
         assert_eq!(
             fixed("fxmanifest.lua", text, "Missing game", "Add game 'rdr3' (RedM)"),
             format!("fx_version 'cerulean'\ngame 'rdr3'\nrdr3_warning '{RDR3_WARNING}'\nauthor 'me'")
@@ -206,10 +240,18 @@ mod tests {
             ]
         );
         let text = "fx_version 'cerulean'\ngame 'gta6'\n";
-        assert_eq!(fixed("fxmanifest.lua", text, "Unknown game", "Replace with 'rdr3'"), "fx_version 'cerulean'\ngame 'rdr3'\n");
+        assert_eq!(
+            fixed("fxmanifest.lua", text, "Unknown game", "Replace with 'rdr3'"),
+            "fx_version 'cerulean'\ngame 'rdr3'\n"
+        );
         let m = messages("fx_version 'cerulean'\ngames 'gta5'\n");
-        assert!(m.contains(&"Missing game: FXServer only starts resources that declare the game they run on".to_owned()), "{m:?}");
-        assert!(m.contains(&"'games' with a single string is recorded as 'games' and ignored: use 'game' or a table".to_owned()));
+        assert!(
+            m.contains(&"Missing game: FXServer only starts resources that declare the game they run on".to_owned()),
+            "{m:?}"
+        );
+        assert!(m.contains(
+            &"'games' with a single string is recorded as 'games' and ignored: use 'game' or a table".to_owned()
+        ));
     }
 
     #[test]
@@ -217,10 +259,19 @@ mod tests {
         let p = problems("fxmanifest.lua", "fx_version 'cerulean'\ngames { 'gta5', 'rdr3' }\n");
         assert_eq!(
             (p[0].1, p[0].2.as_str(), p[0].3.as_str()),
-            (Severity::Error, "RedM resources must declare rdr3_warning with the pre-release acknowledgement, or FXServer refuses to start them", "'rdr3'")
+            (
+                Severity::Error,
+                "RedM resources must declare rdr3_warning with the pre-release acknowledgement, or FXServer refuses to start them",
+                "'rdr3'"
+            )
         );
         assert_eq!(
-            fixed("fxmanifest.lua", "fx_version 'cerulean'\ngames { 'gta5', 'rdr3' }\nauthor 'x'\n", "RedM resources", "Add rdr3_warning"),
+            fixed(
+                "fxmanifest.lua",
+                "fx_version 'cerulean'\ngames { 'gta5', 'rdr3' }\nauthor 'x'\n",
+                "RedM resources",
+                "Add rdr3_warning"
+            ),
             format!("fx_version 'cerulean'\ngames {{ 'gta5', 'rdr3' }}\nrdr3_warning '{RDR3_WARNING}'\nauthor 'x'\n")
         );
         let m = messages("fx_version 'cerulean'\ngame 'rdr3'\nrdr3_warning {}\n");
@@ -237,11 +288,17 @@ mod tests {
 
     #[test]
     fn deprecated_checks() {
-        let legacy = problems("__resource.lua", "resource_manifest_version '44febabe-d386-4d18-afbe-5e627f4af937'\nclient_script 'client/main.lua'\n");
+        let legacy = problems(
+            "__resource.lua",
+            "resource_manifest_version '44febabe-d386-4d18-afbe-5e627f4af937'\nclient_script 'client/main.lua'\n",
+        );
         assert_eq!(legacy.len(), 1);
         assert_eq!(
             (legacy[0].2.as_str(), legacy[0].3.as_str()),
-            ("Legacy __resource.lua manifest: rename it to fxmanifest.lua and declare fx_version and game", "resource_manifest_version")
+            (
+                "Legacy __resource.lua manifest: rename it to fxmanifest.lua and declare fx_version and game",
+                "resource_manifest_version"
+            )
         );
         let mut files = FILES.to_vec();
         files.push(("res/fxmanifest.lua", OK));
@@ -249,31 +306,49 @@ mod tests {
         let fx = Fixture::new(&files);
         let doc = fx.doc("res/__resource.lua");
         let p = ManifestFeature.problems(&fx.cx(&doc));
-        assert_eq!(p[0].message, "This __resource.lua is ignored: FXServer loads the fxmanifest.lua of the same folder");
+        assert_eq!(
+            p[0].message,
+            "This __resource.lua is ignored: FXServer loads the fxmanifest.lua of the same folder"
+        );
         let text = format!("{OK}lua54 'yes'\nreplace_level_meta 'map'\nbefore_level_meta 'x'\n");
         assert_eq!(
             messages(&text),
-            ["lua54 has no effect: every Lua script runs on Lua 5.4 since June 2025", "before_level_meta is deprecated: use data files (data_file) instead"]
+            [
+                "lua54 has no effect: every Lua script runs on Lua 5.4 since June 2025",
+                "before_level_meta is deprecated: use data files (data_file) instead"
+            ]
         );
-        assert_eq!(fixed("fxmanifest.lua", &text, "lua54", "Remove lua54"), format!("{OK}replace_level_meta 'map'\nbefore_level_meta 'x'\n"));
+        assert_eq!(
+            fixed("fxmanifest.lua", &text, "lua54", "Remove lua54"),
+            format!("{OK}replace_level_meta 'map'\nbefore_level_meta 'x'\n")
+        );
         let text = "game 'gta5'\nresource_manifest_version '44febabe-d386-4d18-afbe-5e627f4af937'\n";
         let m = "resource_manifest_version belongs to legacy __resource.lua manifests: fxmanifest.lua uses fx_version";
-        assert_eq!(fixed("fxmanifest.lua", text, m, "Replace with fx_version 'cerulean'"), "game 'gta5'\nfx_version 'cerulean'\n");
+        assert_eq!(
+            fixed("fxmanifest.lua", text, m, "Replace with fx_version 'cerulean'"),
+            "game 'gta5'\nfx_version 'cerulean'\n"
+        );
         let text = format!("{OK}resource_manifest_version '44febabe-d386-4d18-afbe-5e627f4af937'\n");
         assert_eq!(fixed("fxmanifest.lua", &text, m, "Remove resource_manifest_version"), OK);
     }
 
     #[test]
     fn unknown_directives() {
-        let text = format!("{OK}client_scirpts {{ 'client/main.lua' }}\nfx_verison 'x'\npizza_topping 'cheese'\nrepository 'x'\nclient_scripts 'client/main.lua'\nlocal t = {{ client_scirpts 'x' }}\n");
+        let text = format!(
+            "{OK}client_scirpts {{ 'client/main.lua' }}\nfx_verison 'x'\npizza_topping 'cheese'\nrepository 'x'\nclient_scripts 'client/main.lua'\nlocal t = {{ client_scirpts 'x' }}\n"
+        );
         let p = problems("fxmanifest.lua", &text);
-        let unknown: Vec<(&str, &str)> = p.iter().filter(|p| p.0 == checks::UNKNOWN).map(|p| (p.2.as_str(), p.3.as_str())).collect();
+        let unknown: Vec<(&str, &str)> =
+            p.iter().filter(|p| p.0 == checks::UNKNOWN).map(|p| (p.2.as_str(), p.3.as_str())).collect();
         assert_eq!(
             unknown,
             [
                 ("Unknown directive 'client_scirpts': did you mean 'client_scripts'?", "client_scirpts"),
                 ("Unknown directive 'fx_verison': did you mean 'fx_version'?", "fx_verison"),
-                ("'client_scripts' with a single string is recorded as 'client_scripts' and ignored: use 'client_script' or a table", "client_scripts"),
+                (
+                    "'client_scripts' with a single string is recorded as 'client_scripts' and ignored: use 'client_script' or a table",
+                    "client_scripts"
+                ),
             ]
         );
         assert_eq!(
@@ -289,7 +364,9 @@ mod tests {
 
     #[test]
     fn file_templates_are_clean() {
-        for template in [include_str!("../../templates/fxmanifest-fivem.lua"), include_str!("../../templates/fxmanifest-redm.lua")] {
+        for template in
+            [include_str!("../../templates/fxmanifest-fivem.lua"), include_str!("../../templates/fxmanifest-redm.lua")]
+        {
             let manifest = template.replace("$END$", "");
             let fx = Fixture::new(&[
                 ("res/fxmanifest.lua", manifest.as_str()),
@@ -310,7 +387,8 @@ mod tests {
              data_file 'AUDIO_GAMEDATA' 'audio/game.dat'\nescrow_ignore {{ 'config.lua' }}\n"
         );
         let p = problems("fxmanifest.lua", &text);
-        let missing: Vec<(&str, &str)> = p.iter().filter(|p| p.0 == checks::MISSING_FILE).map(|p| (p.2.as_str(), p.3.as_str())).collect();
+        let missing: Vec<(&str, &str)> =
+            p.iter().filter(|p| p.0 == checks::MISSING_FILE).map(|p| (p.2.as_str(), p.3.as_str())).collect();
         assert_eq!(
             missing,
             [

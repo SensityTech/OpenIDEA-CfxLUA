@@ -52,7 +52,12 @@ pub const SNIPPETS: &[Snippet] = &[
         text: "server_scripts {\n    '$PATH$',\n}\n$END$",
         defaults: &[("PATH", "server/*.lua")],
     },
-    Snippet { abbrev: "fls", description: "files { ... } (files downloaded by clients)", text: "files {\n    '$PATH$',\n}\n$END$", defaults: &[] },
+    Snippet {
+        abbrev: "fls",
+        description: "files { ... } (files downloaded by clients)",
+        text: "files {\n    '$PATH$',\n}\n$END$",
+        defaults: &[],
+    },
     Snippet {
         abbrev: "nui",
         description: "ui_page and its files",
@@ -83,7 +88,8 @@ impl Snippet {
     /// The text with every variable at its default, `$END$` removed and the
     /// lines after the first indented with `indent`.
     pub fn expand(&self, indent: &str) -> String {
-        let mut text = self.text.replace("$HEADER$", HEADER).replace("$RDR3_WARNING$", RDR3_WARNING).replace("$END$", "");
+        let mut text =
+            self.text.replace("$HEADER$", HEADER).replace("$RDR3_WARNING$", RDR3_WARNING).replace("$END$", "");
         for (name, value) in self.defaults {
             text = text.replace(&format!("${name}$"), value);
         }
@@ -115,10 +121,18 @@ mod tests {
     fn expansions_use_the_defaults() {
         assert_eq!(
             get("fxmr").expand(""),
-            format!("fx_version 'cerulean'\ngame 'rdr3'\nrdr3_warning '{RDR3_WARNING}'\n\nauthor ''\ndescription ''\nversion '1.0.0'\n\n")
+            format!(
+                "fx_version 'cerulean'\ngame 'rdr3'\nrdr3_warning '{RDR3_WARNING}'\n\nauthor ''\ndescription ''\nversion '1.0.0'\n\n"
+            )
         );
-        assert_eq!(get("nui").expand(""), "ui_page 'web/index.html'\n\nfiles {\n    'web/index.html',\n    'web/*.css',\n    'web/*.js',\n}\n");
-        assert_eq!(get("dataf").expand(""), "files {\n    'data/*.meta',\n}\n\ndata_file 'VEHICLE_METADATA_FILE' 'data/*.meta'\n");
+        assert_eq!(
+            get("nui").expand(""),
+            "ui_page 'web/index.html'\n\nfiles {\n    'web/index.html',\n    'web/*.css',\n    'web/*.js',\n}\n"
+        );
+        assert_eq!(
+            get("dataf").expand(""),
+            "files {\n    'data/*.meta',\n}\n\ndata_file 'VEHICLE_METADATA_FILE' 'data/*.meta'\n"
+        );
         assert_eq!(get("fls").expand(""), "files {\n    '',\n}\n");
         assert_eq!(get("cls").expand("  "), "client_scripts {\n      'client/*.lua',\n  }\n");
         assert_eq!(SNIPPETS.len(), 11);

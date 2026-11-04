@@ -89,15 +89,25 @@ mod tests {
 
     #[test]
     fn add_directive_vectors() {
-        assert_eq!(add("-- my resource\ngame 'gta5'\n", FX_VERSION_LINE, &[]), "-- my resource\nfx_version 'cerulean'\ngame 'gta5'\n");
-        assert_eq!(add("fx_version 'cerulean'\nauthor 'me'", "game 'gta5'", &["fx_version"]), "fx_version 'cerulean'\ngame 'gta5'\nauthor 'me'");
+        assert_eq!(
+            add("-- my resource\ngame 'gta5'\n", FX_VERSION_LINE, &[]),
+            "-- my resource\nfx_version 'cerulean'\ngame 'gta5'\n"
+        );
+        assert_eq!(
+            add("fx_version 'cerulean'\nauthor 'me'", "game 'gta5'", &["fx_version"]),
+            "fx_version 'cerulean'\ngame 'gta5'\nauthor 'me'"
+        );
         let rdr3 = format!("game 'rdr3'\n{}", rdr3_warning_line());
         assert_eq!(
             add("fx_version 'cerulean'\nauthor 'me'", &rdr3, &["fx_version"]),
             format!("fx_version 'cerulean'\ngame 'rdr3'\nrdr3_warning '{RDR3_WARNING}'\nauthor 'me'")
         );
         assert_eq!(
-            add("fx_version 'cerulean'\ngames { 'gta5', 'rdr3' }\nauthor 'x'\n", &rdr3_warning_line(), &["game", "games"]),
+            add(
+                "fx_version 'cerulean'\ngames { 'gta5', 'rdr3' }\nauthor 'x'\n",
+                &rdr3_warning_line(),
+                &["game", "games"]
+            ),
             format!("fx_version 'cerulean'\ngames {{ 'gta5', 'rdr3' }}\nrdr3_warning '{RDR3_WARNING}'\nauthor 'x'\n")
         );
         assert_eq!(add("-- only a comment", FX_VERSION_LINE, &[]), "-- only a comment\nfx_version 'cerulean'\n");
@@ -109,8 +119,14 @@ mod tests {
         let text = "fx_version 'cerulean'\n  lua54 'yes'  \ngame 'gta5' lua54 'yes'\n";
         let view = View::new(&Source::new(text));
         let lua54: Vec<&Decl> = view.named("lua54").collect();
-        assert_eq!(apply(text, &[remove_statement(text, lua54[0])]), "fx_version 'cerulean'\ngame 'gta5' lua54 'yes'\n");
-        assert_eq!(apply(text, &[remove_statement(text, lua54[1])]), "fx_version 'cerulean'\n  lua54 'yes'  \ngame 'gta5' \n");
+        assert_eq!(
+            apply(text, &[remove_statement(text, lua54[0])]),
+            "fx_version 'cerulean'\ngame 'gta5' lua54 'yes'\n"
+        );
+        assert_eq!(
+            apply(text, &[remove_statement(text, lua54[1])]),
+            "fx_version 'cerulean'\n  lua54 'yes'  \ngame 'gta5' \n"
+        );
         let fx = view.first_named("fx_version").unwrap();
         assert_eq!(apply(text, &[replace_statement(fx, "x")]), text.replacen("fx_version 'cerulean'", "x", 1));
         assert_eq!(apply(text, &[rename(fx, "fx")]), text.replacen("fx_version", "fx", 1));

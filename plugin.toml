@@ -42,6 +42,69 @@ id = "show-docs"
 title = "CfxLua: Show Documentation"
 category = "CfxLua"
 
+[[contributes.commands]]
+id = "escrow.check"
+title = "CfxLua: Check Resource Before Escrow Upload"
+category = "CfxLua"
+
+[[contributes.menus]]
+menu = "tools"
+command = "escrow.check"
+
+[[contributes.fileIcons]]
+id = "fxmanifest"
+patterns = ["fxmanifest.lua", "__resource.lua"]
+icon = "icons/fxmanifest.svg"
+iconDark = "icons/fxmanifest_dark.svg"
+
+[[contributes.fileIcons]]
+id = "lua-client"
+patterns = ["client.lua", "cl_*.lua"]
+icon = "icons/luaClient.svg"
+iconDark = "icons/luaClient_dark.svg"
+
+[[contributes.fileIcons]]
+id = "lua-server"
+patterns = ["server.lua", "sv_*.lua"]
+icon = "icons/luaServer.svg"
+iconDark = "icons/luaServer_dark.svg"
+
+[[contributes.fileIcons]]
+id = "lua-shared"
+patterns = ["shared.lua", "sh_*.lua"]
+icon = "icons/luaShared.svg"
+iconDark = "icons/luaShared_dark.svg"
+
+[[contributes.fileTemplates]]
+id = "fxmanifest-fivem"
+name = "fxmanifest.lua (FiveM)"
+extension = "lua"
+path = "templates/fxmanifest-fivem.lua"
+
+[[contributes.fileTemplates]]
+id = "fxmanifest-redm"
+name = "fxmanifest.lua (RedM)"
+extension = "lua"
+path = "templates/fxmanifest-redm.lua"
+
+[[contributes.fileTemplates]]
+id = "client-script"
+name = "Client script"
+extension = "lua"
+path = "templates/client.lua"
+
+[[contributes.fileTemplates]]
+id = "server-script"
+name = "Server script"
+extension = "lua"
+path = "templates/server.lua"
+
+[[contributes.fileTemplates]]
+id = "shared-config"
+name = "Shared config"
+extension = "lua"
+path = "templates/config.lua"
+
 [contributes.settings]
 title = "OpenIDEA-CfxLUA"
 schema = "settings.schema.json"

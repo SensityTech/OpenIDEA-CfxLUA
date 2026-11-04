@@ -38,6 +38,18 @@
       "title": "Show unnamed natives (N_0x...) in completion",
       "description": "Hidden natives are still recognised: existing scripts are not flagged.",
       "default": false
+    },
+    "escrow.showStatus": {
+      "type": "boolean",
+      "title": "Show the Asset Escrow status of resource files",
+      "description": "Files of resources declaring escrow_ignore show whether they will be encrypted or stay open.",
+      "default": true
+    },
+    "escrow.assumeEscrow": {
+      "type": "boolean",
+      "title": "Treat every resource as escrowed",
+      "description": "Also show the status and run the escrow checks in resources without escrow_ignore.",
+      "default": false
     }
   }
 }

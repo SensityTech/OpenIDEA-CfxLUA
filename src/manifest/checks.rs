@@ -64,8 +64,14 @@ fn fx_version(src: &crate::lua::Source, view: &View, out: &mut Vec<Problem>) {
         let (s, e) = anchor(view, text.len(), None);
         let add = edits::add_directive(src, view, FX_VERSION_LINE, &[]);
         out.push(
-            Problem::new(FX_VERSION, Severity::Error, s, e, "Missing fx_version: FXServer does not start a resource without a manifest version")
-                .fix(fix("Add fx_version 'cerulean'", add)),
+            Problem::new(
+                FX_VERSION,
+                Severity::Error,
+                s,
+                e,
+                "Missing fx_version: FXServer does not start a resource without a manifest version",
+            )
+            .fix(fix("Add fx_version 'cerulean'", add)),
         );
     }
     for v in fxs.iter().flat_map(|d| d.values()) {
@@ -93,13 +99,22 @@ fn games<'a>(src: &crate::lua::Source, view: &'a View, fx: bool, out: &mut Vec<P
         let after = ["fx_version"];
         let rdr3 = rdr3_warning_line();
         out.push(
-            Problem::new(GAME, Severity::Error, s, e, "Missing game: FXServer only starts resources that declare the game they run on")
-                .fix(fix("Add game 'gta5' (FiveM)", edits::add_directive(src, view, "game 'gta5'", &after)))
-                .fix(fix("Add game 'rdr3' (RedM)", edits::add_directive(src, view, &format!("game 'rdr3'\n{rdr3}"), &after)))
-                .fix(fix(
-                    "Add games { 'gta5', 'rdr3' } (FiveM and RedM)",
-                    edits::add_directive(src, view, &format!("games {{ 'gta5', 'rdr3' }}\n{rdr3}"), &after),
-                )),
+            Problem::new(
+                GAME,
+                Severity::Error,
+                s,
+                e,
+                "Missing game: FXServer only starts resources that declare the game they run on",
+            )
+            .fix(fix("Add game 'gta5' (FiveM)", edits::add_directive(src, view, "game 'gta5'", &after)))
+            .fix(fix(
+                "Add game 'rdr3' (RedM)",
+                edits::add_directive(src, view, &format!("game 'rdr3'\n{rdr3}"), &after),
+            ))
+            .fix(fix(
+                "Add games { 'gta5', 'rdr3' } (FiveM and RedM)",
+                edits::add_directive(src, view, &format!("games {{ 'gta5', 'rdr3' }}\n{rdr3}"), &after),
+            )),
         );
     }
     let literals: Vec<&Value> = decls.iter().flat_map(|d| d.values()).collect();
@@ -115,7 +130,8 @@ fn games<'a>(src: &crate::lua::Source, view: &'a View, fx: bool, out: &mut Vec<P
                     .fix(fix("Replace with 'rdr3'", edits::replace_value(text, v, "rdr3"))),
             );
         } else if game == "common" && specific {
-            let message = "'common' cannot be combined with a specific game: FXServer refuses the resource as ill-formed";
+            let message =
+                "'common' cannot be combined with a specific game: FXServer refuses the resource as ill-formed";
             out.push(at_value(GAME, Severity::Error, v, message));
         } else if seen.contains(&game) {
             out.push(at_value(GAME, Severity::Warning, v, format!("Duplicate game '{game}'")));
@@ -134,7 +150,12 @@ fn rdr3_warning(src: &crate::lua::Source, view: &View, rdr3: &Value, out: &mut V
         return;
     };
     match w.values().next() {
-        None => out.push(at_name(RDR3, Severity::Error, w, "rdr3_warning needs the pre-release acknowledgement as its value")),
+        None => out.push(at_name(
+            RDR3,
+            Severity::Error,
+            w,
+            "rdr3_warning needs the pre-release acknowledgement as its value",
+        )),
         Some(v) if v.text != RDR3_WARNING => {
             let replace = edits::replace_value(&src.text, v, RDR3_WARNING);
             out.push(
@@ -154,7 +175,10 @@ fn deprecated(cx: &Ctx, view: &View, fx: bool, out: &mut Vec<Problem>) {
         let (pref, message) = if beside {
             (None, "This __resource.lua is ignored: FXServer loads the fxmanifest.lua of the same folder")
         } else {
-            (Some("resource_manifest_version"), "Legacy __resource.lua manifest: rename it to fxmanifest.lua and declare fx_version and game")
+            (
+                Some("resource_manifest_version"),
+                "Legacy __resource.lua manifest: rename it to fxmanifest.lua and declare fx_version and game",
+            )
         };
         let (s, e) = anchor(view, text.len(), pref);
         out.push(Problem::new(DEPRECATED, Severity::Warning, s, e, message));
@@ -162,8 +186,13 @@ fn deprecated(cx: &Ctx, view: &View, fx: bool, out: &mut Vec<Problem>) {
     for d in &view.decls {
         match d.name() {
             "lua54" => out.push(
-                at_name(DEPRECATED, Severity::Warning, d, "lua54 has no effect: every Lua script runs on Lua 5.4 since June 2025")
-                    .fix(fix("Remove lua54", edits::remove_statement(text, d))),
+                at_name(
+                    DEPRECATED,
+                    Severity::Warning,
+                    d,
+                    "lua54 has no effect: every Lua script runs on Lua 5.4 since June 2025",
+                )
+                .fix(fix("Remove lua54", edits::remove_statement(text, d))),
             ),
             "resource_manifest_version" if fx => {
                 let message = "resource_manifest_version belongs to legacy __resource.lua manifests: fxmanifest.lua uses fx_version";
@@ -175,7 +204,12 @@ fn deprecated(cx: &Ctx, view: &View, fx: bool, out: &mut Vec<Problem>) {
                 out.push(at_name(DEPRECATED, Severity::Warning, d, message).fix(f));
             }
             name @ ("before_level_meta" | "after_level_meta") => {
-                out.push(at_name(DEPRECATED, Severity::Warning, d, format!("{name} is deprecated: use data files (data_file) instead")));
+                out.push(at_name(
+                    DEPRECATED,
+                    Severity::Warning,
+                    d,
+                    format!("{name} is deprecated: use data files (data_file) instead"),
+                ));
             }
             _ => {}
         }
@@ -201,13 +235,21 @@ fn unknown(view: &View, out: &mut Vec<Problem>) {
         let name = d.name();
         if catalog::is_table_form(name) && !d.table_form && d.values().next().is_some() {
             let singular = catalog::singular_of(name);
-            let message = format!("'{name}' with a single string is recorded as '{name}' and ignored: use '{singular}' or a table");
-            out.push(at_name(UNKNOWN, Severity::Warning, d, message).fix(fix(format!("Rename to '{singular}'"), edits::rename(d, singular))));
+            let message = format!(
+                "'{name}' with a single string is recorded as '{name}' and ignored: use '{singular}' or a table"
+            );
+            out.push(
+                at_name(UNKNOWN, Severity::Warning, d, message)
+                    .fix(fix(format!("Rename to '{singular}'"), edits::rename(d, singular))),
+            );
         } else if !catalog::is_known(name)
             && let Some(s) = suggestion(name)
         {
             let message = format!("Unknown directive '{name}': did you mean '{s}'?");
-            out.push(at_name(UNKNOWN, Severity::Warning, d, message).fix(fix(format!("Rename to '{s}'"), edits::rename(d, s))));
+            out.push(
+                at_name(UNKNOWN, Severity::Warning, d, message)
+                    .fix(fix(format!("Rename to '{s}'"), edits::rename(d, s))),
+            );
         }
     }
 }

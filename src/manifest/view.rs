@@ -190,7 +190,20 @@ mod tests {
              client_scripts('c.lua', 'd.lua')\nif x then server_script 'e.lua' end\nlocal t = { f = foo 'x' }\nCreateThread(function() lua54 'yes' end)\n",
         );
         let names: Vec<&str> = v.decls.iter().map(Decl::name).collect();
-        assert_eq!(names, ["games", "games", "data_file", "server_scripts", "client_scripts", "server_script", "foo", "CreateThread", "lua54"]);
+        assert_eq!(
+            names,
+            [
+                "games",
+                "games",
+                "data_file",
+                "server_scripts",
+                "client_scripts",
+                "server_script",
+                "foo",
+                "CreateThread",
+                "lua54"
+            ]
+        );
         assert_eq!(v.decls[0].metadata_key(), "game");
         assert_eq!(v.decls[1].metadata_key(), "games");
         let data: Vec<(usize, &str)> = v.decls[2].args().map(|(a, v)| (a, v.text.as_str())).collect();

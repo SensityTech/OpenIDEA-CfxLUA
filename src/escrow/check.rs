@@ -25,7 +25,8 @@ const MAX_LISTED_FILES: usize = 40;
 const NOTIFIED: usize = 5;
 /// Resources listed in the notification of a check of several.
 const NOTIFIED_RESOURCES: usize = 20;
-const SCRIPT_DIRECTIVES: [&str; 6] = ["client_script", "client_scripts", "server_script", "server_scripts", "shared_script", "shared_scripts"];
+const SCRIPT_DIRECTIVES: [&str; 6] =
+    ["client_script", "client_scripts", "server_script", "server_scripts", "shared_script", "shared_scripts"];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Level {
@@ -220,7 +221,8 @@ pub fn check(ws: &Workspace, res: &Resource) -> Report {
 
     // Blockers: the upload fails or the resource does not start.
     if let Some((at, error)) = syntax_error(&msrc) {
-        let message = format!("Syntax error in the manifest ({error}): the upload fails with \"error loading manifest file\"");
+        let message =
+            format!("Syntax error in the manifest ({error}): the upload fails with \"error loading manifest file\"");
         push(Level::Blocker, message, m(), line_of(&msrc, at), None);
     }
     let legacy = res.manifest.eq_ignore_ascii_case("__resource.lua");
@@ -231,13 +233,19 @@ pub fn check(ws: &Workspace, res: &Resource) -> Report {
     if !legacy && !view.has("fx_version") {
         push(Level::Blocker, "Missing fx_version: FXServer does not start the resource".into(), m(), 0, None);
     }
-    let games: Vec<&str> =
-        view.decls.iter().filter(|d| d.metadata_key() == "game").flat_map(|d| d.values()).map(|v| v.text.as_str()).collect();
+    let games: Vec<&str> = view
+        .decls
+        .iter()
+        .filter(|d| d.metadata_key() == "game")
+        .flat_map(|d| d.values())
+        .map(|v| v.text.as_str())
+        .collect();
     if !legacy && games.is_empty() {
         push(Level::Blocker, "Missing game: FXServer does not start the resource".into(), m(), 0, None);
     }
     if games.contains(&"rdr3") && !view.named("rdr3_warning").any(|d| d.values().any(|v| v.text == RDR3_WARNING)) {
-        let message = "RedM resource without the exact rdr3_warning acknowledgement: FXServer does not start it on RedM";
+        let message =
+            "RedM resource without the exact rdr3_warning acknowledgement: FXServer does not start it on RedM";
         push(Level::Blocker, message.into(), m(), 0, None);
     }
 
@@ -251,7 +259,10 @@ pub fn check(ws: &Workspace, res: &Resource) -> Report {
             format!("'{pattern}' will be encrypted: buyers will not be able to edit it.")
         } else {
             let paths: Vec<&str> = group.iter().map(|f| f.rel.as_str()).collect();
-            format!("'{pattern}' will be encrypted ({}): buyers will not be able to edit these files.", paths.join(", "))
+            format!(
+                "'{pattern}' will be encrypted ({}): buyers will not be able to edit these files.",
+                paths.join(", ")
+            )
         };
         push(Level::Warning, message, Some(group[0].rel.clone()), 0, Some(pattern));
     }
@@ -267,14 +278,19 @@ pub fn check(ws: &Workspace, res: &Resource) -> Report {
         if f.status == Status::Encrypted
             && let Some((at, error)) = syntax_error(&src)
         {
-            let message = format!("Syntax error ({error}) in a file that will be encrypted: buyers will not be able to fix it.");
+            let message =
+                format!("Syntax error ({error}) in a file that will be encrypted: buyers will not be able to fix it.");
             push(Level::Warning, message, Some(f.rel.clone()), line_of(&src, at), None);
         }
         for load in rules::loads(&src) {
             let Some((target, Status::Encrypted)) = rules::target(ws, res, &load) else { continue };
             let message = match load.module {
-                Some(callee) => format!("{callee} loads '{target}', which will be encrypted: it cannot load it in the protected build."),
-                None => format!("LoadResourceFile loads '{target}', which will be encrypted: it returns the encrypted bytes in the protected build."),
+                Some(callee) => format!(
+                    "{callee} loads '{target}', which will be encrypted: it cannot load it in the protected build."
+                ),
+                None => format!(
+                    "LoadResourceFile loads '{target}', which will be encrypted: it returns the encrypted bytes in the protected build."
+                ),
             };
             push(Level::Warning, message, Some(f.rel.clone()), line_of(&src, load.start), Some(target));
         }
@@ -282,7 +298,10 @@ pub fn check(ws: &Workspace, res: &Resource) -> Report {
     let tree = Tree::new(ws, &res.dir);
     for v in view.named("escrow_ignore").flat_map(|d| d.values()) {
         let pattern = v.text.as_str();
-        if pattern.trim().is_empty() || !tree.matches(pattern, PathKind::File).is_empty() || !checkable(pattern, PathKind::File) {
+        if pattern.trim().is_empty()
+            || !tree.matches(pattern, PathKind::File).is_empty()
+            || !checkable(pattern, PathKind::File)
+        {
             continue;
         }
         let message = format!("escrow_ignore pattern '{pattern}' matches no file of the resource.");
@@ -291,9 +310,14 @@ pub fn check(ws: &Workspace, res: &Resource) -> Report {
     if !protected.is_empty() || rules::has_key_file(ws, res) {
         let examples = protected.iter().take(3).copied().collect::<Vec<_>>().join(", ");
         let message = match protected.len() {
-            0 => "The folder holds a .fxap key file: this looks like a protected build, upload the original sources.".to_owned(),
-            1 => format!("1 Lua file is already encrypted ({examples}): this looks like a protected build, upload the original sources."),
-            n => format!("{n} Lua files are already encrypted ({examples}): this looks like a protected build, upload the original sources."),
+            0 => "The folder holds a .fxap key file: this looks like a protected build, upload the original sources."
+                .to_owned(),
+            1 => format!(
+                "1 Lua file is already encrypted ({examples}): this looks like a protected build, upload the original sources."
+            ),
+            n => format!(
+                "{n} Lua files are already encrypted ({examples}): this looks like a protected build, upload the original sources."
+            ),
         };
         push(Level::Warning, message, None, 0, None);
     }
@@ -313,7 +337,8 @@ pub fn check(ws: &Workspace, res: &Resource) -> Report {
     }
     let nui = files.iter().filter(|f| NUI_EXTENSIONS.contains(&rules::extension(&f.rel).as_str())).count();
     if nui > 0 || view.has("ui_page") {
-        let message = format!("NUI is not supported by Asset Escrow: the HTML, JavaScript and CSS files ({nui}) ship readable.");
+        let message =
+            format!("NUI is not supported by Asset Escrow: the HTML, JavaScript and CSS files ({nui}) ship readable.");
         push(Level::Note, message, None, 0, None);
     }
     if !view.has("lua54") && files.iter().any(|f| f.status == Status::Encrypted && rules::extension(&f.rel) == "lua") {
@@ -340,7 +365,9 @@ pub fn markdown(reports: &[Report]) -> String {
         [one] => block(&format!("# Escrow pre-publish check: {}", one.name)),
         many => block(&format!("# Escrow pre-publish check: {} resources", grouped(many.len()))),
     }
-    block("Cfx Asset Escrow encrypts the Lua, YFT, YDD and YDR files of a resource, except those matched by escrow_ignore in fxmanifest.lua. The manifest, NUI files and every other file type ship as they are.");
+    block(
+        "Cfx Asset Escrow encrypts the Lua, YFT, YDD and YDR files of a resource, except those matched by escrow_ignore in fxmanifest.lua. The manifest, NUI files and every other file type ship as they are.",
+    );
     for r in reports {
         if reports.len() > 1 {
             block("---");
@@ -352,13 +379,24 @@ pub fn markdown(reports: &[Report]) -> String {
         let unprotected = r.files.len() - encrypted.len() - ignored.len();
         let open = |n: usize| format!("{} {}", grouped(n), if n <= 1 { "file" } else { "files" });
         block("## Summary");
-        block(&[
-            format!("- Folder: `{}`", r.folder),
-            format!("- {}, {}, {}", count(b, "blocker", "blockers"), count(w, "warning", "warnings"), count(n, "note", "notes")),
-            format!("- Encrypted: {}", count(encrypted.len(), "file", "files")),
-            format!("- Open: {} in escrow_ignore, {} of types escrow never encrypts", open(ignored.len()), open(unprotected)),
-        ]
-        .join("\n"));
+        block(
+            &[
+                format!("- Folder: `{}`", r.folder),
+                format!(
+                    "- {}, {}, {}",
+                    count(b, "blocker", "blockers"),
+                    count(w, "warning", "warnings"),
+                    count(n, "note", "notes")
+                ),
+                format!("- Encrypted: {}", count(encrypted.len(), "file", "files")),
+                format!(
+                    "- Open: {} in escrow_ignore, {} of types escrow never encrypts",
+                    open(ignored.len()),
+                    open(unprotected)
+                ),
+            ]
+            .join("\n"),
+        );
         if b + w == 0 {
             block("No blocker and no warning: the resource is ready for the upload.");
         }
@@ -385,7 +423,8 @@ pub fn markdown(reports: &[Report]) -> String {
         if encrypted.is_empty() {
             block("None.");
         } else {
-            let mut lines: Vec<String> = encrypted.iter().take(MAX_LISTED_FILES).map(|f| format!("- `{}`", f.rel)).collect();
+            let mut lines: Vec<String> =
+                encrypted.iter().take(MAX_LISTED_FILES).map(|f| format!("- `{}`", f.rel)).collect();
             if encrypted.len() > MAX_LISTED_FILES {
                 lines.push(format!("- ... and {} more", grouped(encrypted.len() - MAX_LISTED_FILES)));
             }
@@ -465,7 +504,10 @@ mod tests {
     #[test]
     fn good_resource() {
         let r = report(&[
-            ("res/fxmanifest.lua", "fx_version 'cerulean'\ngame 'gta5'\nshared_script 'config.lua'\nclient_script 'client/main.lua'\nserver_script 'server/main.lua'\nescrow_ignore { 'config.lua', 'locales/*.lua' }\n"),
+            (
+                "res/fxmanifest.lua",
+                "fx_version 'cerulean'\ngame 'gta5'\nshared_script 'config.lua'\nclient_script 'client/main.lua'\nserver_script 'server/main.lua'\nescrow_ignore { 'config.lua', 'locales/*.lua' }\n",
+            ),
             ("res/config.lua", "Config = {}"),
             ("res/locales/en.lua", "Locales = {}"),
             ("res/client/main.lua", "print(1)"),
@@ -492,7 +534,10 @@ mod tests {
             ("res/fxmanifest.lua", BAD_MANIFEST),
             ("res/config.lua", "Config = {}"),
             ("res/locales/en.lua", "Locales = {}"),
-            ("res/client/main.lua", "local items = load(LoadResourceFile(GetCurrentResourceName(), 'data/items.lua'))()"),
+            (
+                "res/client/main.lua",
+                "local items = load(LoadResourceFile(GetCurrentResourceName(), 'data/items.lua'))()",
+            ),
             ("res/client/ui.js", ""),
             ("res/data/items.lua", "return {}"),
             ("res/server/main.lua", "local x = = 1"),
@@ -544,14 +589,35 @@ mod tests {
 
     #[test]
     fn other_vectors() {
-        let r = report(&[("res/fxmanifest.lua", "fx_version 'cerulean'\ngame 'gta5'\nclient_scripts { 'a.lua',, }\n"), ("res/a.lua", "")]);
-        assert_eq!((r.findings[0].message.as_str(), r.findings[0].line), ("Syntax error in the manifest (unexpected ','): the upload fails with \"error loading manifest file\"", 3));
+        let r = report(&[
+            ("res/fxmanifest.lua", "fx_version 'cerulean'\ngame 'gta5'\nclient_scripts { 'a.lua',, }\n"),
+            ("res/a.lua", ""),
+        ]);
+        assert_eq!(
+            (r.findings[0].message.as_str(), r.findings[0].line),
+            ("Syntax error in the manifest (unexpected ','): the upload fails with \"error loading manifest file\"", 3)
+        );
         let r = report(&[("res/__resource.lua", "escrow_ignore {}\n")]);
-        assert_eq!(kinds(&r), [(Level::Blocker, "Legacy __resource.lua manifest: Asset Escrow reads fxmanifest.lua; rename it and declare fx_version and game")]);
-        let r = report(&[("res/fxmanifest.lua", "fx_version 'cerulean'\ngame 'gta5'\nlua54 'yes'\nescrow_ignore {}\nclient_script 'a.lua'"), ("res/a.lua", "")]);
+        assert_eq!(
+            kinds(&r),
+            [(
+                Level::Blocker,
+                "Legacy __resource.lua manifest: Asset Escrow reads fxmanifest.lua; rename it and declare fx_version and game"
+            )]
+        );
+        let r = report(&[
+            (
+                "res/fxmanifest.lua",
+                "fx_version 'cerulean'\ngame 'gta5'\nlua54 'yes'\nescrow_ignore {}\nclient_script 'a.lua'",
+            ),
+            ("res/a.lua", ""),
+        ]);
         assert!(r.findings.is_empty(), "{:?}", kinds(&r));
         let r = report(&[
-            ("res/fxmanifest.lua", "fx_version 'cerulean'\ngame 'gta5'\nlua54 'yes'\nescrow_ignore {}\nclient_script 'client/main.lua'\nserver_script 'server/Bank.net.dll'"),
+            (
+                "res/fxmanifest.lua",
+                "fx_version 'cerulean'\ngame 'gta5'\nlua54 'yes'\nescrow_ignore {}\nclient_script 'client/main.lua'\nserver_script 'server/Bank.net.dll'",
+            ),
             ("res/.fxap", ""),
             ("res/client/main.lua", "FXAP\u{1}\u{2}((("),
             ("res/server/Bank.net.dll", ""),
@@ -559,8 +625,14 @@ mod tests {
         assert_eq!(
             kinds(&r),
             [
-                (Level::Warning, "1 Lua file is already encrypted (client/main.lua): this looks like a protected build, upload the original sources."),
-                (Level::Note, "'server/Bank.net.dll' is a C# assembly: Asset Escrow only encrypts Lua, it ships as is."),
+                (
+                    Level::Warning,
+                    "1 Lua file is already encrypted (client/main.lua): this looks like a protected build, upload the original sources."
+                ),
+                (
+                    Level::Note,
+                    "'server/Bank.net.dll' is a C# assembly: Asset Escrow only encrypts Lua, it ships as is."
+                ),
             ]
         );
         assert!(r.files.iter().all(|f| f.rel != ".fxap"));
