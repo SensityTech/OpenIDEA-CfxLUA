@@ -61,6 +61,12 @@ menu = "tools"
 command = "natives.update"
 
 [[contributes.commands]]
+id = "coords.convert-selection"
+title = "CfxLua: Convert Coordinates"
+category = "CfxLua"
+when = "editorFocus"
+
+[[contributes.commands]]
 id = "escrow.check"
 title = "CfxLua: Check Resource Before Escrow Upload"
 category = "CfxLua"

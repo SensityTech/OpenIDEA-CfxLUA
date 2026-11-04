@@ -69,6 +69,72 @@
       "description": "Used by \"Switch ui_page to the dev server\" when no vite or webpack config declares a port.",
       "default": 5173
     },
+    "values.hints": {
+      "type": "boolean",
+      "title": "Show magic value hints",
+      "description": "Name the numbers passed to natives (controls, hashes, blips, markers, HUD colours, explosions, animation flags) as hints.",
+      "default": true
+    },
+    "values.controls": { "type": "boolean", "title": "Magic values: control ids", "default": true },
+    "values.hashes": { "type": "boolean", "title": "Magic values: hash names", "default": true },
+    "values.blips": { "type": "boolean", "title": "Magic values: blip sprites and colours", "default": true },
+    "values.markers": { "type": "boolean", "title": "Magic values: marker types", "default": true },
+    "values.hudColours": { "type": "boolean", "title": "Magic values: HUD colours", "default": true },
+    "values.explosions": { "type": "boolean", "title": "Magic values: explosion types", "default": true },
+    "values.animFlags": { "type": "boolean", "title": "Magic values: animation flags", "default": true },
+    "coords.roundDecimals": {
+      "type": "integer",
+      "title": "Decimals kept when rounding coordinates",
+      "default": 2
+    },
+    "coords.zonesFile": {
+      "type": "string",
+      "title": "Zones file",
+      "description": "A zones.json in the project (absolute or project-relative path) used for zone hints on coordinates. Empty turns zone hints off.",
+      "default": ""
+    },
+    "coords.configTables": {
+      "type": "string",
+      "title": "Config table names",
+      "description": "Tables whose coordinates are checked for duplicates. Comma-separated.",
+      "default": "Config, Cfg"
+    },
+    "perf.idleSleepMs": {
+      "type": "integer",
+      "title": "Adaptive sleep while far away (ms)",
+      "default": 1000
+    },
+    "perf.throttleMs": {
+      "type": "integer",
+      "title": "Interval offered by 'Wait longer between iterations' (ms)",
+      "default": 500
+    },
+    "perf.suggestNearOnly": {
+      "type": "boolean",
+      "title": "Offer the adaptive sleep for loops whose per-frame work only runs near a position",
+      "default": true
+    },
+    "perf.pollingFunctions": {
+      "type": "string",
+      "title": "Functions that never wait and never need to run every frame",
+      "description": "For example ESX.GetPlayerData. Comma-separated.",
+      "default": ""
+    },
+    "perf.minCalls": {
+      "type": "integer",
+      "title": "Minimum number of identical calls reported",
+      "default": 2
+    },
+    "perf.allLoops": {
+      "type": "boolean",
+      "title": "Also report loops that don't run every frame",
+      "default": false
+    },
+    "perf.suggestPlayerPedId": {
+      "type": "boolean",
+      "title": "Suggest PlayerPedId() for GetPlayerPed(-1)",
+      "default": true
+    },
     "escrow.showStatus": {
       "type": "boolean",
       "title": "Show the Asset Escrow status of resource files",
