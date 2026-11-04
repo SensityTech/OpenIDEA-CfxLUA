@@ -136,6 +136,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "openidea-cfxlua"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "openidea-plugin",
+ "pulldown-cmark",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "openidea-plugin"
 version = "0.1.0"
 source = "git+https://github.com/l0ng-ai/openidea?rev=4c5b6de9ada902ffc74b429b7ae3c3384c23a5b3#4c5b6de9ada902ffc74b429b7ae3c3384c23a5b3"
@@ -194,17 +205,6 @@ name = "semver"
 version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
-
-[[package]]
-name = "sensity-devkit"
-version = "0.1.0"
-dependencies = [
- "flate2",
- "openidea-plugin",
- "pulldown-cmark",
- "serde",
- "serde_json",
-]
 
 [[package]]
 name = "serde"

@@ -1,10 +1,10 @@
 [package]
-name = "sensity-devkit"
+name = "openidea-cfxlua"
 version = "0.1.0"
 edition = "2024"
-description = "FiveM / RedM (CfxLua) tooling for OpenIDEA: natives, client/server awareness, state bags, events, fxmanifest, NUI and built-in documentation."
+description = "FiveM / RedM (CfxLua) support for OpenIDEA: natives, client/server awareness, state bags, events, fxmanifest, NUI and built-in documentation."
 license = "Apache-2.0"
-repository = "https://github.com/SensityTech/OpenIDEA-Devkit"
+repository = "https://github.com/SensityTech/OpenIDEA-CfxLUA"
 publish = false
 
 # The plugin builds on its own (target wasm32-wasip2), outside any workspace.

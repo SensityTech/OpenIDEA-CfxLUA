@@ -1,0 +1,30 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2
+      - uses: Swatinem/rust-cache@v2
+      - name: Test
+        run: cargo test --lib --locked
+      - name: Check the tag matches plugin.toml
+        run: |
+          version="$(sed -n 's/^version *= *"\(.*\)"/\1/p' plugin.toml | head -1)"
+          test "v$version" = "${GITHUB_REF_NAME}" || { echo "tag ${GITHUB_REF_NAME} != plugin.toml version $version"; exit 1; }
+      - name: Build and package
+        run: scripts/build.sh --pack
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.oiplugin
+          generate_release_notes: true

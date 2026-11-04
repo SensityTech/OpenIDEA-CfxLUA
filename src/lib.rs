@@ -1,4 +1,4 @@
-//! Sensity DevKit for OpenIDEA: FiveM / RedM (CfxLua) tooling.
+//! OpenIDEA-CfxLUA: FiveM / RedM (CfxLua) support for OpenIDEA.
 //!
 //! The IDE already reads Lua (tree-sitter, lua-language-server); this plugin
 //! adds what only a Cfx.re-aware tool knows: the natives of the right game and
@@ -126,7 +126,7 @@ impl DevKit {
     fn scan(&mut self, project: &openidea_plugin::Project, root: &str) {
         let start = std::time::Instant::now();
         let i = self.workspace_for(&format!("{}/", slash(root).trim_end_matches('/')));
-        let task = host::begin_task("Sensity DevKit: indexing resources", true);
+        let task = host::begin_task("CfxLua: indexing resources", true);
         let mut paths: Vec<String> = Vec::new();
         for (glob, limit) in workspace::SCAN {
             match project.find_files(glob, *limit) {
@@ -303,7 +303,7 @@ impl DevKit {
         });
         let item = match text {
             Some((text, tooltip)) => StatusItem { text, tooltip: Some(tooltip), command: Some("show-docs".into()) },
-            None => StatusItem { text: "Sensity".into(), tooltip: Some("Sensity DevKit".into()), command: Some("show-docs".into()) },
+            None => StatusItem { text: "CfxLua".into(), tooltip: Some("OpenIDEA-CfxLUA".into()), command: Some("show-docs".into()) },
         };
         host::set_status_item(STATUS_SIDE, &item);
     }
@@ -337,7 +337,7 @@ pub fn status_text(ws: &Workspace, settings: &Settings, path: &str) -> (String, 
         (Side::Unknown, None) => "outside any resource".to_owned(),
         _ => "file or folder naming convention".to_owned(),
     };
-    (text, format!("Sensity DevKit: {} ({why}). Click for the documentation.", side.label()))
+    (text, format!("CfxLua: {} ({why}). Click for the documentation.", side.label()))
 }
 
 fn parse(kind: FileKind, text: &str) -> Source {
@@ -375,15 +375,16 @@ impl Plugin for DevKit {
             doc: doc.as_ref(),
             inv: ctx,
         };
-        if let Some(r) = self.docs.command(&cx, id, arg) {
-            return r;
+        let result = std::iter::once(&self.docs as &dyn Feature)
+            .chain(self.features.iter().map(|f| f.as_ref()))
+            .find_map(|f| f.command(&cx, id, arg))
+            .unwrap_or_else(|| Err(Error::NotFound(format!("command {id}"))));
+        if matches!(id, "natives.update" | "natives.scheduled-update") {
+            // The catalogs reload with the stored update on next use.
+            self.natives.invalidate();
+            self.last = None;
         }
-        for f in &self.features {
-            if let Some(r) = f.command(&cx, id, arg) {
-                return r;
-            }
-        }
-        Err(Error::NotFound(format!("command {id}")))
+        result
     }
 
     fn handle_events(&mut self, events: &[Event], ctx: &Invocation) {
