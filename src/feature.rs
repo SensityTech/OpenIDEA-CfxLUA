@@ -68,15 +68,21 @@ pub struct Problem {
     pub message: String,
     pub code: &'static str,
     pub fixes: Vec<Fix>,
+    pub deprecated: bool,
 }
 
 impl Problem {
     pub fn new(code: &'static str, severity: Severity, start: usize, end: usize, message: impl Into<String>) -> Self {
-        Self { start, end, severity, message: message.into(), code, fixes: Vec::new() }
+        Self { start, end, severity, message: message.into(), code, fixes: Vec::new(), deprecated: false }
     }
 
     pub fn fix(mut self, fix: Fix) -> Self {
         self.fixes.push(fix);
+        self
+    }
+
+    pub fn deprecated(mut self) -> Self {
+        self.deprecated = true;
         self
     }
 }

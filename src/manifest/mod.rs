@@ -315,6 +315,10 @@ mod tests {
             fixed("fxmanifest.lua", &text, "lua54", "Remove lua54"),
             format!("{OK}replace_level_meta 'map'\nbefore_level_meta 'x'\n")
         );
+        let (fx, rel) = fixture("fxmanifest.lua", &text);
+        let doc = fx.doc(&rel);
+        assert!(ManifestFeature.problems(&fx.cx(&doc)).iter().all(|p| p.deprecated));
+        assert!(!p[0].deprecated);
         let text = "game 'gta5'\nresource_manifest_version '44febabe-d386-4d18-afbe-5e627f4af937'\n";
         let m = "resource_manifest_version belongs to legacy __resource.lua manifests: fxmanifest.lua uses fx_version";
         assert_eq!(

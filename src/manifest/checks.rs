@@ -180,13 +180,8 @@ fn deprecated(cx: &Ctx, view: &View, fx: bool, out: &mut Vec<Problem>) {
     for d in &view.decls {
         match d.name() {
             "lua54" => out.push(
-                at_name(
-                    DEPRECATED,
-                    Severity::Warning,
-                    d,
-                    "lua54 has no effect: every Lua script runs on Lua 5.4 since June 2025",
-                )
-                .fix(fix("Remove lua54", edits::remove_statement(text, d))),
+                deprecated_directive(d, "lua54 has no effect: every Lua script runs on Lua 5.4 since June 2025")
+                    .fix(fix("Remove lua54", edits::remove_statement(text, d))),
             ),
             "resource_manifest_version" if fx => {
                 let message = "resource_manifest_version belongs to legacy __resource.lua manifests: fxmanifest.lua uses fx_version";
@@ -195,19 +190,18 @@ fn deprecated(cx: &Ctx, view: &View, fx: bool, out: &mut Vec<Problem>) {
                 } else {
                     fix("Replace with fx_version 'cerulean'", edits::replace_statement(d, FX_VERSION_LINE))
                 };
-                out.push(at_name(DEPRECATED, Severity::Warning, d, message).fix(f));
+                out.push(deprecated_directive(d, message).fix(f));
             }
             name @ ("before_level_meta" | "after_level_meta") => {
-                out.push(at_name(
-                    DEPRECATED,
-                    Severity::Warning,
-                    d,
-                    format!("{name} is deprecated: use data files (data_file) instead"),
-                ));
+                out.push(deprecated_directive(d, format!("{name} is deprecated: use data files (data_file) instead")));
             }
             _ => {}
         }
     }
+}
+
+fn deprecated_directive(d: &Decl, message: impl Into<String>) -> Problem {
+    at_name(DEPRECATED, Severity::Warning, d, message).deprecated()
 }
 
 fn suggestion(name: &str) -> Option<&'static str> {
