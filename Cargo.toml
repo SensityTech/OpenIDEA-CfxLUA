@@ -1,0 +1,30 @@
+[package]
+name = "sensity-devkit"
+version = "0.1.0"
+edition = "2024"
+description = "FiveM / RedM (CfxLua) tooling for OpenIDEA: natives, client/server awareness, state bags, events, fxmanifest, NUI and built-in documentation."
+license = "Apache-2.0"
+repository = "https://github.com/SensityTech/OpenIDEA-Devkit"
+publish = false
+
+# The plugin builds on its own (target wasm32-wasip2), outside any workspace.
+[workspace]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# The OpenIDEA plugin SDK (API openidea:plugin@1.0). Not published on crates.io:
+# pinned to the revision of the IDE the plugin is built and tested against.
+openidea-plugin = { git = "https://github.com/l0ng-ai/openidea", rev = "4c5b6de9ada902ffc74b429b7ae3c3384c23a5b3" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+codegen-units = 1
+panic = "abort"

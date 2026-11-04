@@ -1,0 +1,51 @@
+-- Copyright (c) 2026. SensityTech
+--
+-- Licensed under the Apache License, Version 2.0 (the "License"); you may not
+-- use this file except in compliance with the License. You may obtain a copy of
+-- the License at
+--
+-- http://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing, software
+-- distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+-- WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+-- License for the specific language governing permissions and limitations under
+-- the License.
+
+-- Cfx.re Lua runtime, client only: NUI helpers from `scheduler.lua`.
+-- `RegisterNuiCallback`, `RegisterNuiCallbackType` and `SendNuiMessage` are
+-- natives and come from the generated native libraries (the runtime wraps
+-- `RegisterNuiCallback` to report errors raised by the callback).
+
+---
+--- Registers a NUI callback: `fetch('https://<resource>/<callbackType>', ...)`
+--- requests from the resource UI call `callback` with the decoded request body
+--- and a function to send the response.
+---
+--- This is the legacy, event-based variant; the `RegisterNuiCallback` native
+--- does the same without going through events.
+---
+--- ```lua
+--- RegisterNUICallback('close', function(data, cb)
+---     SetNuiFocus(false, false)
+---     cb({ ok = true })
+--- end)
+--- ```
+---
+--- [Documentation](https://docs.fivem.net/docs/scripting-reference/runtimes/lua/functions/RegisterNUICallback/)
+---@param callbackType string @The callback name used in the request URL.
+---@param callback fun(data:any, cb:fun(response:any)) @Called with the request body and the response callback.
+function RegisterNUICallback(callbackType, callback) end
+
+---
+--- Sends `message` to the resource UI. The value is encoded with
+--- `json.encode` and received in JavaScript as a `message` event
+--- (`window.addEventListener('message', ...)`).
+---
+--- ```lua
+--- SendNUIMessage({ action = 'open', items = items })
+--- ```
+---
+--- [Documentation](https://docs.fivem.net/docs/scripting-reference/runtimes/lua/functions/SendNUIMessage/)
+---@param message any @The value to send, usually a table.
+function SendNUIMessage(message) end

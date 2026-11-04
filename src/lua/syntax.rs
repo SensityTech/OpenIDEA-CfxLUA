@@ -1,0 +1,409 @@
+//! A light structural view of a Lua source: code tokens (comments left out),
+//! matching brackets, and "chains" — suffixed expressions such as
+//! `Player(src).state:set('job', job)` — which is what FiveM features look
+//! for (calls with string arguments, state bag accesses, event APIs). No full
+//! parse: it stays correct enough on code that is being typed.
+
+use super::lexer::{Tok, Token, code_tokens, tokenize};
+use crate::text::LineIndex;
+
+/// A parsed document.
+pub struct Source {
+    pub text: String,
+    /// Every token, comments included.
+    pub all: Vec<Token>,
+    /// Tokens without comments.
+    pub toks: Vec<Token>,
+    /// For each bracket token in `toks`, the index of its partner.
+    pub pair: Vec<Option<usize>>,
+    pub lines: LineIndex,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Seg {
+    /// `.name` / `?.name`; `tok` is the name token.
+    Field { name: String, tok: usize, safe: bool },
+    /// `:name` (a call follows) / `?:name`.
+    Method { name: String, tok: usize },
+    /// `[ … ]`: the bracket tokens.
+    Index { open: usize, close: Option<usize> },
+    /// `( … )`: arguments as token ranges `[start, end)` split at top-level commas.
+    Call { open: usize, close: Option<usize>, args: Vec<(usize, usize)> },
+    /// `f 'str'`, `f "str"`, `f [[…]]`: the string token is the only argument.
+    StrCall { tok: usize },
+    /// `f { … }`.
+    TableCall { open: usize, close: Option<usize> },
+}
+
+/// A suffixed expression starting at a name (or a parenthesised expression).
+#[derive(Clone, Debug)]
+pub struct Chain {
+    /// Index (in `toks`) of the first token.
+    pub start: usize,
+    pub head: String,
+    pub segs: Vec<Seg>,
+    /// Index of the token after the chain.
+    pub end: usize,
+}
+
+impl Chain {
+    /// Dotted path of the leading names (`Citizen.CreateThread`,
+    /// `exports.ox_lib:notify`) up to segment `n` (exclusive).
+    pub fn path(&self, n: usize) -> String {
+        let mut out = self.head.clone();
+        for s in &self.segs[..n.min(self.segs.len())] {
+            match s {
+                Seg::Field { name, .. } => {
+                    out.push('.');
+                    out.push_str(name);
+                }
+                Seg::Method { name, .. } => {
+                    out.push(':');
+                    out.push_str(name);
+                }
+                Seg::Index { .. } => out.push_str("[]"),
+                Seg::Call { .. } | Seg::StrCall { .. } | Seg::TableCall { .. } => out.push_str("()"),
+            }
+        }
+        out
+    }
+}
+
+/// A function call found in the source.
+#[derive(Clone, Debug)]
+pub struct Call {
+    /// Callee path (`AddEventHandler`, `Citizen.CreateThread`, `lib.callback.register`).
+    pub callee: String,
+    /// The last name of the callee (`register`), its token index.
+    pub name_tok: usize,
+    /// The `(` token (or the string / `{` of a sugar call).
+    pub open: usize,
+    pub close: Option<usize>,
+    /// Arguments as token ranges.
+    pub args: Vec<(usize, usize)>,
+    /// The chain the call belongs to and the call's segment index in it.
+    pub chain: usize,
+    pub seg: usize,
+}
+
+impl Source {
+    pub fn new(text: &str) -> Self {
+        let all = tokenize(text);
+        let toks = code_tokens(&all);
+        let pair = match_brackets(text, &toks);
+        Self { text: text.to_owned(), lines: LineIndex::new(text), all, toks, pair }
+    }
+
+    /// Text only, no tokens (documents that are not Lua: JS, HTML…).
+    pub fn plain(text: &str) -> Self {
+        Self { text: text.to_owned(), lines: LineIndex::new(text), all: Vec::new(), toks: Vec::new(), pair: Vec::new() }
+    }
+
+    pub fn tok_text(&self, i: usize) -> &str {
+        self.toks.get(i).map_or("", |t| t.text(&self.text))
+    }
+
+    pub fn is_op(&self, i: usize, op: &str) -> bool {
+        self.toks.get(i).is_some_and(|t| t.is_op(&self.text, op))
+    }
+
+    pub fn is_kw(&self, i: usize, kw: &str) -> bool {
+        self.toks.get(i).is_some_and(|t| t.is_kw(&self.text, kw))
+    }
+
+    pub fn is_name(&self, i: usize) -> bool {
+        self.toks.get(i).is_some_and(|t| t.kind == Tok::Name)
+    }
+
+    /// The string value of token `i` if it is a string literal.
+    pub fn string_at(&self, i: usize) -> Option<String> {
+        let t = self.toks.get(i)?;
+        t.is_string().then(|| t.string_value(&self.text))
+    }
+
+    /// If argument `arg` is exactly one string literal: its token index.
+    pub fn string_arg(&self, arg: (usize, usize)) -> Option<usize> {
+        (arg.1 == arg.0 + 1 && self.toks[arg.0].is_string()).then_some(arg.0)
+    }
+
+    /// Index of the code token containing byte `at`, or the last one before it.
+    pub fn tok_before(&self, at: usize) -> Option<usize> {
+        let i = self.toks.partition_point(|t| t.start < at);
+        if i == 0 { None } else { Some(i - 1) }
+    }
+
+    /// Index of the code token that contains `at` (end inclusive).
+    pub fn tok_at(&self, at: usize) -> Option<usize> {
+        let i = self.tok_before(at)?;
+        (self.toks[i].end >= at).then_some(i)
+    }
+
+    /// Whether byte `at` is inside a comment.
+    pub fn in_comment(&self, at: usize) -> bool {
+        let i = self.all.partition_point(|t| t.start < at);
+        i > 0 && {
+            let t = self.all[i - 1];
+            t.is_comment() && at <= t.end && (at < t.end || t.kind == Tok::LineComment)
+        }
+    }
+
+    /// Byte span of token range `[a, b)`.
+    pub fn span(&self, a: usize, b: usize) -> (usize, usize) {
+        if a >= b || a >= self.toks.len() {
+            let at = self.toks.get(a).map_or(self.text.len(), |t| t.start);
+            return (at, at);
+        }
+        (self.toks[a].start, self.toks[b - 1].end)
+    }
+
+    /// Every chain of the source, outer chains before the chains nested in their arguments.
+    pub fn chains(&self) -> Vec<Chain> {
+        let mut out = Vec::new();
+        for i in 0..self.toks.len() {
+            let t = self.toks[i];
+            if t.kind != Tok::Name {
+                continue;
+            }
+            // Not a chain start when it continues one (`a.b`, `a:b`, `a?.b`), or names a field in a table constructor.
+            if i > 0 {
+                let p = self.toks[i - 1];
+                if p.kind == Tok::Op && matches!(p.text(&self.text), "." | ":" | "?." | "?:" | "::") {
+                    continue;
+                }
+            }
+            out.push(self.chain_from(i));
+        }
+        out
+    }
+
+    fn chain_from(&self, start: usize) -> Chain {
+        let head = self.tok_text(start).to_owned();
+        let mut segs = Vec::new();
+        let mut i = start + 1;
+        while i < self.toks.len() {
+            let t = self.toks[i];
+            let text = t.text(&self.text);
+            match (t.kind, text) {
+                (Tok::Op, "." | "?.") if self.is_name(i + 1) => {
+                    segs.push(Seg::Field { name: self.tok_text(i + 1).to_owned(), tok: i + 1, safe: text == "?." });
+                    i += 2;
+                }
+                (Tok::Op, ":" | "?:") if self.is_name(i + 1) => {
+                    segs.push(Seg::Method { name: self.tok_text(i + 1).to_owned(), tok: i + 1 });
+                    i += 2;
+                }
+                (Tok::Op, "[" | "?[") => {
+                    let close = self.pair[i];
+                    segs.push(Seg::Index { open: i, close });
+                    match close {
+                        Some(c) => i = c + 1,
+                        None => break,
+                    }
+                }
+                (Tok::Op, "(") => {
+                    // A `(` on the next line after a complete statement is ambiguous in
+                    // Lua; treat it as a call like the reference parser does.
+                    let close = self.pair[i];
+                    let args = self.split_args(i + 1, close.unwrap_or(self.toks.len()));
+                    segs.push(Seg::Call { open: i, close, args });
+                    match close {
+                        Some(c) => i = c + 1,
+                        None => break,
+                    }
+                }
+                (Tok::Str { .. } | Tok::LongStr, _) => {
+                    segs.push(Seg::StrCall { tok: i });
+                    i += 1;
+                }
+                (Tok::Op, "{") => {
+                    let close = self.pair[i];
+                    segs.push(Seg::TableCall { open: i, close });
+                    match close {
+                        Some(c) => i = c + 1,
+                        None => break,
+                    }
+                }
+                _ => break,
+            }
+        }
+        Chain { start, head, segs, end: i }
+    }
+
+    /// Splits tokens `[from, to)` at top-level commas.
+    pub fn split_args(&self, from: usize, to: usize) -> Vec<(usize, usize)> {
+        let mut args = Vec::new();
+        if from >= to {
+            return args;
+        }
+        let mut s = from;
+        let mut i = from;
+        while i < to {
+            let t = self.toks[i];
+            if t.kind == Tok::Op {
+                match t.text(&self.text) {
+                    "(" | "[" | "{" | "?[" => {
+                        if let Some(c) = self.pair[i] {
+                            i = c.min(to);
+                        } else {
+                            i = to;
+                            continue;
+                        }
+                    }
+                    "," => {
+                        args.push((s, i));
+                        s = i + 1;
+                    }
+                    _ => {}
+                }
+            }
+            i += 1;
+        }
+        args.push((s, to));
+        args
+    }
+
+    /// Every call of the source.
+    pub fn calls(&self, chains: &[Chain]) -> Vec<Call> {
+        let mut out = Vec::new();
+        for (ci, c) in chains.iter().enumerate() {
+            // `function a.b(x)` declares, it does not call.
+            if c.start > 0 && self.is_kw(c.start - 1, "function") {
+                continue;
+            }
+            for (si, s) in c.segs.iter().enumerate() {
+                let (open, close, args) = match s {
+                    Seg::Call { open, close, args } => (*open, *close, args.clone()),
+                    Seg::StrCall { tok } => (*tok, Some(*tok), vec![(*tok, *tok + 1)]),
+                    Seg::TableCall { open, close } => (*open, *close, vec![(*open, close.map_or(*open + 1, |c| c + 1))]),
+                    _ => continue,
+                };
+                let name_tok = match si.checked_sub(1).map(|p| &c.segs[p]) {
+                    Some(Seg::Field { tok, .. } | Seg::Method { tok, .. }) => *tok,
+                    Some(_) => continue,
+                    None => c.start,
+                };
+                out.push(Call { callee: c.path(si), name_tok, open, close, args, chain: ci, seg: si });
+            }
+        }
+        out
+    }
+
+    /// The argument of `call` that contains byte `at` (index, token range).
+    pub fn arg_at(&self, call: &Call, at: usize) -> Option<(usize, (usize, usize))> {
+        let open = self.toks[call.open];
+        let close_at = call.close.map_or(self.text.len(), |c| self.toks[c].start);
+        if at <= open.start || at > close_at {
+            // A sugar call's string is its own argument.
+            if call.close == Some(call.open) && at > open.start && at <= open.end {
+                return Some((0, call.args[0]));
+            }
+            return None;
+        }
+        let mut index = 0;
+        for (n, arg) in call.args.iter().enumerate() {
+            let next_start = call.args.get(n + 1).map_or(close_at, |a| {
+                // The comma before the next argument.
+                self.toks.get(a.0.saturating_sub(1)).map_or(close_at, |t| t.start)
+            });
+            index = n;
+            if at <= next_start {
+                return Some((n, *arg));
+            }
+        }
+        call.args.get(index).map(|a| (index, *a))
+    }
+
+    /// Whether the statement containing token `i` starts at `i` (after
+    /// `;`, a keyword that ends a block header, or another statement's end).
+    pub fn is_statement_start(&self, i: usize) -> bool {
+        if i == 0 {
+            return true;
+        }
+        let p = self.toks[i - 1];
+        let ptext = p.text(&self.text);
+        match p.kind {
+            Tok::Keyword => matches!(ptext, "do" | "then" | "else" | "end" | "repeat" | "break" | "return"),
+            Tok::Op => matches!(ptext, ";" | ")" | "]" | "}"),
+            Tok::Name | Tok::Number | Tok::Str { .. } | Tok::LongStr | Tok::Hash { .. } => true,
+            _ => true,
+        }
+    }
+}
+
+/// Matches `(` `[` `{` `?[` with their closers.
+fn match_brackets(src: &str, toks: &[Token]) -> Vec<Option<usize>> {
+    let mut pair = vec![None; toks.len()];
+    let mut stack: Vec<(usize, u8)> = Vec::new();
+    for (i, t) in toks.iter().enumerate() {
+        if t.kind != Tok::Op {
+            continue;
+        }
+        let close = match t.text(src) {
+            "(" => {
+                stack.push((i, b')'));
+                continue;
+            }
+            "[" | "?[" => {
+                stack.push((i, b']'));
+                continue;
+            }
+            "{" => {
+                stack.push((i, b'}'));
+                continue;
+            }
+            ")" => b')',
+            "]" => b']',
+            "}" => b'}',
+            _ => continue,
+        };
+        // Unbalanced code: unwind to the nearest opener of this kind.
+        if let Some(pos) = stack.iter().rposition(|(_, c)| *c == close) {
+            let (open, _) = stack[pos];
+            stack.truncate(pos);
+            pair[open] = Some(i);
+            pair[i] = Some(open);
+        }
+    }
+    pair
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chains_and_calls() {
+        let src = "Player(src).state:set('job', job, true)\nCitizen.CreateThread(function() Wait(0) end)";
+        let s = Source::new(src);
+        let chains = s.chains();
+        let calls = s.calls(&chains);
+        let callees: Vec<&str> = calls.iter().map(|c| c.callee.as_str()).collect();
+        assert_eq!(callees, ["Player", "Player().state:set", "Citizen.CreateThread", "Wait"]);
+        let set = &calls[1];
+        assert_eq!(set.args.len(), 3);
+        assert_eq!(s.string_at(s.string_arg(set.args[0]).unwrap()).as_deref(), Some("job"));
+    }
+
+    #[test]
+    fn caret_argument() {
+        let src = "TriggerServerEvent('shop:buy', item, )";
+        let s = Source::new(src);
+        let chains = s.chains();
+        let calls = s.calls(&chains);
+        let at = src.find("shop").unwrap();
+        assert_eq!(s.arg_at(&calls[0], at).unwrap().0, 0);
+        let at = src.find(", )").unwrap() + 2;
+        assert_eq!(s.arg_at(&calls[0], at).unwrap().0, 2);
+    }
+
+    #[test]
+    fn sugar_calls_and_unclosed() {
+        let src = "RegisterNetEvent 'esx:playerLoaded'\nAddEventHandler('x', function(";
+        let s = Source::new(src);
+        let calls = s.calls(&s.chains());
+        assert_eq!(calls[0].callee, "RegisterNetEvent");
+        assert_eq!(s.string_at(s.string_arg(calls[0].args[0]).unwrap()).as_deref(), Some("esx:playerLoaded"));
+        assert_eq!(calls[1].callee, "AddEventHandler");
+        assert!(calls[1].close.is_none());
+    }
+}

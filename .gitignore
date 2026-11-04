@@ -1,0 +1,14 @@
+# Build output
+/target/
+/dist/
+*.oiplugin
+
+# Documentation written locally for the maintainers (not published with the sources)
+/doc/
+
+# Editors and OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db

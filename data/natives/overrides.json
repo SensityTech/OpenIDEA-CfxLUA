@@ -1,0 +1,79 @@
+{
+  "_comment": "Lua types the Cfx.re native databases cannot express. Keys are native names (natives_cfx.json) and parameter names as written in the database. Read by com.tang.intellij.lua.cfx.natives.CfxNativeOverrides; any change regenerates the stubs.",
+  "returnTypes": {
+    "DOOR_SYSTEM_GET_ACTIVE": "integer[][]",
+    "GET_ACTIVE_PLAYERS": "integer[]",
+    "GET_ALL_OBJECTS": "integer[]",
+    "GET_ALL_PEDS": "integer[]",
+    "GET_ALL_ROPES": "integer[]",
+    "GET_ALL_TRACK_JUNCTIONS": "integer[]",
+    "GET_ALL_VEHICLE_MODELS": "string[]",
+    "GET_ALL_VEHICLES": "integer[]",
+    "GET_CLOSEST_TRACK_NODES": "integer[][]",
+    "GET_COLSHAPE_POLYGON_DATA": "number[]",
+    "GET_ENTITIES_IN_RADIUS": "integer[]",
+    "GET_GAME_POOL": "integer[]",
+    "GET_PED_DECORATIONS": "integer[][]",
+    "GET_REGISTERED_COMMANDS": "{name:string, resource:string, arity:integer}[]",
+    "GET_RESOURCE_COMMANDS": "{name:string, resource:string, arity:integer}[]",
+    "GET_STATE_BAG_KEYS": "string[]",
+    "GET_STATE_BAG_VALUE": "any"
+  },
+  "paramTypes": {
+    "ADD_CONVAR_CHANGE_LISTENER": {
+      "conVarFilter": "string|nil",
+      "handler": "fun(conVarName:string, reserved:any)"
+    },
+    "ADD_STATE_BAG_CHANGE_HANDLER": {
+      "keyFilter": "string|nil",
+      "bagFilter": "string|nil",
+      "handler": "fun(bagName:string, key:string, value:any, reserved:integer, replicated:boolean)"
+    },
+    "CREATE_COLSHAPE_POLYGON": {
+      "points": "number[]"
+    },
+    "FORMAT_STACK_TRACE": {
+      "traceData": "table"
+    },
+    "GET_ENTITIES_IN_RADIUS": {
+      "models": "integer[]|nil"
+    },
+    "PERFORM_HTTP_REQUEST_INTERNAL_EX": {
+      "requestData": "table"
+    },
+    "REGISTER_ARCHETYPES": {
+      "factory": "fun():table"
+    },
+    "REGISTER_COMMAND": {
+      "handler": "fun(source:integer, args:string[], rawCommand:string)"
+    },
+    "REGISTER_CONSOLE_LISTENER": {
+      "listener": "fun(channel:string, message:string)"
+    },
+    "REGISTER_NUI_CALLBACK": {
+      "callback": "fun(data:any, cb:fun(result:any))"
+    },
+    "REGISTER_RAW_KEYMAP": {
+      "onKeyDown": "fun()|nil",
+      "onKeyUp": "fun()|nil"
+    },
+    "REGISTER_RAW_NUI_CALLBACK": {
+      "callback": "fun(request:table, respond:fun(response:table))"
+    },
+    "REGISTER_RESOURCE_BUILD_TASK_FACTORY": {
+      "factoryFn": "fun():table"
+    },
+    "SCAN_RESOURCE_ROOT": {
+      "callback": "fun(result:table)"
+    },
+    "SET_HTTP_HANDLER": {
+      "handler": "fun(request:table, response:table)"
+    },
+    "UPDATE_MAPDATA_ENTITY": {
+      "entityDef": "table"
+    }
+  },
+  "stringParamTypes": {
+    "playerSrc": "string|integer"
+  }
+}

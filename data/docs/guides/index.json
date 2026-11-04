@@ -1,0 +1,154 @@
+[
+  {
+    "id": "getting-started",
+    "title": "Your first resource",
+    "category": "Getting started",
+    "file": "getting-started.md",
+    "summary": "Create a resource with a manifest, a client script, a server script, a command and a client/server event round trip, then start and iterate on it.",
+    "keywords": ["resource", "first", "tutorial", "fxmanifest", "client", "server", "ensure", "restart", "refresh", "beginner"]
+  },
+  {
+    "id": "plugin-guide",
+    "title": "Using Sensity DevKit",
+    "category": "Getting started",
+    "file": "plugin-guide.md",
+    "summary": "Project settings, game detection, automatic natives updates, client/server/shared file detection, the Sensity tool window, quick documentation, network events, the NUI bridge between Lua and the page, CfxLua and performance inspections, loop cost gutter icons and EmmyDoc annotations.",
+    "keywords": ["plugin", "settings", "natives update", "tool window", "inspections", "performance", "resmon", "adaptive sleep", "quick documentation", "parameter info", "emmydoc", "annotations", "client", "server", "shared", "nui", "RegisterNUICallback", "SendNUIMessage", "fetchNui", "useNuiEvent", "ui_page", "vite", "dev server"]
+  },
+  {
+    "id": "cfxlua-syntax",
+    "title": "CfxLua syntax",
+    "category": "Language",
+    "file": "cfxlua-syntax.md",
+    "summary": "Every CfxLua extension (compound assignment, safe navigation, in unpacking, set constructors, C comments, backtick hashes), Lua 5.4 features, and the syntax that does not exist.",
+    "keywords": ["syntax", "+=", "^=", "?.", "safe navigation", "in unpacking", "set constructor", "/* */", "backtick", "hash", "const", "close", "goto", "++", "lua54"]
+  },
+  {
+    "id": "cfxlua-std-extensions",
+    "title": "Standard library extensions",
+    "category": "Language",
+    "file": "cfxlua-std-extensions.md",
+    "summary": "joaat, defer, each, scrub, table.create/wipe/clone/type, string.strsplit/strjoin/strtrim, math additions, and what the runtime removes (io/os on the client, require, dofile).",
+    "keywords": ["joaat", "defer", "each", "scrub", "table.clone", "table.wipe", "table.type", "strsplit", "strjoin", "strtrim", "math.round", "math.clamp", "require", "os", "io"]
+  },
+  {
+    "id": "vectors-and-math",
+    "title": "Vectors, quaternions and math",
+    "category": "Language",
+    "file": "vectors-and-math.md",
+    "summary": "vector2/3/4 and quat types: constructors, components and swizzling, immutability, arithmetic, distances, global helpers, and the glm library.",
+    "keywords": ["vector2", "vector3", "vector4", "vec3", "quat", "swizzle", "distance", "norm", "dot", "cross", "glm", "math"]
+  },
+  {
+    "id": "threads-and-timing",
+    "title": "Threads, waits and timing",
+    "category": "Runtime",
+    "file": "threads-and-timing.md",
+    "summary": "The cooperative scheduler: CreateThread, Wait(0) versus Wait(n), SetTimeout and ClearTimeout, promises with Citizen.Await, error handling and loop patterns.",
+    "keywords": ["CreateThread", "Citizen.CreateThread", "Wait", "SetTimeout", "ClearTimeout", "promise", "Citizen.Await", "coroutine", "tick", "loop", "GetGameTimer"]
+  },
+  {
+    "id": "events",
+    "title": "Events",
+    "category": "Runtime",
+    "file": "events.md",
+    "summary": "Local and network events, RegisterNetEvent, TriggerEvent, TriggerServerEvent, TriggerClientEvent, latent events, source, cancellation, built-in events and event security.",
+    "keywords": ["AddEventHandler", "RegisterNetEvent", "TriggerEvent", "TriggerServerEvent", "TriggerClientEvent", "latent", "source", "CancelEvent", "WasEventCanceled", "playerConnecting", "deferrals"]
+  },
+  {
+    "id": "exports",
+    "title": "Exports",
+    "category": "Runtime",
+    "file": "exports.md",
+    "summary": "Defining and calling exports between resources, the colon call rule, errors, serialization, GetInvokingResource and manifest exports.",
+    "keywords": ["exports", "export", "server_export", "GetInvokingResource", "GetResourceState", "cross-resource"]
+  },
+  {
+    "id": "state-bags",
+    "title": "State bags",
+    "category": "Runtime",
+    "file": "state-bags.md",
+    "summary": "GlobalState, Player(id).state, LocalPlayer.state and Entity(handle).state: replication rules, write policy, change handlers and bag names.",
+    "keywords": ["state bag", "GlobalState", "LocalPlayer", "Player", "Entity", "AddStateBagChangeHandler", "replicated", "sv_stateBagStrictMode"]
+  },
+  {
+    "id": "json-and-msgpack",
+    "title": "JSON and MessagePack",
+    "category": "Runtime",
+    "file": "json-and-msgpack.md",
+    "summary": "Encoding and decoding with json, empty tables and json.null, resource files and KVP storage, and how msgpack shapes data passed through events, exports and state bags.",
+    "keywords": ["json", "json.encode", "json.decode", "json.null", "msgpack", "LoadResourceFile", "SaveResourceFile", "kvp", "serialization"]
+  },
+  {
+    "id": "nui",
+    "title": "NUI: HTML user interfaces",
+    "category": "Runtime",
+    "file": "nui.md",
+    "summary": "ui_page and files, SendNUIMessage, NUI callbacks with RegisterNUICallback, SetNuiFocus, manifest options and debugging.",
+    "keywords": ["nui", "ui_page", "SendNUIMessage", "RegisterNUICallback", "RegisterNuiCallback", "SetNuiFocus", "GetParentResourceName", "fetch", "html"]
+  },
+  {
+    "id": "commands-and-keymaps",
+    "title": "Commands, key mappings and permissions",
+    "category": "Runtime",
+    "file": "commands-and-keymaps.md",
+    "summary": "RegisterCommand and the restricted flag, ACE permissions and principals, RegisterKeyMapping (FiveM), RedM alternatives, and chat suggestions.",
+    "keywords": ["RegisterCommand", "RegisterKeyMapping", "ace", "add_ace", "add_principal", "IsPlayerAceAllowed", "ExecuteCommand", "chat:addSuggestion", "keybinding"]
+  },
+  {
+    "id": "natives",
+    "title": "Calling natives from Lua",
+    "category": "Natives",
+    "file": "natives.md",
+    "summary": "Native naming rules, argument types, out-parameters as extra return values, BOOL quirks, hashes, entity handles and network ids, vectors, Citizen.InvokeNative, aliases, and client/server/RPC natives.",
+    "keywords": ["natives", "out parameter", "InvokeNative", "N_0x", "hash", "BOOL", "network id", "entity handle", "alias", "RPC", "GetGroundZFor_3dCoord"]
+  },
+  {
+    "id": "redm-vs-fivem",
+    "title": "RedM and FiveM: what differs",
+    "category": "Natives",
+    "file": "redm-vs-fivem.md",
+    "summary": "What is shared between FiveM and RedM, the RedM manifest requirements, native naming differences, game-specific events and features, and writing code for both games.",
+    "keywords": ["redm", "rdr3", "fivem", "gta5", "rdr3_warning", "GetGameName", "nativedb", "RegisterRawKeymap"]
+  },
+  {
+    "id": "fxmanifest-essentials",
+    "title": "fxmanifest essentials: what every resource must define",
+    "category": "Resources",
+    "file": "fxmanifest-essentials.md",
+    "summary": "The checklist of a resource manifest: the required fx_version, game and rdr3_warning lines, metadata, script order, globs, NUI and data files, dependencies, common mistakes the plugin catches, and FiveM and RedM templates.",
+    "keywords": ["fxmanifest", "essentials", "checklist", "required", "fx_version", "game", "games", "rdr3_warning", "shared_scripts", "client_scripts", "server_scripts", "files", "ui_page", "data_file", "stream", "glob", "dependencies", "new resource", "template", "mistakes"]
+  },
+  {
+    "id": "fxmanifest",
+    "title": "The resource manifest",
+    "category": "Resources",
+    "file": "fxmanifest.md",
+    "summary": "How fxmanifest.lua is read, every built-in directive with its values, globbing, dependencies and constraints, data files, and complete FiveM and RedM examples.",
+    "keywords": ["fxmanifest", "fx_version", "game", "client_scripts", "server_scripts", "shared_scripts", "files", "data_file", "dependencies", "provide", "escrow_ignore", "lua54", "ui_page"]
+  },
+  {
+    "id": "escrow",
+    "title": "Selling resources with Asset Escrow",
+    "category": "Resources",
+    "file": "escrow.md",
+    "summary": "What Cfx Asset Escrow encrypts, keeping configuration and translations editable with escrow_ignore, files loaded at runtime, the pre-upload checklist, and the Sensity DevKit escrow decorations, inspections, pre-publish check and protected files.",
+    "keywords": ["escrow", "asset escrow", "escrow_ignore", "tebex", "keymaster", "portal", "encrypted", "fxap", "protected", "config", "locales", "LoadResourceFile", "lib.require", "vendor", "sell"]
+  },
+  {
+    "id": "performance",
+    "title": "Performance",
+    "category": "Best practices",
+    "file": "performance.md",
+    "summary": "Measuring with resmon and the profiler, avoiding per-frame loops, caching native results, reducing garbage, local variables, network traffic and server-side work.",
+    "keywords": ["performance", "resmon", "profiler", "Wait(0)", "optimization", "garbage", "locals", "latent", "ms"]
+  },
+  {
+    "id": "security",
+    "title": "Security",
+    "category": "Best practices",
+    "file": "security.md",
+    "summary": "Treating server events as public endpoints: validation, source, server authority, rate limiting, ACE permissions, secrets in convars, client-writable state, entity and game event filtering.",
+    "keywords": ["security", "validation", "anticheat", "source", "rate limit", "ace", "convar", "setr", "state bag", "entityCreating", "explosionEvent"]
+  }
+]

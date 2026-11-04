@@ -1,0 +1,150 @@
+[
+  {
+    "id": "compound-assignment",
+    "title": "Compound assignment",
+    "syntax": "target += expr | -= | *= | /= | <<= | >>= | &= | |= | ^=",
+    "example": "local count = 10\ncount += 5\ncount -= 1\nlocal flags = 0\nflags |= 1 << 3\nflags &= ~(1 << 3)\nlocal stats = { kills = 0 }\nstats.kills += 1",
+    "description": "`v op= expr` is equivalent to `v = v op (expr)`: the whole right-hand side is evaluated first. Exactly nine operators exist. The target can be a local, upvalue, global, field or indexed element; for indexed targets the table and key are evaluated once. `/=` always produces a float.",
+    "pitfalls": [
+      "`^=` is bitwise XOR, not exponentiation: with x = 3, `x ^= 2` gives 1. Write `x = x ^ 2` for a power.",
+      "`//=`, `%=` and `..=` do not exist.",
+      "Single target only: `a, b += 1, 1` is a syntax error.",
+      "It is a statement, not an expression: `print(a += 1)` does not compile.",
+      "The operator must be written without spaces: `a + = 1` is a syntax error.",
+      "The runtime does not protect `<const>` locals: `c += 1` on a constant is either ignored or really modifies it. Sensity DevKit reports it as an error."
+    ]
+  },
+  {
+    "id": "safe-navigation",
+    "title": "Safe navigation",
+    "syntax": "expr?.name | expr?[key] | expr?:method(args) | expr?(args)",
+    "example": "local config = { vehicle = { plate = 'CFX 001' } }\nlocal plate = config?.vehicle?.plate\nlocal color = config?.paint?.primary\nlocal upper = config.vehicle.plate?:upper()\nlocal onDone = config.onDone\nonDone?('finished')",
+    "description": "When the value before `?` is nil or false, evaluation skips the rest of the whole suffix chain and the chain evaluates to that nil or false. Any other value continues normally. When a statement (call or assignment) starts with a chain that short-circuits, the entire statement is skipped, including its right-hand side.",
+    "pitfalls": [
+      "Only nil and false short-circuit: indexing a number with `?.` still raises an error.",
+      "`a?.b.c` raises an error when `a` exists but `a.b` is nil; write `a?.b?.c`.",
+      "There is no `??` operator and no ternary `a ? b : c`; use `a or b` and `cond and x or y`.",
+      "In a multiple assignment only the first target may contain `?`."
+    ]
+  },
+  {
+    "id": "in-unpacking",
+    "title": "In unpacking",
+    "syntax": "local name1, name2 in source | name1, name2 in source",
+    "example": "local coords = { x = 215.7, y = -810.1, z = 30.7 }\nlocal x, y, z in coords\nlocal health, armour = 0, 0\nhealth, armour in ({ health = 200, armour = 50 })",
+    "description": "Declares (or assigns) variables from the fields of a table with the same names: `local x, y in t` is `local x, y = t.x, t.y`. The source is evaluated once. In the non-local form the key comes from each target: its name, its field name (`obj.name`) or its integer index (`obj[1]`).",
+    "pitfalls": [
+      "The source must be a name, an index, a call or a parenthesized expression: `local a in { a = 1 }` is a syntax error, `local a in ({ a = 1 })` works.",
+      "Only one source expression is allowed.",
+      "The `<close>` attribute is silently ignored with `in`: the value is never closed.",
+      "Fields are read by name, not by position: `local a, b in { 10, 20 }` gives nil, nil."
+    ]
+  },
+  {
+    "id": "set-constructor",
+    "title": "Set constructors",
+    "syntax": "{ .name, [expr], .name = value }",
+    "example": "local allowedJobs = { .police, .ambulance, ['tow-truck'] }\nif allowedJobs['police'] then\n    print('allowed')\nend",
+    "description": "Inside a table constructor, `.name` without a value means `name = true` and `[expr]` without a value means `[expr] = true`. `.name = value` is accepted as an alternative spelling of `name = value`.",
+    "pitfalls": [
+      "`{ .5 }` is the number 0.5, not a set entry.",
+      "Keywords cannot follow the dot: `{ .end }` is a syntax error; use `{ ['end'] }`.",
+      "Only a single name is allowed: `{ .a.b }` is a syntax error."
+    ]
+  },
+  {
+    "id": "c-comment",
+    "title": "C-style block comments",
+    "syntax": "/* comment */",
+    "example": "local speed = 10 /* m/s */ * 3.6\n/*\n    multi-line comment\n*/",
+    "description": "Text between `/*` and the next `*/` is a comment and may span several lines.",
+    "pitfalls": [
+      "Comments do not nest: the first `*/` ends the comment.",
+      "Newlines inside `/* */` are not counted by the runtime, so error messages after a multi-line C comment report wrong (too small) line numbers. Prefer `--[[ ]]`.",
+      "`//` is not a comment: it is integer division.",
+      "An unterminated `/*` is a syntax error."
+    ]
+  },
+  {
+    "id": "hash-literal",
+    "title": "Compile-time hashes",
+    "syntax": "`string`",
+    "example": "local ADDER <const> = `adder`\nlocal same = `adder` == `ADDER`\nlocal unsigned = `adder` & 0xFFFFFFFF\nRequestModel(`adder`)",
+    "description": "A string between backticks is replaced at compile time by its Jenkins one-at-a-time hash (the GetHashKey hash), as a signed 32-bit integer. ASCII letters are lowercased before hashing. The result is a constant, usable with `<const>` and as a call argument.",
+    "pitfalls": [
+      "The value is signed: hashes above 0x7FFFFFFF are negative. Use `& 0xFFFFFFFF` to display the unsigned form.",
+      "The literal must fit on one line.",
+      "For strings known only at runtime, use `joaat(str)` or `GetHashKey(str)`."
+    ]
+  },
+  {
+    "id": "const-attribute",
+    "title": "<const> locals",
+    "syntax": "local name <const> = expr",
+    "example": "local MAX_PLAYERS <const> = 48\nlocal SHOP <const> = vector3(25.7, -1347.3, 29.5)",
+    "description": "Standard Lua 5.4: a constant local cannot be assigned after its declaration. Assigning it with `=` is a compile error.",
+    "pitfalls": [
+      "Compound assignment (`+=`, `-=`, ...) on a `<const>` local is not rejected by the runtime and behaves unpredictably. Sensity DevKit reports it.",
+      "Only the variable is constant: a `<const>` table can still have its fields modified."
+    ]
+  },
+  {
+    "id": "close-attribute",
+    "title": "<close> locals and defer()",
+    "syntax": "local name <close> = value_with___close",
+    "example": "do\n    local _ <close> = defer(function()\n        print('cleanup')\n    end)\n    print('work')\nend",
+    "description": "Standard Lua 5.4: when the variable goes out of scope (normally or because of an error), the value's `__close` metamethod is called. The CfxLua global `defer(fn)` returns a value whose `__close` calls `fn`.",
+    "pitfalls": [
+      "The value must have a `__close` metamethod, or be nil or false; otherwise an error is raised.",
+      "`<close>` combined with `in` unpacking is silently ignored.",
+      "There is no `defer ... end` statement in CfxLua; use `defer(function() ... end)`."
+    ]
+  },
+  {
+    "id": "lua54-operators",
+    "title": "Integer division and bitwise operators",
+    "syntax": "a // b | a & b | a | b | a ~ b | ~a | a << n | a >> n",
+    "example": "local half = 7 // 2\nlocal FLAG_A <const> = 1 << 0\nlocal FLAG_B <const> = 1 << 1\nlocal state = FLAG_A | FLAG_B\nlocal hasB = (state & FLAG_B) ~= 0\nstate = state & ~FLAG_A",
+    "description": "Standard Lua 5.4: `//` is floor division, `/` always returns a float, and `& | ~ << >>` are bitwise operators on integers (`~` is XOR between two operands and NOT as a unary operator).",
+    "pitfalls": [
+      "`~=` is the not-equal operator; `~` alone is XOR or NOT.",
+      "`//` is not a comment.",
+      "Bitwise operators require integer-representable numbers: `1.5 & 1` raises an error."
+    ]
+  },
+  {
+    "id": "vector-types",
+    "title": "Vector and quaternion types",
+    "syntax": "vector2(x, y) | vector3(x, y, z) | vector4(x, y, z, w) | vec(...) | quat(...)",
+    "example": "local a = vector3(1, 2, 3)\nlocal b = a + vector3(0, 0, 1)\nlocal flat = a.xy\nlocal length = #a\nlocal x, y, z = table.unpack(a)",
+    "description": "Runtime value types rather than syntax: `type(v)` is 'vector2', 'vector3', 'vector4' or 'quat'. Components are read with x/y/z/w, r/g/b/a or 1..4; multi-letter swizzles such as `v.zyx` build new vectors; `#v` is the length; arithmetic works component-wise.",
+    "pitfalls": [
+      "Vectors are immutable: `v.x = 1` raises an error; build a new vector.",
+      "Multi-letter swizzles only accept x, y, z, w: `v.rgb` is nil.",
+      "`#v` is the magnitude, not the number of components (use `v.n`).",
+      "Components are 32-bit floats."
+    ]
+  },
+  {
+    "id": "increment-decrement",
+    "title": "No ++ or -- operators",
+    "syntax": "not supported: i++ | ++i | i--",
+    "example": "local i = 0\ni += 1\ni -= 1",
+    "description": "CfxLua has no increment or decrement operator. `i++` and `++i` are syntax errors. `--` always starts a comment, so `i--` compiles as the expression `i` followed by a comment.",
+    "pitfalls": [
+      "`local x = i-- 1` silently compiles as `local x = i`: the rest of the line is a comment.",
+      "`a--=1` is a comment, while `a-=1` is a compound subtraction."
+    ]
+  },
+  {
+    "id": "unsupported-syntax",
+    "title": "Syntax from other languages that does not exist",
+    "syntax": "not supported: != | ! | ?? | a ? b : c | => | continue | //= | %= | ..= | // comment | defer ... end",
+    "example": "local a, b = 1, 2\nlocal different = a ~= b\nlocal negated = not different\nlocal value = nil\nlocal fallback = value or 'default'\nlocal label = different and 'yes' or 'no'\nlocal double = function(x) return x * 2 end\nfor i = 1, 3 do\n    if i == 2 then goto continue end\n    print(i)\n    ::continue::\nend",
+    "description": "Use `~=` for not-equal, `not` for negation, `or` / `and ... or` instead of `??` and the ternary operator, `function` instead of arrow functions, `goto continue` with a `::continue::` label instead of `continue`, explicit assignments instead of `//=`, `%=`, `..=`, `--` comments instead of `//` comments, and `defer(fn)` with `<close>` instead of a defer statement.",
+    "pitfalls": [
+      "`cond and a or b` returns b when a is false or nil.",
+      "`x // comment` divides `x` by a variable named `comment`."
+    ]
+  }
+]

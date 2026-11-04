@@ -1,0 +1,161 @@
+//! Text coordinates. The IDE speaks 0-based lines and UTF-16 columns; the
+//! analysis works on UTF-8 byte offsets. [`LineIndex`] converts both ways in
+//! O(log n) per lookup, so a whole file of diagnostics stays cheap.
+
+use openidea_plugin::{Position, Range};
+
+/// Line starts of a text, for byte offset ↔ [`Position`] conversions.
+#[derive(Clone, Debug)]
+pub struct LineIndex {
+    starts: Vec<usize>,
+    len: usize,
+}
+
+impl LineIndex {
+    pub fn new(text: &str) -> Self {
+        let mut starts = vec![0];
+        starts.extend(text.bytes().enumerate().filter(|(_, b)| *b == b'\n').map(|(i, _)| i + 1));
+        Self { starts, len: text.len() }
+    }
+
+    /// 0-based line of byte `at`.
+    pub fn line_of(&self, at: usize) -> usize {
+        match self.starts.binary_search(&at.min(self.len)) {
+            Ok(line) => line,
+            Err(next) => next - 1,
+        }
+    }
+
+    pub fn line_start(&self, line: usize) -> usize {
+        self.starts.get(line).copied().unwrap_or(self.len)
+    }
+
+    /// Byte offset just past the line's last character (before its `\n`).
+    pub fn line_end(&self, text: &str, line: usize) -> usize {
+        let end = self.starts.get(line + 1).map_or(self.len, |s| s - 1);
+        if end > 0 && text.as_bytes().get(end - 1) == Some(&b'\r') { end - 1 } else { end }
+    }
+
+    pub fn lines(&self) -> usize {
+        self.starts.len()
+    }
+
+    pub fn position(&self, text: &str, at: usize) -> Position {
+        let at = floor_char_boundary(text, at.min(text.len()));
+        let line = self.line_of(at);
+        let start = self.starts[line];
+        let character = text[start..at].chars().map(|c| c.len_utf16() as u32).sum();
+        Position::new(line as u32, character)
+    }
+
+    pub fn range(&self, text: &str, start: usize, end: usize) -> Range {
+        Range::new(self.position(text, start), self.position(text, end))
+    }
+
+    /// Byte offset of `pos`, clamped to its line (and to the text).
+    pub fn offset(&self, text: &str, pos: Position) -> usize {
+        let line = pos.line as usize;
+        if line >= self.starts.len() {
+            return text.len();
+        }
+        let start = self.starts[line];
+        let end = self.line_end(text, line);
+        let mut units = 0u32;
+        for (i, ch) in text[start..end].char_indices() {
+            if units >= pos.character {
+                return start + i;
+            }
+            units += ch.len_utf16() as u32;
+        }
+        end
+    }
+}
+
+pub fn floor_char_boundary(text: &str, mut at: usize) -> usize {
+    while at > 0 && !text.is_char_boundary(at) {
+        at -= 1;
+    }
+    at
+}
+
+/// Levenshtein distance (ASCII case-insensitive), capped: anything above
+/// `max` returns `max + 1` early.
+pub fn edit_distance(a: &str, b: &str, max: usize) -> usize {
+    let a: Vec<char> = a.chars().map(|c| c.to_ascii_lowercase()).collect();
+    let b: Vec<char> = b.chars().map(|c| c.to_ascii_lowercase()).collect();
+    if a.len().abs_diff(b.len()) > max {
+        return max + 1;
+    }
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut cur = vec![0; b.len() + 1];
+    for i in 1..=a.len() {
+        cur[0] = i;
+        let mut row_min = cur[0];
+        for j in 1..=b.len() {
+            let cost = usize::from(a[i - 1] != b[j - 1]);
+            cur[j] = (prev[j] + 1).min(cur[j - 1] + 1).min(prev[j - 1] + cost);
+            row_min = row_min.min(cur[j]);
+        }
+        if row_min > max {
+            return max + 1;
+        }
+        std::mem::swap(&mut prev, &mut cur);
+    }
+    prev[b.len()]
+}
+
+/// Escapes text for HTML.
+pub fn html_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 8);
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// Normalises a path to forward slashes (the IDE gives native paths).
+pub fn slash(path: &str) -> String {
+    path.replace('\\', "/")
+}
+
+/// Directory part of a slash path (`a/b/c.lua` → `a/b`).
+pub fn parent(path: &str) -> &str {
+    path.rfind('/').map_or("", |i| &path[..i])
+}
+
+/// File name of a slash path.
+pub fn file_name(path: &str) -> &str {
+    path.rfind('/').map_or(path, |i| &path[i + 1..])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn positions_round_trip_with_utf16() {
+        let text = "ab\r\n😀x\nlast";
+        let idx = LineIndex::new(text);
+        for at in [0, 1, 2, 4, 8, 9, 10, text.len()] {
+            assert_eq!(idx.offset(text, idx.position(text, at)), at, "{at}");
+        }
+        assert_eq!(idx.position(text, 8), Position::new(1, 2));
+        assert_eq!(idx.offset(text, Position::new(0, 99)), 2, "clamped before \\r\\n");
+        assert_eq!(idx.offset(text, Position::new(9, 0)), text.len());
+    }
+
+    #[test]
+    fn distances() {
+        assert_eq!(edit_distance("job", "jbo", 3), 2);
+        assert_eq!(edit_distance("Job", "job", 3), 0);
+        assert_eq!(edit_distance("weather", "wether", 2), 1);
+        assert_eq!(edit_distance("a", "abcdef", 2), 3);
+    }
+}

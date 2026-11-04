@@ -1,0 +1,595 @@
+[
+  {
+    "name": "onResourceStart",
+    "side": "shared",
+    "game": "common",
+    "params": [
+      { "name": "resourceName", "type": "string", "description": "Name of the resource that has just started." }
+    ],
+    "description": "Raised immediately after a resource has started, on the server and on each client running it. Raised for every resource, so compare `resourceName` with `GetCurrentResourceName()` to react to your own start.",
+    "cancelable": false,
+    "docUrl": "https://docs.fivem.net/docs/scripting-reference/events/list/onResourceStart/"
+  },
+  {
+    "name": "onResourceStarting",
+    "side": "shared",
+    "game": "common",
+    "params": [
+      { "name": "resourceName", "type": "string", "description": "Name of the resource that is about to start." }
+    ],
+    "description": "Raised when a resource is trying to start. Calling `CancelEvent()` prevents the resource from starting.",
+    "cancelable": true,
+    "docUrl": "https://docs.fivem.net/docs/scripting-reference/events/list/onResourceStarting/"
+  },
+  {
+    "name": "onResourceStop",
+    "side": "shared",
+    "game": "common",
+    "params": [
+      { "name": "resourceName", "type": "string", "description": "Name of the resource that is stopping." }
+    ],
+    "description": "Raised immediately when a resource is stopping, on the server and on each client running it. Use it to clean up what your resource created (entities, blips, NUI focus).",
+    "cancelable": false,
+    "docUrl": "https://docs.fivem.net/docs/scripting-reference/events/list/onResourceStop/"
+  },
+  {
+    "name": "onClientResourceStart",
+    "side": "client",
+    "game": "common",
+    "params": [
+      { "name": "resourceName", "type": "string", "description": "Name of the resource that has started." }
+    ],
+    "description": "Queued on the client after a resource has started there.",
+    "cancelable": false,
+    "docUrl": "https://docs.fivem.net/docs/scripting-reference/events/list/onClientResourceStart/"
+  },
+  {
+    "name": "onClientResourceStop",
+    "side": "client",
+    "game": "common",
+    "params": [
+      { "name": "resourceName", "type": "string", "description": "Name of the resource that has stopped." }
+    ],
+    "description": "Raised on the client after a resource has stopped there.",
+    "cancelable": false,
+    "docUrl": "https://docs.fivem.net/docs/scripting-reference/events/list/onClientResourceStop/"
+  },
+  {
+    "name": "onServerResourceStart",
+    "side": "server",
+    "game": "common",
+    "params": [
+      { "name": "resourceName", "type": "string", "description": "Name of the resource that has started." }
+    ],
+    "description": "Queued on the server after a resource has started.",
+    "cancelable": false,
+    "docUrl": "https://docs.fivem.net/docs/scripting-reference/events/server-events/"
+  },
+  {
+    "name": "onServerResourceStop",
+    "side": "server",
+    "game": "common",
+    "params": [
+      { "name": "resourceName", "type": "string", "description": "Name of the resource that has stopped." }
+    ],
+    "description": "Raised on the server after a resource has stopped.",
+    "cancelable": false,
+    "docUrl": "https://docs.fivem.net/docs/scripting-reference/events/server-events/"
+  },
+  {
+    "name": "onResourceListRefresh",
+    "side": "server",
+    "game": "common",
+    "params": [],
+    "description": "Raised on the server when the `refresh` console command has finished rescanning the resources.",
+    "cancelable": false,
+    "docUrl": "https://docs.fivem.net/docs/scripting-reference/events/server-events/"
+  },
+  {
+    "name": "playerConnecting",
+    "side": "server",
+    "game": "common",
+    "params": [
+      { "name": "playerName", "type": "string", "description": "Display name of the connecting player." },
+      { "name": "setKickReason", "type": "function", "description": "fun(reason: string). Sets the message shown to the player when the event is canceled." },
+      { "name": "deferrals", "type": "table", "description": "Deferral control object with `defer()`, `update(message)`, `presentCard(card, cb)`, `done(failureReason)` and `handover(data)`. Wait at least one tick after `defer()` before calling the others." }
+    ],
+    "description": "Raised when a player tries to connect. `source` is a temporary id usable with a limited set of functions. Cancel the event (before yielding) to refuse the player, or use deferrals to accept or refuse later, for example after a database query.",
+    "cancelable": true,
+    "docUrl": "https://docs.fivem.net/docs/scripting-reference/events/list/playerConnecting/"
+  },
+  {
+    "name": "playerJoining",
+    "side": "server",
+    "game": "common",
+    "params": [
+      { "name": "oldID", "type": "string", "description": "The temporary id the player had during `playerConnecting`." }
+    ],
+    "description": "Raised when a connecting player receives their final server id, available as `source`.",
+    "cancelable": false,
+    "docUrl": "https://docs.fivem.net/docs/scripting-reference/events/server-events/"
+  },
+  {
+    "name": "playerDropped",
+    "side": "server",
+    "game": "common",
+    "params": [
+      { "name": "reason", "type": "string", "description": "Why the player disconnected." },
+      { "name": "resourceName", "type": "string", "description": "The resource the drop was dispatched from." },
+      { "name": "clientDropReason", "type": "integer", "description": "Internal drop reason code (see ClientDropReasons.h in the FiveM sources)." }
+    ],
+    "description": "Raised when a player leaves the server. `source` is the player who left; clean up per-player data here.",
+    "cancelable": false,
+    "docUrl": "https://docs.fivem.net/docs/scripting-reference/events/list/playerDropped/"
+  },
+  {
+    "name": "playerEnteredScope",
+    "side": "server",
+    "game": "common",
+    "params": [
+      { "name": "data", "type": "table", "description": "Table with `player` (the player entering the scope) and `for` (the player whose scope is entered), both server ids as strings. Read `for` as `data['for']` since `for` is a Lua keyword." }
+    ],
+    "description": "OneSync: raised when a player enters another player's scope (becomes relevant to them).",
+    "cancelable": false,
+    "docUrl": "https://docs.fivem.net/docs/scripting-reference/events/server-events/"
+  },
+  {
+    "name": "playerLeftScope",
+    "side": "server",
+    "game": "common",
+    "params": [
+      { "name": "data", "type": "table", "description": "Table with `player` (the player leaving the scope) and `for` (the player whose scope is left), both server ids as strings. Read `for` as `data['for']`." }
+    ],
+    "description": "OneSync: raised when a player leaves another player's scope.",
+    "cancelable": false,
+    "docUrl": "https://docs.fivem.net/docs/scripting-reference/events/server-events/"
+  },
+  {
+    "name": "onPlayerBucketChange",
+    "side": "server",
+    "game": "common",
+    "params": [
+      { "name": "player", "type": "string", "description": "Server id of the player that changed routing bucket." },
+      { "name": "bucket", "type": "integer", "description": "The new routing bucket." },
+      { "name": "oldBucket", "type": "integer", "description": "The previous routing bucket." }
+    ],
+    "description": "Raised when a player is moved to another routing bucket.",
+    "cancelable": false,
+    "docUrl": "https://docs.fivem.net/docs/scripting-reference/events/list/onPlayerBucketChange/"
+  },
+  {
+    "name": "onEntityBucketChange",
+    "side": "server",
+    "game": "common",
+    "params": [
+      { "name": "entity", "type": "integer", "description": "Handle of the entity that changed routing bucket." },
+      { "name": "bucket", "type": "integer", "description": "The new routing bucket." },
+      { "name": "oldBucket", "type": "integer", "description": "The previous routing bucket." }
+    ],
+    "description": "Raised when an entity is moved to another routing bucket.",
+    "cancelable": false,
+    "docUrl": "https://docs.fivem.net/docs/scripting-reference/events/list/onEntityBucketChange/"
+  },
+  {
+    "name": "entityCreating",
+    "side": "server",
+    "game": "common",
+    "params": [
+      { "name": "entity", "type": "integer", "description": "Server handle of the entity being created." }
+    ],
+    "description": "OneSync: raised while a networked entity is being created. Calling `CancelEvent()` deletes the entity immediately, which is useful to block unwanted models.",
+    "cancelable": true,
+    "docUrl": "https://docs.fivem.net/docs/scripting-reference/events/server-events/"
+  },
+  {
+    "name": "entityCreated",
+    "side": "server",
+    "game": "common",
+    "params": [
+      { "name": "entity", "type": "integer", "description": "Server handle of the created entity." }
+    ],
+    "description": "OneSync: queued after a networked entity has been created and accepted.",
+    "cancelable": false,
+    "docUrl": "https://docs.fivem.net/docs/scripting-reference/events/server-events/"
+  },
+  {
+    "name": "entityRemoved",
+    "side": "server",
+    "game": "common",
+    "params": [
+      { "name": "entity", "type": "integer", "description": "Server handle of the entity that was removed." }
+    ],
+    "description": "OneSync: raised when a networked entity is removed on the server.",
+    "cancelable": false,
+    "docUrl": "https://docs.fivem.net/docs/scripting-reference/events/server-events/"
+  },
+  {
+    "name": "weaponDamageEvent",
+    "side": "server",
+    "game": "common",
+    "params": [
+      { "name": "sender", "type": "string", "description": "Server id of the player that sent the event, as a string." },
+      { "name": "data", "type": "table", "description": "Damage data, including `damageType`, `weaponType` (weapon hash), `weaponDamage`, `overrideDefaultDamage`, `hitGlobalId` (network id of the victim), `hitGlobalIds`, `willKill`, `silenced`, `damageTime`, `damageFlags`, `hitComponent`, `localPosX/Y/Z`, `parentGlobalId`. The exact field set differs between FiveM and RedM." }
+    ],
+    "description": "OneSync: raised when a client wants to apply damage to an entity owned by someone else. Canceling it stops the damage from being forwarded.",
+    "cancelable": true,
+    "docUrl": "https://docs.fivem.net/docs/scripting-reference/events/server-events/"
+  },
+  {
+    "name": "explosionEvent",
+    "side": "server",
+    "game": "common",
+    "params": [
+      { "name": "sender", "type": "string", "description": "Server id of the player that sent the event, as a string." },
+      { "name": "data", "type": "table", "description": "Explosion data, including `explosionType`, `posX`, `posY`, `posZ`, `ownerNetId` (reported by the client, can be spoofed), `damageScale`, `cameraShake`, `isAudible`, `isInvisible`. Additional fields differ between FiveM and RedM." }
+    ],
+    "description": "OneSync: raised when a client reports an explosion. Canceling it stops the explosion from being forwarded to other players.",
+    "cancelable": true,
+    "docUrl": "https://docs.fivem.net/docs/cookbook/2019/08/19/onesync-intercepting-game-events-such-as-explosions/"
+  },
+  {
+    "name": "startProjectileEvent",
+    "side": "server",
+    "game": "common",
+    "params": [
+      { "name": "sender", "type": "string", "description": "Server id of the player that sent the event, as a string." },
+      { "name": "data", "type": "table", "description": "Projectile data, including `ownerId`, `projectileHash`, `weaponHash`, `initialPositionX/Y/Z`, `firePositionX/Y/Z`, `targetEntity`, `effectGroup`, `throwTaskSequence`. Additional fields differ between FiveM and RedM." }
+    ],
+    "description": "OneSync: raised when a client creates a projectile. Canceling it stops the event from being forwarded.",
+    "cancelable": true,
+    "docUrl": "https://docs.fivem.net/docs/scripting-reference/events/server-events/"
+  },
+  {
+    "name": "clearPedTasksEvent",
+    "side": "server",
+    "game": "common",
+    "params": [
+      { "name": "sender", "type": "string", "description": "Server id of the player that sent the event, as a string." },
+      { "name": "data", "type": "table", "description": "Table with `pedId` (network id of the ped) and `immediately` (whether the tasks are cleared immediately)." }
+    ],
+    "description": "OneSync: raised when a client clears the tasks of a ped it does not own. Canceling it stops the request from being forwarded.",
+    "cancelable": true,
+    "docUrl": "https://github.com/citizenfx/fivem/blob/master/code/components/citizen-server-impl/src/state/ServerGameState.cpp"
+  },
+  {
+    "name": "respawnPlayerPedEvent",
+    "side": "server",
+    "game": "common",
+    "params": [
+      { "name": "sender", "type": "string", "description": "Server id of the player that respawned, as a string." },
+      { "name": "data", "type": "table", "description": "Respawn data, including `posX`, `posY`, `posZ`; the other fields are not named." }
+    ],
+    "description": "OneSync: raised when a player respawns. Canceling it stops the event from being forwarded.",
+    "cancelable": true,
+    "docUrl": "https://docs.fivem.net/docs/scripting-reference/events/list/respawnPlayerPedEvent/"
+  },
+  {
+    "name": "ptFxEvent",
+    "side": "server",
+    "game": "gta5",
+    "params": [
+      { "name": "sender", "type": "string", "description": "Server id of the player that sent the event, as a string." },
+      { "name": "data", "type": "table", "description": "Particle effect data, including `effectHash`, `assetHash`, `posX/Y/Z`, `offsetX/Y/Z`, `rotX/Y/Z`, `scale`, `axisBitset`, `isOnEntity`, `entityNetId`." }
+    ],
+    "description": "OneSync: raised when a client creates a networked particle effect. Canceling it stops the effect from being forwarded.",
+    "cancelable": true,
+    "docUrl": "https://docs.fivem.net/docs/scripting-reference/events/server-events/"
+  },
+  {
+    "name": "giveWeaponEvent",
+    "side": "server",
+    "game": "gta5",
+    "params": [
+      { "name": "sender", "type": "string", "description": "Server id of the player that sent the event, as a string." },
+      { "name": "data", "type": "table", "description": "Table with `pedId` (network id of the ped), `weaponType` (weapon hash), `ammo`, `givenAsPickup` and `unk1`." }
+    ],
+    "description": "OneSync: raised when a client gives a weapon to a ped owned by another player. Canceling it stops the event from being forwarded.",
+    "cancelable": true,
+    "docUrl": "https://github.com/citizenfx/fivem/blob/master/code/components/citizen-server-impl/src/state/ServerGameState.cpp"
+  },
+  {
+    "name": "removeWeaponEvent",
+    "side": "server",
+    "game": "gta5",
+    "params": [
+      { "name": "sender", "type": "string", "description": "Server id of the player that sent the event, as a string." },
+      { "name": "data", "type": "table", "description": "Table with `pedId` (network id of the ped) and `weaponType` (weapon hash)." }
+    ],
+    "description": "OneSync: raised when a client removes a weapon from a ped owned by another player. Canceling it stops the event from being forwarded.",
+    "cancelable": true,
+    "docUrl": "https://github.com/citizenfx/fivem/blob/master/code/components/citizen-server-impl/src/state/ServerGameState.cpp"
+  },
+  {
+    "name": "removeAllWeaponsEvent",
+    "side": "server",
+    "game": "gta5",
+    "params": [
+      { "name": "sender", "type": "string", "description": "Server id of the player that sent the event, as a string." },
+      { "name": "data", "type": "table", "description": "Table with `pedId` (network id of the ped)." }
+    ],
+    "description": "OneSync: raised when a client removes all weapons from a ped owned by another player. Canceling it stops the event from being forwarded.",
+    "cancelable": true,
+    "docUrl": "https://docs.fivem.net/docs/scripting-reference/events/server-events/"
+  },
+  {
+    "name": "fireEvent",
+    "side": "server",
+    "game": "gta5",
+    "params": [
+      { "name": "sender", "type": "string", "description": "Server id of the player that sent the event, as a string." },
+      { "name": "data", "type": "table", "description": "An array whose first element is the list of fires. Each fire has fields such as `posX`, `posY`, `posZ`, `isEntity`, `entityGlobalId`, `maxChildren`, `weaponHash` and `fireId`." }
+    ],
+    "description": "OneSync: raised when a client starts one or more fires. Canceling it stops the event from being forwarded.",
+    "cancelable": true,
+    "docUrl": "https://github.com/citizenfx/fivem/blob/master/code/components/citizen-server-impl/src/state/ServerGameState.cpp"
+  },
+  {
+    "name": "vehicleComponentControlEvent",
+    "side": "server",
+    "game": "gta5",
+    "params": [
+      { "name": "sender", "type": "string", "description": "Server id of the player that sent the event, as a string." },
+      { "name": "data", "type": "table", "description": "Table with `vehicleGlobalId`, `pedGlobalId`, `componentIndex`, `request`, `componentIsSeat` and `pedInSeat`." }
+    ],
+    "description": "OneSync: raised when a ped requests control of a vehicle component (a seat, for example). Canceling it stops the event from being forwarded.",
+    "cancelable": true,
+    "docUrl": "https://docs.fivem.net/docs/scripting-reference/events/list/vehicleComponentControlEvent/"
+  },
+  {
+    "name": "givePedScriptedTaskEvent",
+    "side": "server",
+    "game": "gta5",
+    "params": [
+      { "name": "sender", "type": "string", "description": "Server id of the player that sent the event, as a string." },
+      { "name": "data", "type": "table", "description": "Table with `entityNetId` (network id of the ped) and `taskId`." }
+    ],
+    "description": "OneSync: raised when a client gives a scripted task to a ped owned by another player. Canceling it stops the event from being forwarded.",
+    "cancelable": true,
+    "docUrl": "https://github.com/citizenfx/fivem/blob/master/code/components/citizen-server-impl/src/state/ServerGameState.cpp"
+  },
+  {
+    "name": "requestNetworkSyncedSceneEvent",
+    "side": "server",
+    "game": "gta5",
+    "params": [
+      { "name": "sender", "type": "string", "description": "Server id of the player that sent the event, as a string." },
+      { "name": "data", "type": "table", "description": "Table with `sceneId`." }
+    ],
+    "description": "OneSync: raised when a client requests a networked synchronized scene. Canceling it stops the event from being forwarded.",
+    "cancelable": true,
+    "docUrl": "https://github.com/citizenfx/fivem/blob/master/code/components/citizen-server-impl/src/state/ServerGameState.cpp"
+  },
+  {
+    "name": "startNetworkSyncedSceneEvent",
+    "side": "server",
+    "game": "gta5",
+    "params": [
+      { "name": "sender", "type": "string", "description": "Server id of the player that sent the event, as a string." },
+      { "name": "data", "type": "table", "description": "Scene data, including `sceneId`, `startTime`, `scenePosX/Y/Z`, `sceneRotX/Y/Z/W`, `rate`, `isLooped`, `holdLastFrame`, `animDictHash`, `pedEntities`, `nonPedEntities`, `mapEntities`." }
+    ],
+    "description": "OneSync: raised when a client starts a networked synchronized scene. Canceling it stops the event from being forwarded.",
+    "cancelable": true,
+    "docUrl": "https://github.com/citizenfx/fivem/blob/master/code/components/citizen-server-impl/src/state/ServerGameState.cpp"
+  },
+  {
+    "name": "updateNetworkSyncedSceneEvent",
+    "side": "server",
+    "game": "gta5",
+    "params": [
+      { "name": "sender", "type": "string", "description": "Server id of the player that sent the event, as a string." },
+      { "name": "data", "type": "table", "description": "Table with `sceneId` and `rate`." }
+    ],
+    "description": "OneSync: raised when a client updates the rate of a networked synchronized scene. Canceling it stops the event from being forwarded.",
+    "cancelable": true,
+    "docUrl": "https://github.com/citizenfx/fivem/blob/master/code/components/citizen-server-impl/src/state/ServerGameState.cpp"
+  },
+  {
+    "name": "stopNetworkSyncedSceneEvent",
+    "side": "server",
+    "game": "gta5",
+    "params": [
+      { "name": "sender", "type": "string", "description": "Server id of the player that sent the event, as a string." },
+      { "name": "data", "type": "table", "description": "Table with `sceneId`." }
+    ],
+    "description": "OneSync: raised when a client stops a networked synchronized scene. Canceling it stops the event from being forwarded.",
+    "cancelable": true,
+    "docUrl": "https://github.com/citizenfx/fivem/blob/master/code/components/citizen-server-impl/src/state/ServerGameState.cpp"
+  },
+  {
+    "name": "lightningEvent",
+    "side": "server",
+    "game": "rdr3",
+    "params": [
+      { "name": "sender", "type": "string", "description": "Server id of the player that sent the event, as a string." },
+      { "name": "data", "type": "table", "description": "Lightning data; its fields are not named yet." }
+    ],
+    "description": "OneSync (RedM): raised when a client triggers a lightning strike. Canceling it stops the event from being forwarded.",
+    "cancelable": true,
+    "docUrl": "https://github.com/citizenfx/fivem/blob/master/code/components/citizen-server-impl/src/state/ServerGameState.cpp"
+  },
+  {
+    "name": "endLootEvent",
+    "side": "server",
+    "game": "rdr3",
+    "params": [
+      { "name": "sender", "type": "string", "description": "Server id of the player that sent the event, as a string." },
+      { "name": "data", "type": "table", "description": "Table with `targetId` and unnamed fields." }
+    ],
+    "description": "OneSync (RedM): raised when a client finishes looting. Canceling it stops the event from being forwarded.",
+    "cancelable": true,
+    "docUrl": "https://github.com/citizenfx/fivem/blob/master/code/components/citizen-server-impl/src/state/ServerGameState.cpp"
+  },
+  {
+    "name": "sendCarriableUpdateCarryStateEvent",
+    "side": "server",
+    "game": "rdr3",
+    "params": [
+      { "name": "sender", "type": "string", "description": "Server id of the player that sent the event, as a string." },
+      { "name": "data", "type": "table", "description": "Table with `carriableId`, `parentId` and `carrierId`." }
+    ],
+    "description": "OneSync (RedM): raised when the carry state of a carriable entity changes. Canceling it stops the event from being forwarded.",
+    "cancelable": true,
+    "docUrl": "https://github.com/citizenfx/fivem/blob/master/code/components/citizen-server-impl/src/state/ServerGameState.cpp"
+  },
+  {
+    "name": "carriableVehicleStowStartEvent",
+    "side": "server",
+    "game": "rdr3",
+    "params": [
+      { "name": "sender", "type": "string", "description": "Server id of the player that sent the event, as a string." },
+      { "name": "data", "type": "table", "description": "Table with `carrierId`, `carriableId` and `vehicleId`." }
+    ],
+    "description": "OneSync (RedM): raised when stowing a carriable entity on a vehicle starts. Canceling it stops the event from being forwarded.",
+    "cancelable": true,
+    "docUrl": "https://github.com/citizenfx/fivem/blob/master/code/components/citizen-server-impl/src/state/ServerGameState.cpp"
+  },
+  {
+    "name": "carriableVehicleStowCompleteEvent",
+    "side": "server",
+    "game": "rdr3",
+    "params": [
+      { "name": "sender", "type": "string", "description": "Server id of the player that sent the event, as a string." },
+      { "name": "data", "type": "table", "description": "Table with `carrierId`, `vehicleId`, `carriableId`, `posX`, `posY`, `posZ` and unnamed fields." }
+    ],
+    "description": "OneSync (RedM): raised when stowing a carriable entity on a vehicle completes. Canceling it stops the event from being forwarded.",
+    "cancelable": true,
+    "docUrl": "https://github.com/citizenfx/fivem/blob/master/code/components/citizen-server-impl/src/state/ServerGameState.cpp"
+  },
+  {
+    "name": "pickupCarriableEvent",
+    "side": "server",
+    "game": "rdr3",
+    "params": [
+      { "name": "sender", "type": "string", "description": "Server id of the player that sent the event, as a string." },
+      { "name": "data", "type": "table", "description": "Table with `carrierId`, `carriableId`, `parentId` and an unnamed field." }
+    ],
+    "description": "OneSync (RedM): raised when a carriable entity is picked up. Canceling it stops the event from being forwarded.",
+    "cancelable": true,
+    "docUrl": "https://github.com/citizenfx/fivem/blob/master/code/components/citizen-server-impl/src/state/ServerGameState.cpp"
+  },
+  {
+    "name": "placeCarriableOntoParentEvent",
+    "side": "server",
+    "game": "rdr3",
+    "params": [
+      { "name": "sender", "type": "string", "description": "Server id of the player that sent the event, as a string." },
+      { "name": "data", "type": "table", "description": "Table with `carrierId`, `carriableId`, `parentId` and unnamed fields." }
+    ],
+    "description": "OneSync (RedM): raised when a carriable entity is placed onto a parent (a horse or a vehicle, for example). Canceling it stops the event from being forwarded.",
+    "cancelable": true,
+    "docUrl": "https://github.com/citizenfx/fivem/blob/master/code/components/citizen-server-impl/src/state/ServerGameState.cpp"
+  },
+  {
+    "name": "rconCommand",
+    "side": "server",
+    "game": "common",
+    "params": [
+      { "name": "command", "type": "string", "description": "Name of the command executed over RCON." },
+      { "name": "args", "type": "table", "description": "List of the arguments passed to the command." }
+    ],
+    "description": "Deprecated: raised for commands executed over RCON. Use `RegisterCommand` with the `restricted` flag instead.",
+    "cancelable": false,
+    "docUrl": "https://docs.fivem.net/docs/scripting-reference/events/list/rconCommand/"
+  },
+  {
+    "name": "chatMessage",
+    "side": "server",
+    "game": "common",
+    "params": [
+      { "name": "source", "type": "integer", "description": "Server id of the player who sent the message (passed as a regular argument)." },
+      { "name": "author", "type": "string", "description": "Name shown as the message author." },
+      { "name": "text", "type": "string", "description": "The message text." }
+    ],
+    "description": "Provided by the default `chat` resource: raised on the server for each chat message before it is broadcast. Canceling it prevents the broadcast.",
+    "cancelable": true,
+    "docUrl": "https://docs.fivem.net/docs/resources/chat/events/chatMessage/"
+  },
+  {
+    "name": "chat:addSuggestion",
+    "side": "client",
+    "game": "common",
+    "params": [
+      { "name": "name", "type": "string", "description": "Command name including the leading slash, for example `/heal`." },
+      { "name": "help", "type": "string", "description": "Help text shown for the command." },
+      { "name": "params", "type": "table", "description": "Optional list of parameters, each a table with `name` and `help`." }
+    ],
+    "description": "Provided by the default `chat` resource: trigger it on the client with `TriggerEvent` to add a command suggestion to the chat box.",
+    "cancelable": false,
+    "docUrl": "https://docs.fivem.net/docs/resources/chat/events/chat-addSuggestion/"
+  },
+  {
+    "name": "chat:removeSuggestion",
+    "side": "client",
+    "game": "common",
+    "params": [
+      { "name": "name", "type": "string", "description": "Command name including the leading slash." }
+    ],
+    "description": "Provided by the default `chat` resource: removes a command suggestion previously added with `chat:addSuggestion`.",
+    "cancelable": false,
+    "docUrl": "https://docs.fivem.net/docs/resources/chat/events/chat-removeSuggestion/"
+  },
+  {
+    "name": "chat:addMessage",
+    "side": "client",
+    "game": "common",
+    "params": [
+      { "name": "message", "type": "table", "description": "Message table, for example `{ color = { r, g, b }, args = { 'Author', 'Text' } }`." }
+    ],
+    "description": "Provided by the default `chat` resource: adds a message to the chat box. Trigger it locally with `TriggerEvent`, or from the server with `TriggerClientEvent` (target `-1` for everyone).",
+    "cancelable": false,
+    "docUrl": "https://docs.fivem.net/docs/resources/chat/events/chat-addMessage/"
+  },
+  {
+    "name": "gameEventTriggered",
+    "side": "client",
+    "game": "gta5",
+    "params": [
+      { "name": "name", "type": "string", "description": "Name of the game event, for example `CEventNetworkEntityDamage`." },
+      { "name": "args", "type": "integer[]", "description": "Event-specific integer data." }
+    ],
+    "description": "Raised on the client after low-level game events, such as network entity damage. Not raised in RedM.",
+    "cancelable": false,
+    "docUrl": "https://docs.fivem.net/docs/scripting-reference/events/list/gameEventTriggered/"
+  },
+  {
+    "name": "entityDamaged",
+    "side": "client",
+    "game": "gta5",
+    "params": [
+      { "name": "victim", "type": "integer", "description": "The damaged entity, or 0." },
+      { "name": "culprit", "type": "integer", "description": "The entity that caused the damage, or 0." },
+      { "name": "weapon", "type": "integer", "description": "Hash of the weapon that inflicted the damage." },
+      { "name": "baseDamage", "type": "number", "description": "Base damage before modifiers." }
+    ],
+    "description": "Raised on the client when an entity is damaged locally. Not raised in RedM.",
+    "cancelable": false,
+    "docUrl": "https://docs.fivem.net/docs/scripting-reference/events/client-events/"
+  },
+  {
+    "name": "populationPedCreating",
+    "side": "client",
+    "game": "gta5",
+    "params": [
+      { "name": "x", "type": "number", "description": "X position where the ped will spawn." },
+      { "name": "y", "type": "number", "description": "Y position." },
+      { "name": "z", "type": "number", "description": "Z position." },
+      { "name": "model", "type": "integer", "description": "Hash of the model the ped will use." },
+      { "name": "setters", "type": "table", "description": "Table with `setModel(model)` (hash or name) and `setPosition(x, y, z)` to change the ped before it is created." }
+    ],
+    "description": "Raised on the client before the population system creates an ambient ped. Change it with the setters, or call `CancelEvent()` to skip it.",
+    "cancelable": true,
+    "docUrl": "https://docs.fivem.net/docs/scripting-reference/events/list/populationPedCreating/"
+  },
+  {
+    "name": "__cfx_nui:*",
+    "side": "client",
+    "game": "common",
+    "params": [
+      { "name": "data", "type": "table", "description": "Decoded JSON body posted by the NUI page." },
+      { "name": "cb", "type": "function", "description": "Callback that sends the response back to the page. Always call it." }
+    ],
+    "description": "Internal event pattern used by `RegisterNUICallback(name, fn)`: a POST from the resource's NUI page to `https://<resource>/<name>` raises `__cfx_nui:<name>`. Register NUI callbacks with `RegisterNUICallback` rather than handling this event directly.",
+    "cancelable": false,
+    "docUrl": "https://docs.fivem.net/docs/scripting-manual/nui-development/nui-callbacks/"
+  }
+]

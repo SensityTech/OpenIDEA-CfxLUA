@@ -1,0 +1,72 @@
+-- Copyright (c) 2026. SensityTech
+--
+-- Licensed under the Apache License, Version 2.0 (the "License"); you may not
+-- use this file except in compliance with the License. You may obtain a copy of
+-- the License at
+--
+-- http://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing, software
+-- distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+-- WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+-- License for the specific language governing permissions and limitations under
+-- the License.
+
+-- Cfx.re Lua runtime, server only: HTTP requests, from `scheduler.lua` (built on
+-- the PerformHttpRequestInternalEx native).
+
+---
+--- Options of `PerformHttpRequest` and `PerformHttpRequestAwait`.
+---@class HttpRequestOptions
+---@field followLocation boolean @Follow HTTP redirects (default `true`).
+local HttpRequestOptionsType = {}
+
+---
+--- Performs an asynchronous HTTP request and calls `callback` with the result.
+---
+--- `callback` receives the HTTP status code (`0` when the request could not be
+--- made), the response body (`nil` on failure), the response headers and an
+--- error description (`nil` on success).
+---
+--- ```lua
+--- PerformHttpRequest('https://api.example.com/data', function(status, body, headers, errorData)
+---     if status == 200 then
+---         local data = json.decode(body)
+---     end
+--- end, 'POST', json.encode({ id = 1 }), { ['Content-Type'] = 'application/json' })
+--- ```
+---
+--- [Documentation](https://docs.fivem.net/docs/scripting-reference/runtimes/lua/functions/PerformHttpRequest/)
+---@overload fun(url:string, callback:fun(statusCode:integer, body:string|nil, headers:table<string, string>, errorData:string|nil))
+---@overload fun(url:string, callback:fun(statusCode:integer, body:string|nil, headers:table<string, string>, errorData:string|nil), method:string)
+---@overload fun(url:string, callback:fun(statusCode:integer, body:string|nil, headers:table<string, string>, errorData:string|nil), method:string, data:string)
+---@overload fun(url:string, callback:fun(statusCode:integer, body:string|nil, headers:table<string, string>, errorData:string|nil), method:string, data:string, headers:table<string, string>)
+---@param url string @The request URL.
+---@param callback fun(statusCode:integer, body:string|nil, headers:table<string, string>, errorData:string|nil) @Called with the response.
+---@param method string @The HTTP method (default `'GET'`).
+---@param data string @The request body (default `''`).
+---@param headers table<string, string> @The request headers.
+---@param options HttpRequestOptions|table @Request options.
+function PerformHttpRequest(url, callback, method, data, headers, options) end
+
+---
+--- Performs an HTTP request and waits for the response. Must run inside a
+--- scheduler thread (the main chunk of a resource script, `CreateThread`, an
+--- event handler, ...).
+---
+--- ```lua
+--- local status, body, headers, errorData = PerformHttpRequestAwait('https://api.example.com/data')
+--- ```
+---
+--- [Documentation](https://docs.fivem.net/docs/scripting-reference/runtimes/lua/functions/PerformHttpRequestAwait/)
+---@overload fun(url:string):integer, string|nil, table<string, string>, string|nil
+---@overload fun(url:string, method:string):integer, string|nil, table<string, string>, string|nil
+---@overload fun(url:string, method:string, data:string):integer, string|nil, table<string, string>, string|nil
+---@overload fun(url:string, method:string, data:string, headers:table<string, string>):integer, string|nil, table<string, string>, string|nil
+---@param url string @The request URL.
+---@param method string @The HTTP method (default `'GET'`).
+---@param data string @The request body (default `''`).
+---@param headers table<string, string> @The request headers.
+---@param options HttpRequestOptions|table @Request options.
+---@return integer, string|nil, table<string, string>, string|nil @The status code, the response body, the response headers and the error description.
+function PerformHttpRequestAwait(url, method, data, headers, options) end

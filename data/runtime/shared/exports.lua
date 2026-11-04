@@ -1,0 +1,61 @@
+-- Copyright (c) 2026. SensityTech
+--
+-- Licensed under the Apache License, Version 2.0 (the "License"); you may not
+-- use this file except in compliance with the License. You may obtain a copy of
+-- the License at
+--
+-- http://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing, software
+-- distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+-- WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+-- License for the specific language governing permissions and limitations under
+-- the License.
+
+-- Cfx.re Lua runtime (client and server): the global `exports` object, from
+-- `scheduler.lua`. The exports of the individual resources are not described
+-- here.
+
+---
+--- Type of the global `exports` object: index it with a resource name to get
+--- the exports of that resource, and call it to define an export of the
+--- current resource. Every export is called with a colon:
+--- `exports.myresource:SayHello('world')`.
+---
+--- [Documentation](https://docs.fivem.net/docs/scripting-manual/runtimes/lua/#using-exports)
+---@class CfxExports
+local CfxExportsType = {}
+
+---
+--- The global `exports` object, used to call functions exported by other
+--- resources and to define the exports of the current resource.
+---
+--- **Calling an export.** Index `exports` with the resource name, then call the
+--- export with a colon:
+---
+--- ```lua
+--- local core = exports['qb-core']:GetCoreObject()
+--- exports.myresource:SayHello('world')
+--- ```
+---
+--- The colon matters: the export function receives the resource table as its
+--- first argument, so `exports.myresource.SayHello('world')` silently drops
+--- `'world'`. Calling an export that does not exist raises
+--- `No such export ... in resource ...`, and errors raised inside the export
+--- are re-raised in the caller.
+---
+--- **Defining an export.** Call `exports` with the export name and the
+--- function. Exports can also be declared in `fxmanifest.lua` with `export`
+--- (client) or `server_export` (server); those export global functions.
+---
+--- ```lua
+--- exports('SayHello', function(name)
+---     print('Hello, ' .. tostring(name) .. '!')
+--- end)
+--- ```
+---
+--- Assigning fields (`exports.x = value`) raises an error.
+---
+--- [Documentation](https://docs.fivem.net/docs/scripting-manual/runtimes/lua/#using-exports)
+---@type CfxExports|fun(exportName:string, exportFunction:function)
+exports = nil

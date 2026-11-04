@@ -1,0 +1,33 @@
+-- Copyright (c) 2026. SensityTech
+--
+-- Licensed under the Apache License, Version 2.0 (the "License"); you may not
+-- use this file except in compliance with the License. You may obtain a copy of
+-- the License at
+--
+-- http://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing, software
+-- distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+-- WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+-- License for the specific language governing permissions and limitations under
+-- the License.
+
+-- Cfx.re Lua runtime, client only: the local player wrapper, from
+-- `scheduler.lua`. `StateBag` and `CfxPlayer` are declared in
+-- `shared/statebags.lua`.
+
+---
+--- The local player, equivalent to `Player(-1)`. Use `LocalPlayer.state` to
+--- read the local player state bag; writes from the client are local only
+--- unless made with `LocalPlayer.state:set(key, value, true)` and allowed by
+--- the server.
+---
+--- ```lua
+--- if LocalPlayer.state.isLoggedIn then
+---     print('logged in')
+--- end
+--- ```
+---
+--- [Documentation](https://docs.fivem.net/docs/scripting-manual/networking/state-bags/)
+---@type CfxPlayer
+LocalPlayer = nil
