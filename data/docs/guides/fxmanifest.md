@@ -138,7 +138,7 @@ A file from another resource can be included with `@resourceName/path`:
 shared_script '@my_library/init.lua'
 ```
 
-Sensity DevKit uses these entries to decide whether a file is client, server or shared code (see `cfxdoc:plugin-guide`).
+OpenIDEA-CfxLUA uses these entries to decide whether a file is client, server or shared code (see `cfxdoc:plugin-guide`).
 
 ### file(s)
 

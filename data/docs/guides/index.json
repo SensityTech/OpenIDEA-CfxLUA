@@ -9,10 +9,10 @@
   },
   {
     "id": "plugin-guide",
-    "title": "Using Sensity DevKit",
+    "title": "Using OpenIDEA-CfxLUA",
     "category": "Getting started",
     "file": "plugin-guide.md",
-    "summary": "Project settings, game detection, automatic natives updates, client/server/shared file detection, the Sensity tool window, quick documentation, network events, the NUI bridge between Lua and the page, CfxLua and performance inspections, loop cost gutter icons and EmmyDoc annotations.",
+    "summary": "Settings, game detection, natives updates, client/server/shared file detection, the status bar, the CfxLua tool window, documentation in completion, events, state bags, the NUI bridge between Lua and the page, CfxLua and performance checks, loop cost gutter icons and working with lua-language-server.",
     "keywords": ["plugin", "settings", "natives update", "tool window", "inspections", "performance", "resmon", "adaptive sleep", "quick documentation", "parameter info", "emmydoc", "annotations", "client", "server", "shared", "nui", "RegisterNUICallback", "SendNUIMessage", "fetchNui", "useNuiEvent", "ui_page", "vite", "dev server"]
   },
   {
@@ -132,7 +132,7 @@
     "title": "Selling resources with Asset Escrow",
     "category": "Resources",
     "file": "escrow.md",
-    "summary": "What Cfx Asset Escrow encrypts, keeping configuration and translations editable with escrow_ignore, files loaded at runtime, the pre-upload checklist, and the Sensity DevKit escrow decorations, inspections, pre-publish check and protected files.",
+    "summary": "What Cfx Asset Escrow encrypts, keeping configuration and translations editable with escrow_ignore, files loaded at runtime, the pre-upload checklist, and the OpenIDEA-CfxLUA escrow status, checks, pre-publish check and protected files.",
     "keywords": ["escrow", "asset escrow", "escrow_ignore", "tebex", "keymaster", "portal", "encrypted", "fxap", "protected", "config", "locales", "LoadResourceFile", "lib.require", "vendor", "sell"]
   },
   {

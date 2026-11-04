@@ -12,7 +12,7 @@ This guide explains how a native's C signature becomes a Lua call: names, argume
 | RDR3 client | Game natives for RedM | https://alloc8or.re/rdr3/nativedb/ (descriptions; see the RedM notes below) |
 | Cfx (namespace `CFX`) | Platform natives: events, resources, state bags, NUI, server player management... Each has an API set: `client`, `server` or `shared` | https://docs.fivem.net/natives/ (namespace CFX) |
 
-In the IDE, the **Natives** tab of the Sensity tool window and Search Everywhere list them all, filtered by your project's game and by the side of the current file (see `cfxdoc:plugin-guide`).
+In the IDE, the **Natives** tab of the CfxLua tool window and completion list them all, filtered by your project's game and by the side of the current file (see `cfxdoc:plugin-guide`).
 
 ## Naming rules
 
@@ -138,7 +138,7 @@ local hasImpact, impact = GetPedLastWeaponImpactCoord(PlayerPedId())
 
 For a trailing `Vector3*` or `BOOL*`, the value you pass is ignored; only the returned value matters.
 
-Quick Documentation (`Ctrl+Q`) on a native lists the exact Lua return values, so you never need to work this out by hand.
+The documentation of a native (in completion, or with **CfxLua: Show Documentation**) lists the exact Lua return values, so you never need to work this out by hand.
 
 ## The BOOL quirks
 

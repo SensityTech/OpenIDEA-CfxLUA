@@ -187,7 +187,7 @@ AddEventHandler('playerConnecting', function(name, setKickReason, deferrals)
 end)
 ```
 
-The complete list, with parameters, sides, games and cancelability, is in the **Events** tab of the Sensity tool window.
+The complete list, with parameters, sides, games and cancelability, is in the **Events** tab of the CfxLua tool window.
 
 ## Event security
 

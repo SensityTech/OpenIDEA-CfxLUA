@@ -1,6 +1,6 @@
 # Selling resources with Asset Escrow
 
-Cfx Asset Escrow protects the code of resources sold on Tebex: you upload the resource as a zip on the Cfx.re portal, the portal encrypts it, and buyers receive a protected build that only starts on servers whose license key owns the asset. This guide covers what escrow encrypts, how to keep configuration editable with `escrow_ignore`, the mistakes that only show up after the upload, and the Sensity DevKit tools that catch them before.
+Cfx Asset Escrow protects the code of resources sold on Tebex: you upload the resource as a zip on the Cfx.re portal, the portal encrypts it, and buyers receive a protected build that only starts on servers whose license key owns the asset. This guide covers what escrow encrypts, how to keep configuration editable with `escrow_ignore`, the mistakes that only show up after the upload, and the OpenIDEA-CfxLUA tools that catch them before.
 
 ## What escrow encrypts
 
@@ -75,11 +75,11 @@ local items = json.decode(LoadResourceFile(GetCurrentResourceName(), 'data/items
 
 The 2021 announcement of escrow asked for `lua54 'yes'` in the manifest. Every script runs on Lua 5.4 since June 2025 and the flag has no effect any more; add it only if the portal asks for it.
 
-## What Sensity DevKit does for vendors
+## What OpenIDEA-CfxLUA does for vendors
 
-**Project view.** Every file of a resource that declares `escrow_ignore` shows `escrow: encrypted` or `escrow: open` after its name, following the rules above. Settings | Languages & Frameworks | CfxLua | Asset Escrow turns the status off, or shows it for every resource.
+**Status of each file.** Every Lua file of a resource that declares `escrow_ignore` shows a hint on its first line, `escrow: encrypted` or `escrow: open`, following the rules above. **Settings › Plugins › OpenIDEA-CfxLUA** turns the status off (*Show the Asset Escrow status of resource files*), or shows it for every resource (*Treat every resource as escrowed*).
 
-**Inspections** (Settings | Editor | Inspections | Lua | CfxLua | Asset Escrow), in resources declaring `escrow_ignore`:
+**Checks**, shown in the editor and the Problems view, in resources declaring `escrow_ignore`:
 
 | Inspection | Reports | Quick fix |
 |---|---|---|
@@ -87,9 +87,9 @@ The 2021 announcement of escrow asked for `lua54 'yes'` in the manifest. Every s
 | File loaded at runtime encrypted by Asset Escrow | `LoadResourceFile(GetCurrentResourceName(), 'x.lua')`, `require`, `lib.require`, `lib.load` of a file that will be encrypted | add the file to `escrow_ignore` |
 | Script that Asset Escrow cannot protect | `.js` and `.dll` scripts of the manifest | |
 
-**Pre-publish check.** **Tools | Sensity DevKit: Check Resource Before Escrow Upload** (also in the Project view context menu) checks the resource of the selected files, or every resource of the project when nothing is selected, in the background. It opens a report listing the blockers (manifest syntax, missing `fx_version` / `game` / `rdr3_warning`, legacy `__resource.lua`, size), the warnings (missing `escrow_ignore`, configuration and loaded files that will be encrypted, `escrow_ignore` patterns matching nothing, syntax errors in encrypted files, protected builds), the notes (readable JavaScript and NUI files), the suggested `escrow_ignore` block, and the files kept open or encrypted. Its notification adds every suggested pattern to the manifests in one step.
+**Pre-publish check.** **CfxLua: Check Resource Before Escrow Upload** (Tools menu, or Find Action) checks the resource of the focused file, or every resource of the project when no file is open. Its notification lists the blockers (manifest syntax, missing `fx_version` / `game` / `rdr3_warning`, legacy `__resource.lua`), the warnings (missing `escrow_ignore`, configuration and loaded files that will be encrypted, `escrow_ignore` patterns matching nothing, syntax errors in encrypted files, protected builds) and the notes (readable JavaScript and NUI files). On the manifest, the quick action *Add N patterns to escrow_ignore* (Alt+Enter) adds every suggested pattern in one step.
 
-**Protected files.** A Lua file whose content starts with `FXAP` is an encrypted file of a protected build. Sensity DevKit opens it as plain text, read-only, with the banner "This file is protected by Cfx Asset Escrow", instead of reporting hundreds of syntax errors.
+**Protected files.** A Lua file whose content starts with `FXAP` is an encrypted file of a protected build. OpenIDEA-CfxLUA does not parse it and says so with a single note, "This file is protected by Cfx Asset Escrow", instead of reporting hundreds of syntax errors.
 
 ## Shipping protected builds
 

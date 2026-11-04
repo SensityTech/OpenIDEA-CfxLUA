@@ -36,7 +36,7 @@ RedM's Lua natives are generated from the definition file the RedM runtime ships
 
 When a name from a database does not resolve:
 
-1. Look the native up by hash in the **Natives** tab of the Sensity tool window; it shows the name that exists at runtime (or `N_0x...`) and mentions the database name.
+1. Look the native up by hash in the **Natives** tab of the CfxLua tool window; it shows the name that exists at runtime (or `N_0x...`) and mentions the database name.
 2. Call it by that name, or by hash:
 
 ```lua
@@ -87,7 +87,7 @@ The server parses some game events sent by clients and raises script events for 
 | `fireEvent`, `giveWeaponEvent`, `removeWeaponEvent`, `removeAllWeaponsEvent`, `ptFxEvent`, `vehicleComponentControlEvent` | yes | no |
 | `lightningEvent`, `endLootEvent`, carriable events (`pickupCarriableEvent`, ...) | no | yes |
 
-The Events tab of the Sensity tool window lists each event with its game.
+The Events tab of the CfxLua tool window lists each event with its game.
 
 ## Writing code for both games
 

@@ -69,7 +69,7 @@ Exactly nine operators exist: `+= -= *= /= <<= >>= &= |= ^=`.
 - **Single target only.** `a, b += 1, 1` is a syntax error.
 - **It is a statement, not an expression.** `print(a += 1)` and `if (a += 1) then` do not compile.
 - **The operator must be written without spaces.** `a + = 1` is a syntax error.
-- **`<const>` is not protected.** The runtime does not reject `c += 1` on a `<const>` local: it is either a silent no-op or it really modifies the value. Never do it; Sensity DevKit reports it as an error.
+- **`<const>` is not protected.** The runtime does not reject `c += 1` on a `<const>` local: it is either a silent no-op or it really modifies the value. Never do it; OpenIDEA-CfxLUA reports it as an error.
 
 ## Safe navigation `?`
 
@@ -151,7 +151,7 @@ health, armour in data         -- health = data.health, armour = data.armour
 
 - **The source must be a name, an index, a call or a parenthesised expression.** A literal table needs parentheses: `local a in { a = 1 }` is a syntax error, `local a in ({ a = 1 })` works.
 - **Only one source.** `local a, b in t1, t2` does not compile.
-- **`<close>` is silently ignored with `in`.** `local f <close> in t` never calls `__close`. Sensity DevKit reports this.
+- **`<close>` is silently ignored with `in`.** `local f <close> in t` never calls `__close`. OpenIDEA-CfxLUA reports this.
 - **It reads fields by name, not by position.** `local a, b in { 10, 20 }` gives `nil, nil`. Use `table.unpack` for arrays.
 - Not to be confused with `for k, v in pairs(t) do`, which is the regular generic `for`.
 

@@ -156,7 +156,7 @@ dependencies {
 
 ## Common mistakes and how the plugin catches them
 
-Sensity DevKit checks manifests as you type (**Settings > Editor > Inspections > Lua > CfxLua > fxmanifest**). Most problems come with a quick fix (Alt+Enter).
+OpenIDEA-CfxLUA checks manifests as you type; the problems show in the editor and the Problems view. Most come with a quick fix (Alt+Enter).
 
 | Mistake | What FXServer does | Plugin |
 |---|---|---|

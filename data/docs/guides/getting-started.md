@@ -33,7 +33,7 @@ client_script 'client.lua'
 server_script 'server.lua'
 ```
 
-Sensity DevKit reads this file to know that `client.lua` is client code and `server.lua` is server code, and offers the right natives in each. See `cfxdoc:fxmanifest` for every directive.
+OpenIDEA-CfxLUA reads this file to know that `client.lua` is client code and `server.lua` is server code, and offers the right natives in each. See `cfxdoc:fxmanifest` for every directive.
 
 ## 3. Client script
 
