@@ -76,15 +76,16 @@ let items = feature.completion(&fx.cx(&doc), at, None);
 
 ## Updating the natives snapshot
 
-`data/natives/` holds gzip copies of the four databases the plugin reads:
+`data/natives/` holds gzip copies of the four databases the plugin reads (their addresses are in
+`src/natives/sources.rs`). The [Natives snapshot](.github/workflows/natives.yml) workflow refreshes them every Monday:
+when a database changed, it runs the tests and commits the new copies to `main`. To do it by hand:
 
 ```sh
-for u in natives.json natives_cfx.json natives_rdr3.lua; do
-  curl -fsSL "https://static.cfx.re/natives/$u" | gzip -9 > "data/natives/$u.gz"
-done
-curl -fsSL https://raw.githubusercontent.com/alloc8or/rdr3-nativedb-data/master/natives.json | gzip -9 > data/natives/rdr3_nativedb.json.gz
-cargo test --lib natives
+scripts/update-natives.sh
+cargo test --lib
 ```
+
+The script only rewrites the files whose content changed.
 
 ## License
 

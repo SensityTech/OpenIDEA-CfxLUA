@@ -16,6 +16,7 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   pre-publish report of the selected one and a **Copy Report** button. **CfxLua: Check Resource Before Escrow Upload**
   opens it on the checked resource.
 - An **Update Natives Now** button in the Natives tab.
+- A weekly workflow refreshes the bundled native databases (`scripts/update-natives.sh`).
 
 ### Changed
 

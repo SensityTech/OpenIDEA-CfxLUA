@@ -25,5 +25,5 @@ jobs:
         run: scripts/build.sh --pack
       - uses: actions/upload-artifact@v4
         with:
-          name: sensity-devkit-plugin
+          name: openidea-cfxlua
           path: dist/*.oiplugin

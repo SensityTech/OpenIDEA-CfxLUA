@@ -71,7 +71,7 @@ reason in its tooltip, and file icons mark client, server and shared scripts and
 - A server native called from a client script (or the reverse) is reported.
 - **CfxLua: Update Natives** (or the update button of the Natives tab) downloads the latest databases from Cfx.re
   (conditional requests: nothing is downloaded when nothing changed); a background check runs once a day. Offline,
-  the bundled snapshot is used.
+  the bundled snapshot is used; it is refreshed every week, so each release ships recent natives.
 
 ### Cfx runtime API
 

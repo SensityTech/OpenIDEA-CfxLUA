@@ -188,13 +188,17 @@ mod tests {
             let unnamed = primaries.iter().filter(|n| n.is_unnamed()).count();
             (natives.len(), primaries.len(), unnamed)
         };
-        assert_eq!(count(NativeSet::Gta5), (9930, 7087, 1001));
-        assert_eq!(count(NativeSet::Rdr3), (10110, 7387, 2221));
-        assert_eq!(count(NativeSet::Server), (394, 390, 0));
+        let at_least = |(all, primaries, unnamed): (usize, usize, usize), min: (usize, usize, usize)| {
+            all >= min.0 && primaries >= min.1 && unnamed >= min.2 && primaries <= all
+        };
+        assert!(at_least(count(NativeSet::Gta5), (9000, 6500, 500)), "{:?}", count(NativeSet::Gta5));
+        assert!(at_least(count(NativeSet::Rdr3), (9000, 6500, 1000)), "{:?}", count(NativeSet::Rdr3));
+        assert!(at_least(count(NativeSet::Server), (300, 300, 0)), "{:?}", count(NativeSet::Server));
+        assert_eq!(count(NativeSet::Server).2, 0, "server natives all have names");
         let rdr3 = bundled(NativeSet::Rdr3);
-        assert_eq!(rdr3.iter().filter(|n| n.alt_name.is_some()).count(), 354);
+        assert!(rdr3.iter().filter(|n| n.alt_name.is_some()).count() > 200);
         let server = bundled(NativeSet::Server);
-        assert_eq!(server.iter().filter(|n| !n.is_alias() && n.rpc).count(), 78);
+        assert!(server.iter().filter(|n| !n.is_alias() && n.rpc).count() > 50);
         let apisets: std::collections::BTreeSet<Side> = server.iter().map(|n| n.apiset).collect();
         assert_eq!(apisets, [Side::Server, Side::Shared].into());
         for set in NativeSet::ALL {
@@ -251,7 +255,7 @@ mod tests {
             Some(NativeSet::Server)
         );
         assert!(natives.is_loaded(NativeSet::Gta5), "fixed catalogs are always loaded");
-        assert_eq!(natives.catalog(NativeSet::Server).len(), 394);
+        assert_eq!(natives.catalog(NativeSet::Server).len(), bundled(NativeSet::Server).len());
     }
 
     #[test]

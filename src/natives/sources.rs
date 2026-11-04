@@ -156,48 +156,60 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "lists the databases for scripts/update-natives.sh"]
+    fn database_list() {
+        for d in Database::ALL {
+            println!("natives-db {} {}", d.file_name(), d.url());
+        }
+    }
+
+    #[test]
     fn snapshot_inventory() {
         let gta5 = text(Database::Gta5);
         let natives = parse::parse_json(&gta5, Origin::Gta5Json).unwrap();
         let namespaces: HashSet<&str> = natives.iter().map(|n| n.namespace.as_ref()).collect();
-        assert_eq!((natives.len(), namespaces.len()), (6436, 44));
-        assert_eq!(natives.iter().filter(|n| n.name.is_none()).count(), 1001);
-        assert_eq!(natives.iter().filter(|n| !n.aliases.is_empty()).count(), 2308);
-        assert_eq!(natives.iter().filter(|n| n.lua_example.is_some()).count(), 293);
+        assert!(
+            natives.len() > 6000 && namespaces.len() > 40,
+            "{} natives, {} namespaces",
+            natives.len(),
+            namespaces.len()
+        );
+        assert!(natives.iter().filter(|n| n.name.is_none()).count() > 500);
+        assert!(natives.iter().filter(|n| !n.aliases.is_empty()).count() > 2000);
+        assert!(natives.iter().filter(|n| n.lua_example.is_some()).count() > 200);
 
         let cfx = text(Database::Cfx);
         let natives = parse::parse_json(&cfx, Origin::CfxJson).unwrap();
         let count = |f: &dyn Fn(&RawNative) -> bool| natives.iter().filter(|n| f(n)).count();
-        assert_eq!(natives.len(), 973);
-        assert_eq!(
-            [count(&|n| n.apiset == "client"), count(&|n| n.apiset == "server"), count(&|n| n.apiset == "shared")],
-            [583, 292, 98]
-        );
-        assert_eq!([count(&|n| n.game.is_none()), count(&|n| n.game.as_deref() == Some("ny"))], [466, 2]);
+        assert!(natives.len() > 900, "{}", natives.len());
+        let apisets =
+            [count(&|n| n.apiset == "client"), count(&|n| n.apiset == "server"), count(&|n| n.apiset == "shared")];
+        assert!(apisets.iter().all(|&n| n > 50) && apisets.iter().sum::<usize>() == natives.len(), "{apisets:?}");
+        assert!(count(&|n| n.game.is_none()) > 400);
 
         let dsl_text = text(Database::Rdr3);
         let dsl = parse::parse_dsl(&dsl_text).unwrap();
-        assert_eq!(dsl.len(), 7154);
+        assert!(dsl.len() > 7000, "{}", dsl.len());
         assert!(dsl.iter().all(|n| n.hash.is_some() && n.namespace.is_some() && n.returns.is_some()));
-        assert_eq!(dsl.iter().filter_map(|n| n.hash).collect::<HashSet<_>>().len(), 7154, "unique hashes");
-        assert_eq!(dsl.iter().filter(|n| n.name.starts_with("0x")).count(), 2221);
-        assert_eq!(dsl.iter().map(|n| n.aliases.len()).sum::<usize>(), 2746);
-        assert_eq!(dsl.iter().filter(|n| n.aliases.len() > 1).count(), 36);
+        assert_eq!(dsl.iter().filter_map(|n| n.hash).collect::<HashSet<_>>().len(), dsl.len(), "unique hashes");
+        assert!(dsl.iter().filter(|n| n.name.starts_with("0x")).count() > 1000);
+        assert!(dsl.iter().map(|n| n.aliases.len()).sum::<usize>() > 2000);
+        assert!(dsl.iter().any(|n| n.aliases.len() > 1));
 
         let docs_text = text(Database::Rdr3Docs);
         let docs = parse::parse_nativedb(&docs_text).unwrap();
-        assert_eq!(docs.len(), 7132);
+        assert!(docs.len() > 7000, "{}", docs.len());
         let missing =
             dsl.iter().filter_map(|n| n.hash).filter(|h| !docs.contains_key(&parse::normalize_hash(h))).count();
-        assert_eq!(missing, 22);
+        assert!(missing < dsl.len() / 50, "{missing} natives without documentation");
         let commented = dsl
             .iter()
             .filter_map(|n| docs.get(&parse::normalize_hash(n.hash?)))
             .filter(|d| !d.comment.trim().is_empty())
             .count();
-        assert_eq!(commented, 2161);
+        assert!(commented > 2000, "{commented}");
         let joined = parse::join_rdr3(dsl, &docs);
-        assert_eq!(joined.iter().filter(|n| n.alt_name.is_some()).count(), 354);
+        assert!(joined.iter().filter(|n| n.alt_name.is_some()).count() > 200);
     }
 
     #[test]
