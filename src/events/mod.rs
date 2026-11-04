@@ -86,7 +86,7 @@ impl EventsFeature {
         let config = Config::read(cx.settings);
         let mut projects = self.projects.borrow_mut();
         let p = projects.entry(cx.ws.root.clone()).or_default();
-        if p.db.is_none() || p.dirty || p.config != config {
+        if (p.db.is_none() || p.dirty || p.config != config) && !(cx.ws.indexing && p.db.is_some()) {
             p.rebuild(cx.ws, config);
         }
         p.db.clone()

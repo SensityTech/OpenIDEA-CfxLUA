@@ -36,11 +36,22 @@ use text::slash;
 use workspace::Workspace;
 
 pub const STATUS_SIDE: &str = "side";
-const SCAN_BUDGET_MS: u128 = 40_000;
-// Indexing slices: at activation, per event batch, and on the editing path (shared 50 ms budget).
-const ACTIVATION_INDEX_MS: u128 = 1_000;
-const EVENT_INDEX_MS: u128 = 1_500;
-const EDIT_INDEX_MS: u128 = 4;
+
+// A call's CPU budget is fuel (wasm instructions), not time: the scan is split in slices of files read and bytes indexed.
+#[derive(Clone, Copy)]
+struct Slice {
+    reads: usize,
+    bytes: usize,
+    heavy: bool,
+}
+
+const ACTIVATION: Slice = Slice { reads: 1_500, bytes: 512 << 10, heavy: true };
+const EVENTS: Slice = Slice { reads: 1_500, bytes: 2 << 20, heavy: true };
+// Bigger files are generated data or bundles: indexing one would take a call on its own.
+const MAX_INDEXED: usize = 1 << 20;
+const DERIVE_EVERY: u32 = 6;
+const VIEW: Slice = Slice { reads: 64, bytes: 512 << 10, heavy: false };
+const EDIT: Slice = Slice { reads: 16, bytes: 0, heavy: false };
 
 pub fn all_features() -> Vec<Box<dyn Feature>> {
     vec![
@@ -66,7 +77,15 @@ pub struct DevKit {
     natives: Natives,
     workspaces: Vec<Workspace>,
     last: Option<(Doc, Option<Vec<Problem>>)>,
+    unread: Vec<(usize, String)>,
     pending: Vec<(usize, String)>,
+    catalogs: Vec<usize>,
+    derive: Vec<usize>,
+    derived: usize,
+    deriving: bool,
+    slices: u32,
+    indexing: bool,
+    focus: Option<(usize, String)>,
 }
 
 impl Default for DevKit {
@@ -78,7 +97,15 @@ impl Default for DevKit {
             natives: Natives::bundled(),
             workspaces: Vec::new(),
             last: None,
+            unread: Vec::new(),
             pending: Vec::new(),
+            catalogs: Vec::new(),
+            derive: Vec::new(),
+            derived: 0,
+            deriving: false,
+            slices: 0,
+            indexing: false,
+            focus: None,
         }
     }
 }
@@ -115,9 +142,7 @@ impl DevKit {
     }
 
     fn scan(&mut self, project: &openidea_plugin::Project, root: &str) {
-        let start = std::time::Instant::now();
         let i = self.workspace_for(&format!("{}/", slash(root).trim_end_matches('/')));
-        let task = host::begin_task("CfxLua: indexing resources", true);
         let mut paths: Vec<String> = Vec::new();
         for (glob, limit) in workspace::SCAN {
             match project.find_files(glob, *limit) {
@@ -127,22 +152,12 @@ impl DevKit {
         }
         paths.sort();
         paths.dedup();
-        let total = paths.len() as u32;
         let ws = &mut self.workspaces[i];
-        for (n, path) in paths.iter().enumerate() {
-            if task.is_cancelled() || start.elapsed().as_millis() > SCAN_BUDGET_MS {
-                host::log(LogLevel::Warn, &format!("indexing stopped after {n} of {total} files"));
-                break;
+        for path in paths {
+            ws.set(&path, None);
+            if project::file_kind(&path) != FileKind::Other {
+                self.unread.push((i, path));
             }
-            if n % 64 == 0 {
-                task.report(n as u32, Some(total), Some(text::file_name(&slash(path))));
-            }
-            let kind = project::file_kind(path);
-            let text = match kind {
-                FileKind::Other => None,
-                _ => project.read_file(path).ok(),
-            };
-            ws.set(path, text.as_deref());
         }
         let zones = self.settings.string("coords.zonesFile", "");
         if !zones.trim().is_empty() {
@@ -153,51 +168,145 @@ impl DevKit {
             }
         }
         ws.scanned = true;
-        let readable: Vec<String> = ws.files().filter(|f| f.text.is_some()).map(|f| f.path.clone()).collect();
-        self.pending.extend(readable.into_iter().map(|p| (i, p)));
-        let games = natives::project_games(&self.settings, &self.workspaces[i].detected_games());
-        for set in games.into_iter().map(natives::NativeSet::for_game).chain([natives::NativeSet::Server]) {
-            self.natives.catalog(set);
-        }
-        self.index_pending(ACTIVATION_INDEX_MS);
-        host::log(
-            LogLevel::Info,
-            &format!(
-                "read {total} files of {root} in {} ms, {} left to index",
-                start.elapsed().as_millis(),
-                self.pending.len()
-            ),
-        );
+        ws.indexing = true;
+        // Read last, popped first: manifests say which resource and side every other file belongs to.
+        self.unread.sort_by_key(|(_, p)| project::file_kind(p) == FileKind::Manifest);
+        self.catalogs.push(i);
+        self.indexing = true;
+        host::log(LogLevel::Info, &format!("{} files of {root} to read", self.unread.len()));
     }
 
-    // A call has a fixed CPU budget (fuel): big projects are indexed in slices over several calls.
-    fn index_pending(&mut self, budget_ms: u128) {
+    fn step(&mut self, slice: Slice) {
+        let left = self.unread.len() + self.pending.len();
+        if left == 0 && self.catalogs.is_empty() && self.derive.is_empty() && !self.indexing {
+            return;
+        }
+        if !slice.heavy {
+            self.read_slice(slice.reads);
+            if slice.bytes > 0 {
+                self.index_pending(slice);
+            }
+            return;
+        }
+        self.load_catalogs();
+        if self.deriving || !self.derive.is_empty() && (left == 0 || self.slices >= DERIVE_EVERY) {
+            self.deriving = !self.derive_slice();
+            if !self.deriving {
+                self.slices = 0;
+            }
+        } else if left > 0 {
+            let task = host::begin_task("CfxLua: indexing resources", false);
+            self.read_slice(slice.reads);
+            self.index_pending(slice);
+            self.slices += 1;
+            task.report(0, Some((self.unread.len() + self.pending.len()) as u32), None);
+        }
+        if self.indexing && self.unread.is_empty() && self.pending.is_empty() && self.derive.is_empty() {
+            self.indexing = false;
+            for ws in &mut self.workspaces {
+                ws.indexing = false;
+            }
+            host::log(LogLevel::Info, "resources indexed");
+        }
+    }
+
+    // Derived indexes (event links, NUI bridge, state bags) grow with the project: one rebuild per call once a call is busy.
+    fn derive_slice(&mut self) -> bool {
+        let start = std::time::Instant::now();
+        while let Some(&i) = self.derive.first() {
+            while self.derived < self.features.len() {
+                if start.elapsed().as_millis() > 50 {
+                    return false;
+                }
+                self.features[self.derived].indexed(&self.workspaces[i]);
+                self.derived += 1;
+            }
+            self.derived = 0;
+            self.derive.remove(0);
+        }
+        true
+    }
+
+    fn read_slice(&mut self, max: usize) {
+        if self.unread.is_empty() {
+            return;
+        }
+        let Ok(projects) = host::projects() else { return };
+        let projects: Vec<(String, openidea_plugin::Project)> = projects
+            .into_iter()
+            .filter_map(|p| Some((slash(&p.root().ok()?).trim_end_matches('/').to_owned(), p)))
+            .collect();
+        for _ in 0..max {
+            let Some((i, path)) = self.unread.pop() else { break };
+            let ws = &mut self.workspaces[i];
+            let text = projects.iter().find(|(root, _)| *root == ws.root).and_then(|(_, p)| p.read_file(&path).ok());
+            ws.set(&path, text.as_deref());
+            if text.is_some() {
+                self.pending.push((i, slash(&path)));
+            }
+        }
+    }
+
+    fn load_catalogs(&mut self) {
+        let ready: Vec<usize> = self
+            .catalogs
+            .iter()
+            .copied()
+            .filter(|i| !self.unread.iter().any(|(j, p)| j == i && project::file_kind(p) == FileKind::Manifest))
+            .collect();
+        self.catalogs.retain(|i| !ready.contains(i));
+        for i in ready {
+            let games = natives::project_games(&self.settings, &self.workspaces[i].detected_games());
+            for set in games.into_iter().map(natives::NativeSet::for_game).chain([natives::NativeSet::Server]) {
+                self.natives.catalog(set);
+            }
+        }
+    }
+
+    fn index_pending(&mut self, slice: Slice) {
         if self.pending.is_empty() {
             return;
         }
-        let start = std::time::Instant::now();
-        let mut touched: Vec<usize> = Vec::new();
-        while start.elapsed().as_millis() < budget_ms {
-            let Some((i, path)) = self.pending.pop() else { break };
+        let mut used = 0;
+        while let Some((i, path)) = self.pending.pop() {
             let ws = &self.workspaces[i];
             let Some(f) = ws.file(&path) else { continue };
             let Some(text) = f.text.as_deref() else { continue };
+            if text.len() > MAX_INDEXED {
+                continue;
+            }
+            if used + text.len() > slice.bytes && (used > 0 || !slice.heavy) {
+                self.pending.push((i, path));
+                break;
+            }
+            used += text.len();
             let src = parse(f.kind, text);
             for feature in &self.features {
                 feature.index_file(ws, &f.path, f.kind, &src);
             }
-            if !touched.contains(&i) {
-                touched.push(i);
-            }
-        }
-        for i in touched {
-            for feature in &self.features {
-                feature.indexed(&self.workspaces[i]);
+            if !self.derive.contains(&i) {
+                self.derive.push(i);
             }
         }
         if self.pending.is_empty() {
             self.last = None;
         }
+    }
+
+    fn focus_on(&mut self, path: &str) {
+        let i = self.workspace_for(path);
+        self.prioritize(i, path);
+    }
+
+    fn prioritize(&mut self, ws: usize, path: &str) {
+        let Some(dir) = self.workspaces[ws].resource_of(path).map(|r| format!("{}/", r.dir)) else { return };
+        if self.focus.as_ref() == Some(&(ws, dir.clone())) {
+            return;
+        }
+        let first = |(i, p): &(usize, String)| *i == ws && slash(p).starts_with(&dir);
+        self.unread.sort_by_key(|item| (first(item), project::file_kind(&item.1) == FileKind::Manifest));
+        self.pending.sort_by_key(|item| first(item));
+        self.focus = Some((ws, dir));
     }
 
     fn reread(&mut self, path: &str) {
@@ -221,15 +330,16 @@ impl DevKit {
                 let src = parse(kind, t);
                 for f in &self.features {
                     f.index_file(ws, &slash(path), kind, &src);
-                    f.indexed(ws);
                 }
             }
             None => {
                 for f in &self.features {
                     f.forget_file(&slash(path));
-                    f.indexed(ws);
                 }
             }
+        }
+        if !self.derive.contains(&i) {
+            self.derive.push(i);
         }
         self.last = None;
     }
@@ -238,8 +348,9 @@ impl DevKit {
         if !self.settings.enabled() {
             return None;
         }
-        self.index_pending(EDIT_INDEX_MS);
         let i = self.workspace_for(&d.path);
+        self.prioritize(i, &d.path);
+        self.step(EDIT);
         let path = slash(&d.path);
         if let Some((doc, _)) = &self.last
             && doc.path == path
@@ -256,7 +367,12 @@ impl DevKit {
         if changed {
             for f in &self.features {
                 f.index_file(ws, &path, doc.kind, &doc.src);
-                f.indexed(ws);
+                if !ws.indexing {
+                    f.indexed(ws);
+                }
+            }
+            if ws.indexing && !self.derive.contains(&i) {
+                self.derive.push(i);
             }
         }
         self.last = Some((doc, None));
@@ -379,7 +495,7 @@ fn parse(kind: FileKind, text: &str) -> Source {
 
 impl Plugin for DevKit {
     fn activate(&mut self, _ctx: &Context) -> Result<(), Error> {
-        for kind in [EventKind::FileSaved, EventKind::EditorFocused, EventKind::Scheduled] {
+        for kind in [EventKind::FileOpened, EventKind::FileSaved, EventKind::EditorFocused, EventKind::Scheduled] {
             if let Err(e) = host::subscribe(kind) {
                 host::log(LogLevel::Warn, &format!("events: {e}"));
             }
@@ -395,11 +511,13 @@ impl Plugin for DevKit {
                 }
             }
         }
+        self.step(ACTIVATION);
         Ok(())
     }
 
     fn run_command(&mut self, id: &str, ctx: &Invocation, arg: Option<&str>) -> Result<Option<String>, Error> {
         self.settings.reset();
+        self.step(VIEW);
         let (ws, doc) = self.command_doc(ctx);
         let cx = CommandCx {
             ws: ws.map(|i| &self.workspaces[i]),
@@ -421,22 +539,30 @@ impl Plugin for DevKit {
     }
 
     fn handle_events(&mut self, events: &[Event], ctx: &Invocation) {
-        self.index_pending(EVENT_INDEX_MS);
+        let mut slice = EVENTS;
         for e in events {
             match e {
+                Event::FileOpened(path) => self.focus_on(path),
                 Event::FileSaved(path) => {
                     self.reread(path);
                     if project::file_kind(path) == FileKind::Manifest {
                         self.update_status(Some(path));
                     }
                 }
-                Event::EditorFocused(path) => self.update_status(path.as_deref()),
+                Event::EditorFocused(path) => {
+                    if let Some(path) = path {
+                        self.focus_on(path);
+                    }
+                    self.update_status(path.as_deref());
+                }
                 Event::Scheduled => {
                     let _ = self.run_command("natives.scheduled-update", ctx, None);
+                    slice = VIEW;
                 }
                 _ => {}
             }
         }
+        self.step(slice);
     }
 }
 
@@ -523,6 +649,7 @@ impl Providers for DevKit {
 
 impl Views for DevKit {
     fn render(&mut self, view: &str, viewport: Option<Viewport>, ctx: &Invocation) -> Result<View, Error> {
+        self.step(VIEW);
         let (ws, doc) = self.command_doc(ctx);
         let cx = CommandCx {
             ws: ws.map(|i| &self.workspaces[i]),
@@ -536,6 +663,7 @@ impl Views for DevKit {
 
     fn handle(&mut self, view: &str, event: ViewEvent, ctx: &Invocation) -> Result<(), Error> {
         self.settings.reset();
+        self.step(VIEW);
         let (ws, doc) = self.command_doc(ctx);
         let cx = CommandCx {
             ws: ws.map(|i| &self.workspaces[i]),
@@ -650,6 +778,71 @@ mod tests {
             } else if let Ok(text) = std::fs::read_to_string(&path) {
                 out.push((slash(&path.strip_prefix(root).unwrap().to_string_lossy()), text));
             }
+        }
+    }
+
+    #[test]
+    #[ignore = "measurement: CFXLUA_PROJECT=<dir> cargo test --release --lib index_cost_of_a_real_project -- --ignored --nocapture"]
+    fn index_cost_of_a_real_project() {
+        fn walk(dir: &std::path::Path, root: &std::path::Path, out: &mut Vec<(String, String)>) {
+            for entry in std::fs::read_dir(dir).unwrap().flatten() {
+                let path = entry.path();
+                let name = entry.file_name().to_string_lossy().into_owned();
+                if name.starts_with('.') || name == "node_modules" {
+                    continue;
+                }
+                if path.is_dir() {
+                    walk(&path, root, out);
+                } else if let Ok(text) = std::fs::read_to_string(&path) {
+                    out.push((slash(&path.strip_prefix(root).unwrap().to_string_lossy()), text));
+                }
+            }
+        }
+        let root = std::path::PathBuf::from(std::env::var("CFXLUA_PROJECT").expect("CFXLUA_PROJECT"));
+        let mut all = Vec::new();
+        walk(&root, &root, &mut all);
+        let files: Vec<(String, String)> = all
+            .into_iter()
+            .filter(|(p, t)| project::file_kind(p) != FileKind::Other && t.len() <= workspace::MAX_FILE)
+            .collect();
+        let bytes: usize = files.iter().map(|(_, t)| t.len()).sum();
+        let refs: Vec<(&str, &str)> = files.iter().map(|(p, t)| (p.as_str(), t.as_str())).collect();
+        let ws = Workspace::from_files("/real", &refs);
+        let features = all_features();
+        let names =
+            ["natives", "runtime", "manifest", "statebags", "events", "nui", "values", "coords", "perf", "syntax"];
+        let mut parse_time = std::time::Duration::ZERO;
+        let mut index_time = vec![std::time::Duration::ZERO; features.len()];
+        for f in ws.files() {
+            let Some(text) = f.text.as_deref() else { continue };
+            let start = std::time::Instant::now();
+            let src = parse(f.kind, text);
+            parse_time += start.elapsed();
+            for (n, feature) in features.iter().enumerate() {
+                let start = std::time::Instant::now();
+                feature.index_file(&ws, &f.path, f.kind, &src);
+                index_time[n] += start.elapsed();
+            }
+        }
+        eprintln!("{} files, {bytes} bytes: parse {parse_time:?}", files.len());
+        for ((feature, name), t) in features.iter().zip(names).zip(index_time) {
+            let start = std::time::Instant::now();
+            feature.indexed(&ws);
+            eprintln!("{name}: index_file {t:?}, indexed {:?}", start.elapsed());
+        }
+        let (path, text) =
+            files.iter().filter(|(p, _)| p.ends_with(".lua")).max_by_key(|(_, t)| t.len() / 1000 % 7).unwrap();
+        let path = format!("/real/{path}");
+        let edited = format!("{text}\nlocal typed = 1\n");
+        let mut ws = ws;
+        ws.set(&path, Some(&edited));
+        let src = parse(project::file_kind(&path), &edited);
+        for (feature, name) in features.iter().zip(names) {
+            let start = std::time::Instant::now();
+            feature.index_file(&ws, &path, project::file_kind(&path), &src);
+            let indexed = start.elapsed();
+            feature.indexed(&ws);
+            eprintln!("keystroke {name}: index_file {indexed:?}, indexed {:?}", start.elapsed() - indexed);
         }
     }
 

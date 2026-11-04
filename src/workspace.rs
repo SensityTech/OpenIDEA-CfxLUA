@@ -27,6 +27,8 @@ pub struct Workspace {
     resources: BTreeMap<String, Resource>,
     pub generation: u64,
     pub scanned: bool,
+    /// The first scan is still indexing: editor calls keep the derived indexes they have.
+    pub indexing: bool,
     pub native_backslashes: bool,
 }
 

@@ -163,9 +163,8 @@ impl NuiFeature {
     fn bridge(&self, ws: &Workspace, settings: &Settings) -> Rc<Bridge> {
         let keys = read_keys(settings);
         let mut st = self.state.borrow_mut();
-        if !st.dirty
-            && let Some((k, b)) = &st.bridge
-            && *k == keys
+        if let Some((k, b)) = &st.bridge
+            && (!st.dirty && *k == keys || ws.indexing)
         {
             return b.clone();
         }
