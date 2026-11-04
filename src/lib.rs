@@ -87,6 +87,7 @@ pub struct DevKit {
     slices: u32,
     indexing: bool,
     focus: Option<(usize, String)>,
+    status_for: Option<String>,
 }
 
 impl Default for DevKit {
@@ -107,6 +108,7 @@ impl Default for DevKit {
             slices: 0,
             indexing: false,
             focus: None,
+            status_for: None,
         }
     }
 }
@@ -398,6 +400,10 @@ impl DevKit {
         let i = self.workspace_for(&d.path);
         self.prioritize(i, &d.path);
         self.step(EDIT);
+        // The editor focus event that started the plugin came before it subscribed.
+        if self.status_for.as_deref() != Some(d.path.as_str()) {
+            self.update_status(Some(&d.path));
+        }
         let path = slash(&d.path);
         if let Some((doc, _)) = &self.last
             && doc.path == path
@@ -485,6 +491,7 @@ impl DevKit {
     }
 
     fn update_status(&mut self, path: Option<&str>) {
+        self.status_for = path.map(str::to_owned);
         let text = path.and_then(|p| {
             let kind = project::file_kind(p);
             if !matches!(kind, FileKind::Lua | FileKind::Manifest) {
@@ -880,29 +887,6 @@ mod tests {
             assert!(kit.completion(&doc, Position::new(lines - 1, 11), None).is_empty());
             assert!(kit.line_markers(&doc).is_empty());
         }
-    }
-
-    #[test]
-    fn go_to_definition_of_a_native_opens_its_generated_declaration() {
-        let host = openidea_plugin::mock::MockHost::install();
-        let (mut kit, path, body) = windows_server_resource(&host);
-        let text = format!("{body}local c = GetEntityCoords(ped)\r\n");
-        let doc = Document { path, language: "lua".into(), version: 2, text };
-        let at = Position::new(2, 14);
-        assert!(kit.definition(&doc, at).is_empty());
-        let told = host.notifications();
-        assert_eq!(told.len(), 1, "{told:?}");
-        assert!(told[0].body.contains(natives::feature::STUBS), "{told:?}");
-        assert!(kit.definition(&doc, at).is_empty());
-        assert_eq!(host.notifications().len(), 1, "told once");
-        host.add_file(
-            natives::feature::STUBS,
-            "---@meta\n\n---Gets the coordinates.\nfunction GetEntityCoords(entity, alive) end\n",
-        );
-        let found = kit.definition(&doc, at);
-        assert_eq!(found.len(), 1, "{found:?}");
-        assert!(found[0].path.ends_with(r".cfxlua\natives.lua"), "{}", found[0].path);
-        assert_eq!((found[0].range.start.line, found[0].range.start.character), (3, 9));
     }
 
     fn demo_files(dir: &std::path::Path, root: &std::path::Path, out: &mut Vec<(String, String)>) {

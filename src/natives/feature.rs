@@ -8,47 +8,21 @@ use crate::lua::lexer::Tok;
 use crate::lua::syntax::Seg;
 use crate::project::{FileKind, Game, Side};
 use crate::settings::keys;
+use openidea_plugin::Severity;
 use openidea_plugin::providers::{CompletionItem, CompletionKind};
-use openidea_plugin::{Location, NotificationLevel, Position, Range, Severity, host};
-use std::cell::Cell;
 use std::collections::HashSet;
 use std::fmt::Write;
 
 const MAX_ITEMS: usize = 2000;
 const MAX_DOCUMENTED: usize = 500;
 const MAX_HUMPS: usize = 48;
-/// Where CfxLua: Generate lua-language-server Definitions writes the natives' declarations.
-pub const STUBS: &str = ".cfxlua/natives.lua";
 
 pub const WRONG_SIDE: &str = "CfxNativeWrongSide";
 
 #[derive(Default)]
-pub struct NativesFeature {
-    told_no_stubs: Cell<bool>,
-}
+pub struct NativesFeature;
 
 impl Feature for NativesFeature {
-    fn definition(&self, cx: &Ctx, at: usize) -> Vec<Location> {
-        if !cx.settings.enabled() || cx.doc.kind != FileKind::Lua || !cx.doc.is_lua() {
-            return Vec::new();
-        }
-        let Some(name) = native_at(cx, at) else { return Vec::new() };
-        if let Some(found) = stub_declaration(cx, name) {
-            return vec![found];
-        }
-        if !self.told_no_stubs.replace(true) {
-            host::notify(
-                NotificationLevel::Info,
-                "CfxLua",
-                &format!(
-                    "{name} is a native: its declaration goes in {STUBS}. Create that file empty, keep it focused and run \
-                     CfxLua: Generate lua-language-server Definitions."
-                ),
-            );
-        }
-        Vec::new()
-    }
-
     fn command(&self, cx: &CommandCx, id: &str, _arg: Option<&str>) -> Option<CommandResult> {
         match id {
             update::UPDATE => Some(update::run(cx.natives)),
@@ -118,37 +92,6 @@ fn in_string(src: &Source, at: usize) -> bool {
         _ => return false,
     };
     at < t.end || (at == t.end && open)
-}
-
-/// The native named at `at` (anywhere in the word), among the loaded catalogs: never loads one on the editing path.
-fn native_at<'a>(cx: &'a Ctx, at: usize) -> Option<&'a str> {
-    let text = cx.doc.text();
-    let bytes = text.as_bytes();
-    let mut end = at.min(text.len());
-    while end < bytes.len() && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'_') {
-        end += 1;
-    }
-    let start = word_start(&cx.doc.src, end)?;
-    let name = &text[start..end];
-    NativeSet::ALL
-        .into_iter()
-        .filter(|&s| cx.natives.is_loaded(s))
-        .find_map(|s| cx.natives.catalog(s).get(name))
-        .map(|_| name)
-}
-
-fn stub_declaration(cx: &Ctx, name: &str) -> Option<Location> {
-    let (path, text) = host::projects().ok()?.into_iter().find_map(|p| {
-        let root = p.root().ok()?;
-        (crate::text::slash(&root).trim_end_matches('/') == cx.ws.root).then_some(())?;
-        let path = format!("{}/{STUBS}", root.trim_end_matches(['/', '\\']));
-        p.read_file(&path).ok().map(|text| (path, text))
-    })?;
-    let at = text.find(&format!("\nfunction {name}("))? + 1;
-    let line = text[..at].matches('\n').count() as u32;
-    let col = "function ".len() as u32;
-    let range = Range { start: Position::new(line, col), end: Position::new(line, col + name.len() as u32) };
-    Some(Location { path, range })
 }
 
 fn word_start(src: &Source, at: usize) -> Option<usize> {
@@ -443,12 +386,12 @@ mod tests {
 
     fn labels(fx: &Fixture, rel: &str) -> Vec<String> {
         let (doc, at) = fx.caret(rel);
-        NativesFeature::default().completion(&fx.cx(&doc), at, None).into_iter().map(|i| i.label).collect()
+        NativesFeature.completion(&fx.cx(&doc), at, None).into_iter().map(|i| i.label).collect()
     }
 
     fn problems(fx: &Fixture, rel: &str) -> Vec<(String, String)> {
         let doc = fx.doc(rel);
-        NativesFeature::default()
+        NativesFeature
             .problems(&fx.cx(&doc))
             .into_iter()
             .map(|p| (doc.text()[p.start..p.end].to_owned(), p.message))
@@ -562,7 +505,7 @@ mod tests {
         }];
         let fx = fixture("res/client/main.lua", "GetEntityCo<caret>").with_natives(vec![coords]);
         let (doc, at) = fx.caret("res/client/main.lua");
-        let items = NativesFeature::default().completion(&fx.cx(&doc), at, None);
+        let items = NativesFeature.completion(&fx.cx(&doc), at, None);
         assert_eq!(items.len(), 1);
         let item = &items[0];
         assert_eq!((item.label.as_str(), item.insert_text.as_str()), ("GetEntityCoords", "GetEntityCoords"));
@@ -674,7 +617,7 @@ mod tests {
             )]
         );
         let doc = fx.doc("res/server/main.lua");
-        let p = &NativesFeature::default().problems(&fx.cx(&doc))[0];
+        let p = &NativesFeature.problems(&fx.cx(&doc))[0];
         assert_eq!((p.code, p.severity, p.fixes.len()), (WRONG_SIDE, Severity::Warning, 0));
 
         for declared in [
@@ -707,7 +650,7 @@ mod tests {
         let fx = fixture("res/shared/main.lua", "S<caret>").with_natives(all);
         let (doc, at) = fx.caret("res/shared/main.lua");
         let start = std::time::Instant::now();
-        let items = NativesFeature::default().completion(&fx.cx(&doc), at, None);
+        let items = NativesFeature.completion(&fx.cx(&doc), at, None);
         let elapsed = start.elapsed();
         let bytes: usize =
             items.iter().map(|i| i.label.len() + i.detail.as_ref().map_or(0, String::len)).sum::<usize>()
@@ -722,7 +665,7 @@ mod tests {
         let fx = fixture("res/client/main.lua", "GetEntityCoo<caret>")
             .with_natives(crate::natives::tests::bundled(NativeSet::Gta5).to_vec());
         let (doc, at) = fx.caret("res/client/main.lua");
-        let items = NativesFeature::default().completion(&fx.cx(&doc), at, None);
+        let items = NativesFeature.completion(&fx.cx(&doc), at, None);
         assert_eq!(items[0].label, "GetEntityCoords");
         let md = items[0].documentation.as_deref().unwrap_or_default();
         assert!(
