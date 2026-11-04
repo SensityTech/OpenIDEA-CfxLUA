@@ -13,6 +13,10 @@ plugin brings the Cfx.re knowledge; lua-language-server brings the Lua engine (s
 lua-language-server* below).
 
 1. Install the plugin: **Settings › Plugins › Install Plugin from Package File…** and pick the `.oiplugin` file.
+   Or, in **Settings › Plugins › Available**, set the marketplace index URL to
+   `https://github.com/SensityTech/OpenIDEA-CfxLUA/releases/download/marketplace/index.json` and install
+   **OpenIDEA-CfxLUA** from there: that copy is signed by `sensity`, and new versions are offered as updates.
+   OpenIDEA reads one marketplace at a time; clear the URL to go back to its default one.
 2. Accept the permissions. `project.read`, `editor.read`, `editor.write`, `storage` and `events` are needed;
    `net:static.cfx.re` and `net:raw.githubusercontent.com` are only used to download natives updates, and
    `clipboard` only by the copy buttons of the tool window.

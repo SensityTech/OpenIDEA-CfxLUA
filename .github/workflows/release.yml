@@ -28,3 +28,10 @@ jobs:
         with:
           files: dist/*.oiplugin
           generate_release_notes: true
+
+  marketplace:
+    needs: release
+    uses: ./.github/workflows/marketplace.yml
+    with:
+      tag: ${{ github.ref_name }}
+    secrets: inherit

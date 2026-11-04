@@ -87,6 +87,21 @@ cargo test --lib
 
 The script only rewrites the files whose content changed.
 
+## Releasing
+
+1. Set the version in `plugin.toml` (with its `change-notes`) and `Cargo.toml`, and move the `[Unreleased]` notes of
+   `CHANGELOG.md` under it.
+2. Tag the commit `v<version>` and push the tag. The [Release](.github/workflows/release.yml) workflow tests, builds
+   and publishes the package file; the [Marketplace](.github/workflows/marketplace.yml) workflow then signs a copy and
+   updates the index on the `marketplace` release.
+
+Signing uses the repository secret `PLUGIN_SIGNING_KEY`: the content of the file `openidea-plugin keygen` writes, whose
+public key the index lists for the `sensity` publisher. Without the secret, a release goes on without the marketplace.
+To publish a release to the marketplace again, run the Marketplace workflow by hand with its tag, or
+`SIGNING_KEY="$(cat sensity.key)" scripts/publish-marketplace.sh v<version>` with `openidea-plugin` on your `PATH`.
+The index keeps the revocations and the earlier keys it lists; to stop trusting a key, set its `revoked` to `true` in
+`index.json` and upload it again.
+
 ## License
 
 By contributing, you agree that your contributions are licensed under the [Apache License 2.0](LICENSE).

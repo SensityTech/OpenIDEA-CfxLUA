@@ -183,6 +183,8 @@ Install lua-language-server with `winget install LuaLS.lua-language-server`, `br
 distribution's package or a [release archive](https://github.com/LuaLS/lua-language-server/releases), then restart
 OpenIDEA so that it finds it.
 
+### From a package file
+
 1. Download `sensity.cfxlua-<version>.oiplugin` from the
    [latest release](https://github.com/SensityTech/OpenIDEA-CfxLUA/releases/latest).
 2. In OpenIDEA: **Settings › Plugins › Install Plugin from Package File…** and pick the file.
@@ -190,6 +192,22 @@ OpenIDEA so that it finds it.
 
 To install from the sources instead, [build it](#building-from-source) and use **Install Plugin from Disk…** on the
 repository folder.
+
+### From the OpenIDEA-CfxLUA marketplace
+
+Every release is also published in the project's own marketplace, signed by its publisher, `sensity`. In
+**Settings › Plugins › Available**, set the marketplace index URL to
+
+```text
+https://github.com/SensityTech/OpenIDEA-CfxLUA/releases/download/marketplace/index.json
+```
+
+then select **OpenIDEA-CfxLUA** and **Install**. OpenIDEA checks the download against the index and the publisher's
+key, shows *Signed by sensity* and offers each new version as an update.
+
+OpenIDEA reads one marketplace at a time and trusts the publishers it lists: while this one is set, a package signed
+by another publisher is refused. Clear the URL to go back to OpenIDEA's default marketplace. For the same reason, the
+package file of a release is not signed: OpenIDEA's default marketplace does not list `sensity`.
 
 ## Getting started
 

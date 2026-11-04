@@ -5,6 +5,12 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
 
 ## [Unreleased]
 
+### Added
+
+- **A signed marketplace.** Every release is also published, signed by the `sensity` publisher, with the `index.json`
+  OpenIDEA reads in **Settings › Plugins › Available**: installs from there are checked against the publisher's key,
+  and new versions are offered as updates. The package file of a release stays unsigned.
+
 ## [0.1.1] - 2026-11-04
 
 ### Added

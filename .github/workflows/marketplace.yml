@@ -1,0 +1,65 @@
+name: Marketplace
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release to publish (vX.Y.Z)
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: marketplace
+
+jobs:
+  key:
+    runs-on: ubuntu-latest
+    outputs:
+      set: ${{ steps.key.outputs.set }}
+    steps:
+      - id: key
+        env:
+          SIGNING_KEY: ${{ secrets.PLUGIN_SIGNING_KEY }}
+        run: |
+          if [ -n "$SIGNING_KEY" ]; then
+            echo "set=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::PLUGIN_SIGNING_KEY is not set: the marketplace is not updated"
+          fi
+
+  publish:
+    needs: key
+    if: needs.key.outputs.set == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: sdk
+        run: |
+          rev="$(sed -n 's|^source = "git+https://github.com/l0ng-ai/openidea?rev=\([0-9a-f]*\)#.*|\1|p' Cargo.lock | head -1)"
+          test -n "$rev"
+          echo "rev=$rev" >> "$GITHUB_OUTPUT"
+      - id: cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/openidea-plugin
+          key: openidea-plugin-${{ runner.os }}-${{ steps.sdk.outputs.rev }}
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.cache.outputs.cache-hit != 'true'
+      - name: Build openidea-plugin
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: >-
+          cargo install --locked --git https://github.com/l0ng-ai/openidea --rev ${{ steps.sdk.outputs.rev }}
+          ide-host --bin openidea-plugin
+      - name: Sign and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SIGNING_KEY: ${{ secrets.PLUGIN_SIGNING_KEY }}
+          TAG: ${{ inputs.tag }}
+        run: scripts/publish-marketplace.sh "$TAG"
