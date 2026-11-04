@@ -7,6 +7,11 @@ report. This guide describes what it does and where to find it.
 
 ## Getting set up
 
+OpenIDEA-CfxLUA needs two things: OpenIDEA 0.1.35 or newer, and
+[lua-language-server](https://luals.github.io/#install) on your `PATH` (restart OpenIDEA after installing it). The
+plugin brings the Cfx.re knowledge; lua-language-server brings the Lua engine (see *Working with
+lua-language-server* below).
+
 1. Install the plugin: **Settings › Plugins › Install Plugin from Package File…** and pick the `.oiplugin` file.
 2. Accept the permissions. `project.read`, `editor.read`, `editor.write`, `storage` and `events` are needed;
    `net:static.cfx.re` and `net:raw.githubusercontent.com` are only used to download natives updates, and
@@ -182,18 +187,21 @@ See `cfxdoc:escrow`.
 
 ## Working with lua-language-server
 
-OpenIDEA uses lua-language-server (when it is installed) for generic Lua: types of your own code, hover, references.
-It does not know CfxLua syntax or the natives. A `.luarc.json` at the root of the project quiets it:
+OpenIDEA runs lua-language-server for Lua itself: the types of your own code and its `---@param` / `---@class`
+annotations, hover, signature help, references. On its own it does not know CfxLua syntax or the natives, and reports
+`+=`, backtick hashes and every native as errors. Two steps teach it:
 
-```json
-{
-  "runtime.version": "Lua 5.4",
-  "runtime.nonstandardSymbol": ["+=", "-=", "*=", "/=", "<<=", ">>=", "&=", "|=", "^=", "/**/", "`"],
-  "diagnostics.severity": { "undefined-global": "Hint" }
-}
-```
+1. **The configuration.** At the root of the project, **New › lua-language-server config (.luarc.json)**, named
+   `.luarc`. It enables the CfxLua syntax (`+=`, `` `hash` ``, `/* */`), loads the `.cfxlua` folder as a library and
+   leaves `fxmanifest.lua` files to this plugin.
+2. **The definitions.** Create an empty `.cfxlua/natives.lua`, keep it focused and run **CfxLua: Generate
+   lua-language-server Definitions**, then save. The file receives every native of your games and of the server,
+   with their documentation, parameters, returns and per-game signatures, and the Cfx runtime API (`Citizen`, events,
+   exports, state bags, `json`, `msgpack`, `promise`, vectors).
 
-OpenIDEA-CfxLUA does not depend on it: natives, events, state bags and the rest work without it.
+lua-language-server then checks calls to natives: a missing argument, a wrong type or one argument too many is
+reported, and hover shows the native's documentation. Trailing flags may be left out, as the runtime allows. Run the
+command again after **CfxLua: Update Natives** or a change of game; the folder can stay out of version control.
 
 ## Troubleshooting
 

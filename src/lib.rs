@@ -4,6 +4,7 @@ pub mod escrow;
 pub mod events;
 pub mod feature;
 pub mod lua;
+pub mod luals;
 pub mod manifest;
 pub mod natives;
 pub mod nui;
@@ -54,6 +55,7 @@ pub fn all_features() -> Vec<Box<dyn Feature>> {
         Box::<perf::PerfFeature>::default(),
         Box::<syntax::SyntaxFeature>::default(),
         Box::<escrow::EscrowFeature>::default(),
+        Box::<luals::LualsFeature>::default(),
     ]
 }
 

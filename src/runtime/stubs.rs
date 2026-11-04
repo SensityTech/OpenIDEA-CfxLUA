@@ -33,7 +33,7 @@ impl Part {
     }
 }
 
-const FILES: &[(Part, &str, &str)] = &[
+pub const FILES: &[(Part, &str, &str)] = &[
     (Part::Shared, "cfxlua_std.lua", include_str!("../../data/runtime/shared/cfxlua_std.lua")),
     (Part::Shared, "citizen.lua", include_str!("../../data/runtime/shared/citizen.lua")),
     (Part::Shared, "events.lua", include_str!("../../data/runtime/shared/events.lua")),

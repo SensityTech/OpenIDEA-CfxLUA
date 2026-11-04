@@ -5,6 +5,22 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
 
 ## [Unreleased]
 
+### Added
+
+- **CfxLua: Generate lua-language-server Definitions**: fills an empty `.lua` file with a `---@meta` library of the
+  natives of the project's games and the server (documentation, parameters, returns, per-game overloads) and of the
+  Cfx runtime API, so that lua-language-server checks native calls and shows their documentation.
+- A **lua-language-server config (.luarc.json)** New file template: CfxLua syntax, the `.cfxlua` library, manifests
+  left to the plugin.
+
+### Changed
+
+- lua-language-server is now listed as a requirement next to OpenIDEA.
+
+### Fixed
+
+- The `string.blob_pack` overload of the runtime API used an invalid vararg annotation.
+
 ## [0.1.0] - 2026-11-04
 
 First preview release.

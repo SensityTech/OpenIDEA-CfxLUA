@@ -187,7 +187,7 @@ function string.isblob(value) end
 --- Writes values into `blob` like `string.pack`, starting at `position`
 --- (default 1). Returns the blob, or a new larger blob if the data does not
 --- fit.
----@overload fun(blob:string, format:string, vararg any):string
+---@overload fun(blob:string, format:string, ...:any):string
 ---@param blob string @The blob to write into.
 ---@param position integer @The position to start writing at.
 ---@param format string @A `string.pack` format.

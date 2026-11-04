@@ -166,7 +166,16 @@ The tool window follows the IDE theme ([light theme](assets/screenshots/tool-win
 
 ## Installation
 
-Requires [OpenIDEA](https://github.com/l0ng-ai/openidea/releases/latest) 0.1.35 or newer (plugin API 1.0).
+**Requirements — both are needed:**
+
+| | |
+|---|---|
+| [OpenIDEA](https://github.com/l0ng-ai/openidea/releases/latest) 0.1.35 or newer | The IDE (plugin API 1.0). |
+| [lua-language-server](https://luals.github.io/#install) on your `PATH` | OpenIDEA's Lua support: types of your own code, hover, signature help, references. OpenIDEA-CfxLUA feeds it the natives and the runtime API ([see below](#working-with-lua-language-server)). |
+
+Install lua-language-server with `winget install LuaLS.lua-language-server`, `brew install lua-language-server`, your
+distribution's package or a [release archive](https://github.com/LuaLS/lua-language-server/releases), then restart
+OpenIDEA so that it finds it.
 
 1. Download `sensity.cfxlua-<version>.oiplugin` from the
    [latest release](https://github.com/SensityTech/OpenIDEA-CfxLUA/releases/latest).
@@ -195,6 +204,7 @@ Run them from **Find Action** (`Ctrl+Shift+A` / `Cmd+Shift+A`); bind keys in **S
 |---|---|
 | **CfxLua: Show Documentation** | Shows the native, event, hash literal or manifest directive at the caret in the tool window. Also on the status bar item. |
 | **CfxLua: Update Natives** | Downloads the latest Cfx.re native databases now. |
+| **CfxLua: Generate lua-language-server Definitions** | Fills the focused empty `.lua` file with the natives and the runtime API for lua-language-server ([how](#working-with-lua-language-server)). |
 | **CfxLua: Check Resource Before Escrow Upload** | Runs the Asset Escrow pre-publish checklist on the resource of the focused file (Tools menu). |
 | **CfxLua: Convert Coordinates** | Converts the selected coordinates to another format. |
 
@@ -230,20 +240,32 @@ The plugin runs no programs and sends nothing anywhere except the natives update
 
 ## Working with lua-language-server
 
-OpenIDEA uses lua-language-server for generic Lua (types, hover, references) when it is installed. It does not know
-CfxLua syntax or the natives, so it reports `+=`, backtick hashes and every native as errors. A `.luarc.json` at the
-root of your project quiets it:
+OpenIDEA runs lua-language-server for Lua itself: the types of your own code and its `---@param` / `---@class`
+annotations, hover, signature help, references. On its own it does not know CfxLua syntax or the natives, and reports
+`+=`, backtick hashes and every native as errors. Two steps teach it:
 
-```json
-{
-  "runtime.version": "Lua 5.4",
-  "runtime.nonstandardSymbol": ["+=", "-=", "*=", "/=", "<<=", ">>=", "&=", "|=", "^=", "/**/", "`"],
-  "diagnostics.severity": { "undefined-global": "Hint" }
-}
-```
+1. **The configuration.** At the root of the project, **New › lua-language-server config (.luarc.json)**, named
+   `.luarc`:
 
-OpenIDEA-CfxLUA itself does not depend on lua-language-server: natives, events, state bags and the rest work
-without it. See the [lua-language-server settings](https://luals.github.io/wiki/settings/).
+   ```json
+   {
+     "runtime.version": "Lua 5.4",
+     "runtime.nonstandardSymbol": ["+=", "-=", "*=", "/=", "<<=", ">>=", "&=", "|=", "^=", "/**/", "`"],
+     "workspace.library": [".cfxlua"],
+     "workspace.ignoreDir": [".vscode", "node_modules", "fxmanifest.lua", "__resource.lua"],
+     "diagnostics.ignoredFiles": "Disable"
+   }
+   ```
+
+   It enables the CfxLua syntax, loads the `.cfxlua` folder as a library and leaves manifests to OpenIDEA-CfxLUA.
+2. **The definitions.** Create an empty `.cfxlua/natives.lua`, keep it focused and run **CfxLua: Generate
+   lua-language-server Definitions**, then save. The file receives every native of your games and of the
+   server — documentation, parameters, returns, a signature per game — and the Cfx runtime API.
+
+lua-language-server then checks calls to natives — a missing argument, a wrong type, one argument too many — and its
+hover shows their documentation. Trailing flags may be left out, as the runtime allows. Run the command again after
+**CfxLua: Update Natives** or a change of game; `.cfxlua/` can stay out of version control. See the
+[lua-language-server settings](https://luals.github.io/wiki/settings/) for the rest.
 
 ## Known limitations
 

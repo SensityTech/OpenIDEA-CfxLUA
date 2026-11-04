@@ -67,6 +67,11 @@ category = "CfxLua"
 when = "editorFocus"
 
 [[contributes.commands]]
+id = "luals.definitions"
+title = "CfxLua: Generate lua-language-server Definitions"
+category = "CfxLua"
+
+[[contributes.commands]]
 id = "escrow.check"
 title = "CfxLua: Check Resource Before Escrow Upload"
 category = "CfxLua"
@@ -128,6 +133,12 @@ id = "shared-config"
 name = "Shared config"
 extension = "lua"
 path = "templates/config.lua"
+
+[[contributes.fileTemplates]]
+id = "luarc"
+name = "lua-language-server config (.luarc.json)"
+extension = "json"
+path = "templates/luarc.json"
 
 [contributes.settings]
 title = "OpenIDEA-CfxLUA"
