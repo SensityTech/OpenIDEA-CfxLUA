@@ -553,6 +553,78 @@ register_plugin!(DevKit, providers, views);
 mod tests {
     use super::*;
 
+    type Section = (String, Vec<(String, String)>);
+
+    fn manifest_sections() -> Vec<Section> {
+        let text =
+            std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("plugin.toml")).unwrap();
+        let mut sections: Vec<Section> = Vec::new();
+        for line in text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {
+            if line.starts_with('[') {
+                sections.push((line.trim_matches(['[', ']']).to_owned(), Vec::new()));
+            } else if let (Some((key, value)), Some((_, entries))) = (line.split_once(" = "), sections.last_mut()) {
+                entries.push((key.to_owned(), value.trim_matches('"').to_owned()));
+            }
+        }
+        sections
+    }
+
+    fn values<'a>(sections: &'a [Section], kind: &str, key: &str) -> Vec<&'a str> {
+        let field = |e: &'a [(String, String)]| e.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str());
+        sections.iter().filter(|(k, _)| k == kind).filter_map(|(_, e)| field(e)).collect()
+    }
+
+    #[test]
+    fn every_declared_command_is_handled_and_every_file_exists() {
+        let sections = manifest_sections();
+        let host = openidea_plugin::mock::MockHost::install();
+        let inv = host.invocation();
+        let (settings, natives) = (Settings::defaults(), Natives::from_natives(Vec::new()));
+        let cx = CommandCx { ws: None, settings: &settings, natives: &natives, doc: None, inv: &inv };
+        let docs = docs::Docs::default();
+        let features = all_features();
+        for id in values(&sections, "contributes.commands", "id") {
+            let handled = std::iter::once(&docs as &dyn Feature)
+                .chain(features.iter().map(|f| f.as_ref()))
+                .any(|f| f.command(&cx, id, None).is_some());
+            assert!(handled, "command {id} is declared but not handled");
+        }
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let files = [
+            ("contributes.fileTemplates", "path"),
+            ("contributes.fileIcons", "icon"),
+            ("contributes.fileIcons", "iconDark"),
+            ("contributes.views", "web"),
+            ("contributes.settings", "schema"),
+        ];
+        for (kind, key) in files {
+            for path in values(&sections, kind, key) {
+                assert!(root.join(path).is_file(), "{kind}.{key} = {path} does not exist");
+            }
+        }
+    }
+
+    #[test]
+    fn run_detectors_follow_the_host_rules() {
+        let sections = manifest_sections();
+        let detectors: Vec<&Vec<(String, String)>> =
+            sections.iter().filter(|(k, _)| k == "contributes.runDetectors").map(|(_, e)| e).collect();
+        assert!(!detectors.is_empty());
+        for entries in detectors {
+            let get = |key: &str| entries.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str()).unwrap_or("");
+            let keys = ["id", "name", "files", "command", "args", "test"];
+            assert!(entries.iter().all(|(k, _)| keys.contains(&k.as_str())), "{entries:?}");
+            let id = get("id");
+            assert!(
+                id.starts_with(|c: char| c.is_ascii_lowercase() || c.is_ascii_digit())
+                    && id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "-_.".contains(c))
+            );
+            assert!((1..=128).contains(&get("name").trim().len()));
+            assert!(get("files").starts_with('[') && !get("files").contains(".."), "{}", get("files"));
+            assert!(!get("command").is_empty() && !get("command").contains(char::is_whitespace));
+        }
+    }
+
     #[test]
     fn status_names_side_resource_and_game() {
         let ws = Workspace::from_files(

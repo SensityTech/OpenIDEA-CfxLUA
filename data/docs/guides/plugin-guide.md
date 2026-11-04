@@ -205,6 +205,14 @@ lua-language-server then checks calls to natives: a missing argument, a wrong ty
 reported, and hover shows the native's documentation. Trailing flags may be left out, as the runtime allows. Run the
 command again after **CfxLua: Update Natives** or a change of game; the folder can stay out of version control.
 
+## Running FXServer
+
+In a `server-data` folder (a `server.cfg` at the root of the project), the run configurations offer **FXServer
+(server.cfg)**, which starts `FXServer +exec server.cfg` there with its console in the Run tool window. Grant the
+optional `process:FXServer` permission in **Settings › Plugins** once `FXServer` is on your `PATH`: on Windows the
+folder of `FXServer.exe`, on Linux an executable `FXServer` script that runs the artifacts' `run.sh`. After an artifacts
+update, approve the program again.
+
 ## Troubleshooting
 
 | Symptom | What to do |

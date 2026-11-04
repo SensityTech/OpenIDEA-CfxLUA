@@ -37,6 +37,7 @@ IDE, with the permissions you grant.
 - [Settings](#settings)
 - [Permissions](#permissions)
 - [Working with lua-language-server](#working-with-lua-language-server)
+- [Running FXServer](#running-fxserver)
 - [Known limitations](#known-limitations)
 - [Building from source](#building-from-source)
 - [Contributing](#contributing)
@@ -240,8 +241,10 @@ OpenIDEA plugins run in a sandbox and can only do what you grant when installing
 | `events` | Re-read saved files; update the status bar for the focused file. |
 | `net:static.cfx.re`, `net:raw.githubusercontent.com` *(optional)* | Download natives updates (Cfx.re database, RDR3 NativeDB). Without them, the bundled natives are used. |
 | `clipboard` *(optional)* | Copy buttons of the tool window. |
+| `process:FXServer` *(optional)* | The **FXServer (server.cfg)** run configuration ([Running FXServer](#running-fxserver)). |
 
-The plugin runs no programs and sends nothing anywhere except the natives update requests.
+The plugin sends nothing anywhere except the natives update requests, and runs no program except FXServer when you
+start that run configuration.
 
 ## Working with lua-language-server
 
@@ -271,6 +274,20 @@ lua-language-server then checks calls to natives — a missing argument, a wrong
 hover shows their documentation. Trailing flags may be left out, as the runtime allows. Run the command again after
 **CfxLua: Update Natives** or a change of game; `.cfxlua/` can stay out of version control. See the
 [lua-language-server settings](https://luals.github.io/wiki/settings/) for the rest.
+
+## Running FXServer
+
+When the project is a `server-data` folder (a `server.cfg` at its root), the run configurations list
+**FXServer (server.cfg)**: it starts `FXServer +exec server.cfg` in the project root, with its console in the Run tool
+window. It needs the optional `process:FXServer` permission, granted on the install page or later in
+**Settings › Plugins**; OpenIDEA then looks the program up on your `PATH`:
+
+- **Windows:** add the folder of `FXServer.exe` (your server artifacts) to `PATH`.
+- **Linux:** put an executable `FXServer` script on your `PATH` that runs the artifacts' `run.sh`, for example
+  `exec /opt/fxserver/run.sh "$@"`.
+
+Set `PATH` before granting the permission (restart OpenIDEA if it does not see the change). The permission pins the
+program it found: after an artifacts update, approve it again in **Settings › Plugins**.
 
 ## Known limitations
 

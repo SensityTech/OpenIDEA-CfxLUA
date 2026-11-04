@@ -134,6 +134,13 @@ name = "Shared config"
 extension = "lua"
 path = "templates/config.lua"
 
+[[contributes.runDetectors]]
+id = "fxserver"
+name = "FXServer (server.cfg)"
+files = ["server.cfg"]
+command = "FXServer"
+args = ["+exec", "server.cfg"]
+
 [[contributes.fileTemplates]]
 id = "luarc"
 name = "lua-language-server config (.luarc.json)"

@@ -17,6 +17,7 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   opens it on the checked resource.
 - An **Update Natives Now** button in the Natives tab.
 - A weekly workflow refreshes the bundled native databases (`scripts/update-natives.sh`).
+- An **FXServer (server.cfg)** run configuration in `server-data` projects (optional `process:FXServer` permission).
 
 ### Changed
 
