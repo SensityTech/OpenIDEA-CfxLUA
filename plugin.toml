@@ -1,11 +1,11 @@
 id = "sensity.cfxlua"
 name = "OpenIDEA-CfxLUA"
-version = "0.1.2"
+version = "0.1.3"
 description = "FiveM and RedM (CfxLua) support: natives of the right game and side, client/server awareness, the Cfx runtime API, state bags, events, fxmanifest, NUI, magic values, CfxLua syntax checks, Asset Escrow and built-in documentation."
 authors = ["SensityTech"]
 homepage = "https://github.com/SensityTech/OpenIDEA-CfxLUA"
 license = "Apache-2.0"
-change-notes = "0.1.2 — built on the final shape of plugin API 1.0; deprecated manifest directives are struck through."
+change-notes = "0.1.3 — big projects no longer crash the plugin at start: they are indexed in slices while you work."
 categories = ["frameworks", "linters", "tools"]
 engines.openidea = "^1.0"
 wasm = "dist/plugin.wasm"

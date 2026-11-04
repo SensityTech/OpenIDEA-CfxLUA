@@ -1,6 +1,6 @@
 [package]
 name = "openidea-cfxlua"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 description = "FiveM / RedM (CfxLua) support for OpenIDEA: natives, client/server awareness, state bags, events, fxmanifest, NUI and built-in documentation."
 license = "Apache-2.0"

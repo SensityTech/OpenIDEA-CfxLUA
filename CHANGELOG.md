@@ -5,6 +5,17 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-11-04
+
+### Fixed
+
+- **Big projects crashed the plugin at start** ("activation exceeded its CPU budget"): it read and indexed the
+  whole project in one call, past the CPU budget OpenIDEA gives each call (5·10⁹ wasm instructions). The scan now runs
+  in slices counted in files read and bytes indexed, over the calls the IDE makes (opening and focusing files, the
+  tool window, commands), the resource you open first; derived indexes catch up between slices. On a 5,000-file
+  project, no call uses more than half of the budget, and completion stays under 10 ms while indexing.
+- Files over 1 MB (generated data, bundles) are no longer indexed.
+
 ## [0.1.2] - 2026-11-04
 
 ### Changed
@@ -92,7 +103,8 @@ First preview release.
 - **Asset Escrow**: per-file encryption status, checks and a pre-upload checklist.
 - **The CfxLua tool window**: natives browser, runtime API, events, manifest directives, syntax features and guides.
 
-[Unreleased]: https://github.com/SensityTech/OpenIDEA-CfxLUA/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/SensityTech/OpenIDEA-CfxLUA/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/SensityTech/OpenIDEA-CfxLUA/releases/tag/v0.1.3
 [0.1.2]: https://github.com/SensityTech/OpenIDEA-CfxLUA/releases/tag/v0.1.2
 [0.1.1]: https://github.com/SensityTech/OpenIDEA-CfxLUA/releases/tag/v0.1.1
 [0.1.0]: https://github.com/SensityTech/OpenIDEA-CfxLUA/releases/tag/v0.1.0
