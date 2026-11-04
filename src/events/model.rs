@@ -131,6 +131,10 @@ impl EventKey {
     pub fn is_builtin(&self) -> bool {
         !self.logical && (self.parts[0].starts_with("__cfx_") || crate::docs::data::event(&self.parts[0]).is_some())
     }
+
+    pub fn is_nui_callback(&self) -> bool {
+        !self.logical && self.parts[0].starts_with(crate::nui::NUI_EVENT_PREFIX)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

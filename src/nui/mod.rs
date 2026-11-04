@@ -6,6 +6,8 @@ mod lua;
 mod manifest;
 mod web;
 
+pub use web::NUI_EVENT_PREFIX;
+
 use crate::feature::{Ctx, Doc, Feature, Intention, Problem};
 use crate::lua::Source;
 use crate::lua::lexer::Tok;

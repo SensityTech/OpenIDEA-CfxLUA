@@ -827,3 +827,11 @@ fn nothing_when_the_plugin_is_disabled() {
     assert!(f.problems(&fx.cx(&fx.doc("shop/web/src/App.tsx"))).is_empty());
     assert!(f.problems(&fx.cx(&fx.doc("shop/fxmanifest.lua"))).is_empty());
 }
+
+#[test]
+fn nui_callback_events_go_to_the_page() {
+    let (fx, f) =
+        project(&[("shop/client/events.lua", "AddEventHandler('__cfx_nui:closeShop', function(_, cb) cb('ok') end)")]);
+    let found = definitions(&fx, &f, "shop/client/events.lua", "closeShop", 1);
+    assert!(found.iter().any(|l| l.starts_with("shop/web/src/App.tsx:")), "{found:?}");
+}

@@ -477,3 +477,14 @@ fn disabled_or_unscanned_projects_are_silent() {
     let doc = fx.doc("standard_res/client.lua");
     assert!(f.line_markers(&fx.cx(&doc)).is_empty());
 }
+
+#[test]
+fn nui_callback_events_are_left_to_the_nui_bridge() {
+    let fx = myres((
+        "myres/client.lua",
+        "RegisterNUICallback('close', function(d, cb) cb('ok') end)\nAddEventHandler('__cfx_nui:close', function() end)\nTriggerEvent('__cfx_nui:close')\nRegisterNuiCallbackType('close')",
+    ));
+    let f = indexed(&fx);
+    assert!(definitions(&fx, &f, "myres/client.lua", "'__cfx_nui:close', function", 3).is_empty());
+    assert_eq!(definitions(&fx, &f, "myres/client.lua", "TriggerEvent('__cfx_nui", 15), ["myres/client.lua:2"]);
+}

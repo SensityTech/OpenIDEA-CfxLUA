@@ -380,6 +380,10 @@ fn site_at_caret<'a>(cx: &Ctx, db: &'a Db, at: usize) -> Option<(&'a Site, usize
 
 pub fn definition(cx: &Ctx, db: &Db, at: usize) -> Vec<Location> {
     let Some((site, _)) = site_at_caret(cx, db, at) else { return Vec::new() };
+    // The NUI bridge answers on `AddEventHandler('__cfx_nui:…')`, with the page.
+    if matches!(site.role, Role::Handler) && site.key.is_nui_callback() {
+        return Vec::new();
+    }
     targets_of(db, site).into_iter().map(anchor_location).collect()
 }
 
