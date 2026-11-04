@@ -3,12 +3,6 @@
 /dist/
 *.oiplugin
 
-# Documentation written locally for the maintainers (not published with the sources)
-/doc/
-
-# Local tooling (agent worktrees, editor settings)
-/.claude/
-
 # Editors and OS
 .idea/
 .vscode/
