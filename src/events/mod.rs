@@ -16,7 +16,7 @@ use flow::FileFacts;
 use openidea_plugin::Location;
 use openidea_plugin::providers::{CompletionItem, LineMarker};
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::rc::Rc;
 
 pub mod keys {
@@ -46,8 +46,31 @@ impl Config {
 struct Project {
     files: BTreeMap<String, FileFacts>,
     dirty: bool,
+    /// Lua files whose facts changed since the last build.
+    changed: BTreeSet<String>,
+    /// A manifest changed: sides and resources may differ everywhere.
+    manifests_changed: bool,
     db: Option<Rc<Db>>,
     config: Config,
+}
+
+const MAX_UPDATED_FILES: usize = 8;
+
+impl Project {
+    fn rebuild(&mut self, ws: &Workspace, config: Config) {
+        let incremental = !self.manifests_changed && self.config == config && self.changed.len() <= MAX_UPDATED_FILES;
+        let updated = self
+            .db
+            .take()
+            .filter(|_| incremental)
+            .and_then(|db| Rc::try_unwrap(db).ok())
+            .and_then(|db| db.update(ws, &self.files, &config, &self.changed));
+        self.db = Some(Rc::new(updated.unwrap_or_else(|| Db::build(ws, &self.files, &config))));
+        self.config = config;
+        self.dirty = false;
+        self.changed.clear();
+        self.manifests_changed = false;
+    }
 }
 
 #[derive(Default)]
@@ -64,9 +87,7 @@ impl EventsFeature {
         let mut projects = self.projects.borrow_mut();
         let p = projects.entry(cx.ws.root.clone()).or_default();
         if p.db.is_none() || p.dirty || p.config != config {
-            p.db = Some(Rc::new(Db::build(cx.ws, &p.files, &config)));
-            p.config = config;
-            p.dirty = false;
+            p.rebuild(cx.ws, config);
         }
         p.db.clone()
     }
@@ -89,18 +110,27 @@ impl Feature for EventsFeature {
                 let facts = flow::facts(src);
                 if p.files.get(path) != Some(&facts) {
                     p.files.insert(path.to_owned(), facts);
+                    p.changed.insert(path.to_owned());
                     p.dirty = true;
                 }
             }
-            // sides and resources come from the manifests
-            FileKind::Manifest => p.dirty = true,
+            FileKind::Manifest => {
+                p.manifests_changed = true;
+                p.dirty = true;
+            }
             _ => {}
         }
     }
 
     fn forget_file(&self, path: &str) {
+        let manifest = crate::project::file_kind(path) == FileKind::Manifest;
         for p in self.projects.borrow_mut().values_mut() {
-            if p.files.remove(path).is_some() || crate::project::file_kind(path) == FileKind::Manifest {
+            if p.files.remove(path).is_some() {
+                p.changed.insert(path.to_owned());
+                p.dirty = true;
+            }
+            if manifest {
+                p.manifests_changed = true;
                 p.dirty = true;
             }
         }
@@ -110,8 +140,8 @@ impl Feature for EventsFeature {
         let mut projects = self.projects.borrow_mut();
         let p = projects.entry(ws.root.clone()).or_default();
         if p.dirty && ws.scanned {
-            p.db = Some(Rc::new(Db::build(ws, &p.files, &p.config)));
-            p.dirty = false;
+            let config = p.config.clone();
+            p.rebuild(ws, config);
         }
     }
 

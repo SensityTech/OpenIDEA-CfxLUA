@@ -413,8 +413,8 @@ impl<'a> Builder<'a> {
         self.scopes.resolve(&self.functions, &self.standard, r.record, r.file, info, self_class)
     }
 
-    fn build(mut self) -> Db {
-        // 1. explicit functions
+    /// The explicit and detected event functions; returns the names of every function whose calls make sites.
+    fn detect(&mut self) -> BTreeSet<String> {
         for line in &self.config.helpers {
             if let Some(f) = settings_helper(line) {
                 self.settings_paths.insert(f.path.clone());
@@ -464,7 +464,6 @@ impl<'a> Builder<'a> {
         });
         self.rebuild_lookup();
 
-        // 2. helper detection
         let mut fetched: BTreeSet<String> = BTreeSet::new();
         let mut inner: Vec<(FnId<'a>, &'a FunctionInfo, Vec<Ref<'a>>)> = Vec::new();
         let mut inner_index: HashMap<FnId<'a>, usize> = HashMap::new();
@@ -495,13 +494,19 @@ impl<'a> Builder<'a> {
             }
             pending = self.functions.keys().filter(|k| !fetched.contains(*k)).cloned().collect();
         }
+        fetched
+    }
 
-        // 3. sites
+    /// Grouped by file, in call order within a file, so that the sites of one file can be replaced alone.
+    fn sites(&mut self, fetched: &BTreeSet<String>, only: Option<&BTreeSet<String>>) -> (Vec<Site>, Vec<DynamicSite>) {
         let mut sites = Vec::new();
         let mut dynamic = Vec::new();
-        for name in &fetched {
+        for name in fetched {
             let mut last: Option<(&str, FileInfo)> = None;
             for r in self.fetch(name).iter() {
+                if only.is_some_and(|files| !files.contains(r.file)) {
+                    continue;
+                }
                 let info = match &last {
                     Some((file, info)) if *file == r.file => info.clone(),
                     _ => self.scopes.info(r.file),
@@ -512,6 +517,12 @@ impl<'a> Builder<'a> {
                 last = Some((r.file, info));
             }
         }
+        sites.sort_by(|a, b| a.file.cmp(&b.file));
+        dynamic.sort_by(|a, b| a.file.cmp(&b.file));
+        (sites, dynamic)
+    }
+
+    fn helper_list(&self) -> Vec<Rc<EventFn>> {
         let mut helpers: Vec<Rc<EventFn>> = self.explicit.clone();
         helpers.extend(
             self.detected.iter().flatten().map(|(_, f)| f.clone()).filter(|f| !self.settings_paths.contains(&f.path)),
@@ -523,9 +534,17 @@ impl<'a> Builder<'a> {
                 b.offset,
             ))
         });
+        helpers
+    }
+
+    fn build(mut self) -> Db {
+        let fetched = self.detect();
+        let (sites, dynamic) = self.sites(&fetched, None);
+        let helpers = self.helper_list();
         let mut db =
             Db { helpers, sites, dynamic, functions: self.functions, standard: self.standard, ..Db::default() };
-        db.index();
+        db.index_keys();
+        db.index_derived();
         db
     }
 
@@ -924,11 +943,85 @@ fn payload_arity(f: &EventFn, args: &[Arg], record: &CallRecord) -> Option<usize
 }
 
 impl Db {
-    fn index(&mut self) {
+    /// The database after the Lua files `changed` were edited, re-resolving only their calls. `None` when the edit
+    /// changed the event functions, which every file depends on: build it again.
+    pub fn update(
+        mut self,
+        ws: &Workspace,
+        files: &BTreeMap<String, FileFacts>,
+        config: &Config,
+        changed: &BTreeSet<String>,
+    ) -> Option<Db> {
+        let mut builder = Builder::new(ws, files, config);
+        let fetched = builder.detect();
+        if builder.helper_list() != self.helpers {
+            return None;
+        }
+        let (fresh, fresh_dynamic) = builder.sites(&fetched, Some(changed));
+        self.replace_sites(changed, fresh);
+        self.dynamic.retain(|d| !changed.contains(&*d.file));
+        self.dynamic.extend(fresh_dynamic);
+        self.dynamic.sort_by(|a, b| a.file.cmp(&b.file));
+        self.index_derived();
+        Some(self)
+    }
+
+    fn replace_sites(&mut self, changed: &BTreeSet<String>, fresh: Vec<Site>) {
+        let old = std::mem::take(&mut self.sites);
+        let mut moved: Vec<Option<usize>> = Vec::with_capacity(old.len());
+        let mut sites = Vec::with_capacity(old.len() + fresh.len());
+        let mut added = Vec::with_capacity(fresh.len());
+        let mut fresh = fresh.into_iter().peekable();
+        for s in old {
+            while let Some(f) = fresh.next_if(|f| f.file < s.file) {
+                added.push(sites.len());
+                sites.push(f);
+            }
+            if changed.contains(&*s.file) {
+                moved.push(None);
+            } else {
+                moved.push(Some(sites.len()));
+                sites.push(s);
+            }
+        }
+        for f in fresh {
+            added.push(sites.len());
+            sites.push(f);
+        }
+        self.sites = sites;
+        self.by_key.retain(|_, list| {
+            list.retain_mut(|i| moved[*i].map(|n| *i = n).is_some());
+            !list.is_empty()
+        });
+        let mut touched: HashSet<Rc<EventKey>> = HashSet::new();
+        for &i in &added {
+            let key = &self.sites[i].key;
+            self.by_key.entry(key.clone()).or_default().push(i);
+            touched.insert(key.clone());
+        }
+        for key in touched {
+            if let Some(list) = self.by_key.get_mut(&key) {
+                list.sort_unstable();
+            }
+        }
+    }
+
+    fn index_keys(&mut self) {
         for (i, s) in self.sites.iter().enumerate() {
             self.by_key.entry(s.key.clone()).or_default().push(i);
-            self.by_file.entry(s.file.clone()).or_default().push(i);
         }
+    }
+
+    fn index_derived(&mut self) {
+        self.by_file.clear();
+        let mut start = 0;
+        while start < self.sites.len() {
+            let file = &self.sites[start].file;
+            let end = start + self.sites[start..].iter().take_while(|s| s.file == *file).count();
+            self.by_file.insert(file.clone(), (start..end).collect());
+            start = end;
+        }
+        self.aliases.clear();
         // the two sites of an alias call are built together
         let mut calls: Vec<Vec<Rc<EventKey>>> = Vec::new();
         let mut previous: Option<&Site> = None;
@@ -953,17 +1046,39 @@ impl Db {
                 }
             }
         }
-        let mut namespaces = HashSet::new();
+        let mut namespaces: HashSet<String> = HashSet::new();
+        let mut add = |k: &EventKey| {
+            let ns = k.namespace();
+            if !ns.is_empty() && !namespaces.contains(ns) {
+                namespaces.insert(ns.to_owned());
+            }
+        };
         for (key, sites) in &self.by_key {
             if !sites.iter().any(|&i| self.sites[i].role == Role::Handler) {
                 continue;
             }
-            for k in self.related(key) {
-                if !k.namespace().is_empty() && !namespaces.contains(k.namespace()) {
-                    namespaces.insert(k.namespace().to_owned());
-                }
+            if self.aliases.contains_key(key) {
+                self.related(key).iter().for_each(&mut add);
+            } else {
+                add(key);
             }
         }
         self.handled_namespaces = namespaces;
+    }
+
+    #[cfg(test)]
+    pub fn dump(&self) -> String {
+        let mut keys: Vec<String> = self.by_key.iter().map(|(k, v)| format!("{k:?} {v:?}")).collect();
+        let mut files: Vec<String> = self.by_file.iter().map(|(k, v)| format!("{k} {v:?}")).collect();
+        let mut aliases: Vec<String> = self.aliases.iter().map(|(k, v)| format!("{k:?} {v:?}")).collect();
+        let mut namespaces: Vec<&String> = self.handled_namespaces.iter().collect();
+        keys.sort();
+        files.sort();
+        aliases.sort();
+        namespaces.sort();
+        format!(
+            "helpers {:?}\nsites {:#?}\ndynamic {:#?}\nkeys {keys:#?}\nfiles {files:#?}\naliases {aliases:#?}\nnamespaces {namespaces:?}",
+            self.helpers, self.sites, self.dynamic
+        )
     }
 }

@@ -616,6 +616,67 @@ mod tests {
             files.len(),
             start.elapsed() - indexed
         );
+        let names =
+            ["natives", "runtime", "manifest", "statebags", "events", "nui", "values", "coords", "perf", "syntax"];
+        let (path, text) =
+            files.iter().find(|(p, t)| p.starts_with("res7/client/") && t.contains("TriggerServerEvent")).unwrap();
+        let path = format!("/big/{path}");
+        let settings = Settings::defaults();
+        let natives = Natives::bundled();
+        let query = |ws: &Workspace, text: &str, label: &str| {
+            let doc = Doc::new(ws, &path, "lua", 1, text);
+            let cx = Ctx { doc: &doc, ws, settings: &settings, natives: &natives };
+            for (feature, name) in features.iter().zip(names) {
+                let start = std::time::Instant::now();
+                let n = feature.problems(&cx).len() + feature.completion(&cx, text.len(), None).len();
+                eprintln!("{label} {name}: problems+completion {:?} ({n})", start.elapsed());
+            }
+        };
+        query(&ws, text, "cold");
+        query(&ws, text, "warm");
+        let edited = format!("{text}\nlocal typed = 1\n");
+        let mut ws = ws;
+        ws.set(&path, Some(&edited));
+        let src = parse(project::file_kind(&path), &edited);
+        for feature in &features {
+            feature.index_file(&ws, &path, project::file_kind(&path), &src);
+            feature.indexed(&ws);
+        }
+        query(&ws, &edited, "keystroke");
+
+        let mut heavy = Vec::new();
+        for r in 0..440 {
+            heavy.push((
+                format!("r{r}/fxmanifest.lua"),
+                "fx_version 'cerulean'\ngame 'gta5'\nclient_script 'cl.lua'\nserver_script 'sv.lua'\n".to_owned(),
+            ));
+            let mut server = String::new();
+            for k in 0..55 {
+                server.push_str(&format!(
+                    "RegisterNetEvent('r{r}:e{k}')\nAddEventHandler('r{r}:e{k}', function(a, b)\n    TriggerClientEvent('r{r}:c{k}', source, a, b)\nend)\n"
+                ));
+            }
+            heavy.push((format!("r{r}/sv.lua"), server));
+        }
+        let refs: Vec<(&str, &str)> = heavy.iter().map(|(p, t)| (p.as_str(), t.as_str())).collect();
+        let mut ws = Workspace::from_files("/heavy", &refs);
+        let events = events::EventsFeature::default();
+        for f in ws.files() {
+            if let Some(text) = f.text.as_deref() {
+                events.index_file(&ws, &f.path, f.kind, &parse(f.kind, text));
+            }
+        }
+        let start = std::time::Instant::now();
+        events.indexed(&ws);
+        eprintln!("heavy events: {} files, first build {:?}", heavy.len(), start.elapsed());
+        let path = "/heavy/r7/sv.lua";
+        let edited = format!("local typed = 1\n{}", ws.text(path).unwrap());
+        ws.set(path, Some(&edited));
+        let start = std::time::Instant::now();
+        events.index_file(&ws, path, FileKind::Lua, &parse(FileKind::Lua, &edited));
+        let file = start.elapsed();
+        events.indexed(&ws);
+        eprintln!("heavy events keystroke: index_file {file:?}, indexed {:?}", start.elapsed() - file);
     }
 
     #[test]

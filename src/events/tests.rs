@@ -436,3 +436,43 @@ fn settings_changes_rebuild_the_database() {
     let db = feature.db(&fx.cx(&doc)).unwrap();
     assert_eq!(db.helpers.len(), 1);
 }
+
+#[test]
+fn updating_edited_files_matches_a_full_build() {
+    let fx = project(&[]);
+    let config = Config::read(&Settings::defaults());
+    let lua: Vec<String> = fx
+        .ws
+        .files()
+        .filter(|f| f.path.ends_with(".lua") && !f.path.ends_with("fxmanifest.lua"))
+        .map(|f| f.path.clone())
+        .collect();
+    let mut files: std::collections::BTreeMap<String, super::flow::FileFacts> =
+        lua.iter().map(|p| (p.clone(), super::flow::facts(&crate::lua::Source::new(fx.ws.text(p).unwrap())))).collect();
+    let mut db = Db::build(&fx.ws, &files, &config);
+    let mut incremental = 0;
+    for (n, path) in lua.iter().cycle().take(lua.len() * 6).enumerate() {
+        let text = fx.ws.text(path).unwrap().to_owned();
+        let at = text.char_indices().map(|(i, _)| i).nth(n * 7 % text.chars().count().max(1)).unwrap_or(0);
+        let edited = match n % 6 {
+            0 => format!("local typed = 1\n{text}"),
+            1 => format!("{}\n{}", &text[..at], &text[at..]),
+            2 => format!("{} x{}", &text[..at], &text[at..]),
+            3 => text.replacen("'", "'renamed_", 1),
+            4 => text.lines().skip(1).collect::<Vec<_>>().join("\n"),
+            _ => format!("{text}\nTriggerServerEvent('late:{n}')\n"),
+        };
+        files.insert(path.clone(), super::flow::facts(&crate::lua::Source::new(&edited)));
+        let changed = std::collections::BTreeSet::from([path.clone()]);
+        let full = Db::build(&fx.ws, &files, &config);
+        db = match db.update(&fx.ws, &files, &config, &changed) {
+            Some(updated) => {
+                incremental += 1;
+                assert_eq!(updated.dump(), full.dump(), "edit {n} of {path}");
+                updated
+            }
+            None => full,
+        };
+    }
+    assert!(incremental > lua.len(), "most edits update in place ({incremental})");
+}
