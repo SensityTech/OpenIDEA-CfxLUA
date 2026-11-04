@@ -24,6 +24,10 @@ to go with them.
 It is an OpenIDEA plugin: a sandboxed WebAssembly component written in Rust that only reads your project through the
 IDE, with the permissions you grant.
 
+<p align="center">
+  <img src="assets/screenshots/natives-search.gif" alt="Searching natives by camel humps in the CfxLua tool window: typing ggz finds GetGroundZFor_3dCoord" width="960">
+</p>
+
 ## Contents
 
 - [Features](#features)
@@ -148,6 +152,17 @@ into the editor), the runtime API, the built-in events, the manifest directives,
 **guides** (getting started, natives, threads, events, exports, state bags, NUI, fxmanifest, vectors, json/msgpack,
 commands, RedM vs FiveM, Asset Escrow, performance, security…).
 **CfxLua: Show Documentation** shows the native, event, hash or directive at the caret.
+
+| | |
+|---|---|
+| ![Natives: GetGroundZFor_3dCoord with its out-parameter returned](assets/screenshots/tool-window-natives.png) | ![Built-in events: playerConnecting with its handler parameters](assets/screenshots/tool-window-events.png) |
+| **Natives** — every parameter with its Lua and native type, returns, description and example. | **Events** — built-in events with their parameters, side, game and whether they can be cancelled. |
+| ![Runtime API: CreateThread](assets/screenshots/tool-window-runtime.png) | ![CfxLua syntax: compound assignment and its pitfalls](assets/screenshots/tool-window-syntax.png) |
+| **Runtime API** — `Citizen`, events, state bags, `json`, `msgpack`, vectors… | **Syntax** — what CfxLua adds to Lua 5.4, and its pitfalls. |
+| ![Manifest directives: client_script](assets/screenshots/tool-window-manifest.png) | ![Guides: state bags](assets/screenshots/tool-window-guides.png) |
+| **Manifest** — every `fxmanifest.lua` directive. | **Guides** — from your first resource to security and performance. |
+
+The tool window follows the IDE theme ([light theme](assets/screenshots/tool-window-natives-light.png)).
 
 ## Installation
 
