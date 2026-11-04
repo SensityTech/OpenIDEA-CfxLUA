@@ -1,21 +1,12 @@
-//! Asset Escrow's rules: which files of a resource it encrypts (Lua, YFT, YDD
-//! and YDR files that `escrow_ignore` does not match), the files buyers expect
-//! to edit (configuration, translations), and the files scripts load from
-//! their path at runtime (`LoadResourceFile`, ox_lib's module loaders).
-
 use crate::lua::Source;
 use crate::manifest::files::normalize;
 use crate::project::{Resource, is_manifest_name};
 use crate::text::file_name;
 use crate::workspace::Workspace;
 
-/// Extensions escrow encrypts.
 const ENCRYPTED_EXTENSIONS: [&str; 4] = ["lua", "yft", "ydd", "ydr"];
-/// NUI files, which escrow never encrypts.
 pub const NUI_EXTENSIONS: [&str; 5] = ["html", "htm", "js", "mjs", "css"];
-/// First bytes of a file escrow encrypted.
 const MAGIC: &str = "FXAP";
-/// The key file of a protected build, in the resource directory.
 const KEY_FILE: &str = ".fxap";
 const SKIPPED_DIRS: [&str; 5] = ["node_modules", ".git", ".svn", ".idea", ".vscode"];
 const MAX_FILES: usize = 20_000;
@@ -26,9 +17,7 @@ const LOCALE_DIRS: [&str; 8] = ["locales", "locale", "lang", "langs", "languages
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Status {
     Encrypted,
-    /// Listed in `escrow_ignore`.
     Ignored,
-    /// A type escrow does not encrypt (or a manifest).
     Unprotected,
 }
 
@@ -49,12 +38,10 @@ impl Status {
     }
 }
 
-/// The text after the last `.` of a name, lowercased (`""` without one).
 pub fn extension(name: &str) -> String {
     file_name(name).rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default()
 }
 
-/// A Lua file escrow already encrypted (its text starts with `FXAP`).
 pub fn is_protected(text: &str) -> bool {
     text.starts_with(MAGIC)
 }
@@ -63,12 +50,10 @@ pub fn has_key_file(ws: &Workspace, res: &Resource) -> bool {
     ws.exists(&format!("{}/{KEY_FILE}", res.dir))
 }
 
-/// The resource declares `escrow_ignore` or holds a `.fxap` key.
 pub fn uses_escrow(ws: &Workspace, res: &Resource) -> bool {
     res.escrow_ignore.is_some() || has_key_file(ws, res)
 }
 
-/// Status of the resource file `rel` (relative to the resource directory).
 pub fn status(res: &Resource, rel: &str) -> Status {
     let name = file_name(rel);
     if is_manifest_name(name) || !ENCRYPTED_EXTENSIONS.contains(&extension(name).as_str()) {
@@ -80,7 +65,6 @@ pub fn status(res: &Resource, rel: &str) -> Status {
     }
 }
 
-/// A file of a resource.
 #[derive(Clone, Debug)]
 pub struct EscrowFile {
     pub path: String,
@@ -88,7 +72,6 @@ pub struct EscrowFile {
     pub status: Status,
 }
 
-/// The files escrow packs, sorted by path: nested resources, tool folders and the key file left out.
 pub fn files_of(ws: &Workspace, res: &Resource) -> Vec<EscrowFile> {
     let prefix = format!("{}/", res.dir);
     let nested: Vec<String> =
@@ -108,7 +91,6 @@ pub fn files_of(ws: &Workspace, res: &Resource) -> Vec<EscrowFile> {
         .collect()
 }
 
-/// The `escrow_ignore` pattern that keeps a configuration or translation file open, `None` for other files.
 pub fn editable_pattern(rel: &str) -> Option<String> {
     if extension(rel) != "lua" {
         return None;
@@ -128,7 +110,6 @@ pub fn editable_pattern(rel: &str) -> Option<String> {
     stem.split(['_', '.', '-']).any(|w| CONFIG_NAMES.contains(&w.to_ascii_lowercase().as_str())).then(|| rel.to_owned())
 }
 
-/// Encrypted configuration and translation files, grouped by the pattern that keeps them open (first appearance first).
 pub fn editable_groups(files: &[EscrowFile]) -> Vec<(String, Vec<&EscrowFile>)> {
     let mut out: Vec<(String, Vec<&EscrowFile>)> = Vec::new();
     for f in files.iter().filter(|f| f.status == Status::Encrypted) {
@@ -141,30 +122,22 @@ pub fn editable_groups(files: &[EscrowFile]) -> Vec<(String, Vec<&EscrowFile>)> 
     out
 }
 
-/// Whose file `LoadResourceFile` reads.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Owner {
-    /// `GetCurrentResourceName()`, ox_lib's `cache.resource` (and every module loader).
     This,
-    /// A resource named by a string.
     Named(String),
 }
 
-/// A file loaded from its path at runtime.
 #[derive(Clone, Debug)]
 pub struct Load {
-    /// `None` for `LoadResourceFile`, else the module loader as written (`require`, `lib.require`, `lib.load`).
     pub module: Option<&'static str>,
     owner: Owner,
-    /// The path or module name.
     pub value: String,
-    /// The literal's byte span.
     pub start: usize,
     pub end: usize,
 }
 
 impl Load {
-    /// Paths relative to the resource named `resource`, in lookup order.
     pub fn candidates(&self, resource: &str) -> Vec<String> {
         if self.module.is_none() {
             if matches!(&self.owner, Owner::Named(n) if n != resource) {
@@ -189,7 +162,6 @@ impl Load {
     }
 }
 
-/// The loads of a Lua source: `LoadResourceFile(<this resource>, 'path')`, `require 'm'`, `lib.require 'm'`, `lib.load 'm'`.
 pub fn loads(src: &Source) -> Vec<Load> {
     // Most scripts load nothing: skip the call scan (it runs on every new version of the edited file).
     if !src.text.contains("LoadResourceFile") && !src.text.contains("require") && !src.text.contains("lib.load") {
@@ -221,7 +193,6 @@ pub fn loads(src: &Source) -> Vec<Load> {
     out
 }
 
-/// The owner argument of `LoadResourceFile`, when it names a resource.
 fn owner(src: &Source, (a, b): (usize, usize)) -> Option<Owner> {
     if let Some(tok) = src.string_arg((a, b)) {
         return Some(Owner::Named(src.toks[tok].string_value(&src.text)));
@@ -230,7 +201,6 @@ fn owner(src: &Source, (a, b): (usize, usize)) -> Option<Owner> {
     matches!(texts.as_slice(), ["GetCurrentResourceName", "(", ")"] | ["cache", ".", "resource"]).then_some(Owner::This)
 }
 
-/// The resource file a load reads (as written in the project) and its status.
 pub fn target(ws: &Workspace, res: &Resource, load: &Load) -> Option<(String, Status)> {
     let prefix = format!("{}/", res.dir);
     load.candidates(&res.name).into_iter().find_map(|c| {

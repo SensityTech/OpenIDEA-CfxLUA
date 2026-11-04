@@ -1,8 +1,3 @@
-//! The NUI parts of a manifest: `CfxNuiFilesMissing` (the `ui_page` or the
-//! files of its build not covered by `files`, so FXServer does not send them)
-//! with its fix, and the intention switching `ui_page` between the build and
-//! the dev server.
-
 use super::build::{Configs, dir_exists, join};
 use crate::feature::{Doc, Fix, Intention, Problem};
 use crate::lua::Source;
@@ -14,7 +9,6 @@ use crate::workspace::Workspace;
 use openidea_plugin::Severity;
 
 const CODE: &str = "CfxNuiFilesMissing";
-/// Files looked at under a build folder, at most.
 const MAX_FILES: usize = 2000;
 const MAX_EXAMPLES: usize = 3;
 const NOT_SERVED_EXTENSIONS: &[&str] = &[
@@ -32,10 +26,8 @@ const NOT_SERVED_NAMES: &[&str] = &[
     "license",
     "readme",
 ];
-/// Starts the trailing comment holding the original `ui_page` value.
 const MARKER: &str = "-- ui_page build: ";
 
-/// Entries declaring files: `file '…'`, `file { … }`, `files { … }` (`files 'x'` is no file entry).
 fn file_entries(entries: &[Entry]) -> Vec<&Entry> {
     entries.iter().filter(|e| e.name == "file" || (e.name == "files" && e.table.is_some())).collect()
 }
@@ -50,7 +42,6 @@ fn is_url(value: &str) -> bool {
     value.contains("://")
 }
 
-/// A folder holding a UI project (its sources), not a build.
 fn is_source_project(ws: &Workspace, dir: &str) -> bool {
     ws.exists(&format!("{dir}/package.json"))
         || dir_exists(ws, &format!("{dir}/node_modules"))
@@ -60,15 +51,12 @@ fn is_source_project(ws: &Workspace, dir: &str) -> bool {
         })
 }
 
-/// A file next to the page that the page does not load.
 fn is_not_served(name: &str) -> bool {
     let name = name.to_ascii_lowercase();
     let ext = name.rsplit_once('.').map_or("", |(_, e)| e);
     NOT_SERVED_NAMES.contains(&name.as_str()) || NOT_SERVED_EXTENSIONS.contains(&ext) || name.ends_with(".d.ts")
 }
 
-/// The build folder holding the page: the output folder of a bundler configuration containing it, else
-/// the page's folder; `None` for the resource root and for a source project folder.
 fn build_root(ws: &Workspace, configs: &Configs, res: &str, page: &str) -> Option<String> {
     let inside = |outer: &str, inner: &str| inner.strip_prefix(outer).is_some_and(|r| r.starts_with('/'));
     for (dir, c) in configs.under(res) {
@@ -166,7 +154,6 @@ pub fn files_missing(doc: &Doc, ws: &Workspace, configs: &Configs) -> Vec<Proble
     out
 }
 
-/// The quote of a literal: `"` when it starts with one, else `'`.
 fn quote_of(src: &Source, v: Option<&Value>) -> char {
     if v.is_some_and(|v| src.text[v.start..].starts_with('"')) { '"' } else { '\'' }
 }
@@ -179,7 +166,6 @@ fn line_start(text: &str, at: usize) -> usize {
     text[..at].rfind('\n').map_or(0, |i| i + 1)
 }
 
-/// `Add '{glob}' to files`: in the `files { }` table, after a `file` line, or as a new directive.
 fn add_files(src: &Source, entries: &[Entry], literal: &Value, glob: &str) -> Fix {
     let fix = Fix::new(format!("Add '{glob}' to files"));
     let text = &src.text;
@@ -214,16 +200,11 @@ fn add_files(src: &Source, entries: &[Entry], literal: &Value, glob: &str) -> Fi
     fix.insert(line_end(text, anchor_end), format!("\n{line}"))
 }
 
-/// The state of a `ui_page` line.
 enum Line<'a> {
-    /// A local page: it can switch to the dev server.
     Build(&'a Value),
-    /// The dev server, switched by the plugin: the literal to restore, the start of the appended
-    /// comment and the end of the line.
     Dev { literal: &'a Value, original: String, comment: usize, end: usize },
 }
 
-/// The `ui_page` line at byte `at`.
 fn line_at<'a>(text: &str, entries: &'a [Entry], at: usize) -> Option<Line<'a>> {
     for e in entries.iter().filter(|e| e.name == "ui_page") {
         let Some(literal) = e.first() else { continue };
@@ -246,7 +227,6 @@ fn line_at<'a>(text: &str, entries: &'a [Entry], at: usize) -> Option<Line<'a>> 
     None
 }
 
-/// "Switch ui_page to the dev server" / "Switch ui_page back to the build" on the `ui_page` line at `at`.
 pub fn dev_mode(doc: &Doc, configs: &Configs, default_port: u16, at: usize) -> Option<Intention> {
     let src = &doc.src;
     let text = &src.text;

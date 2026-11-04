@@ -1,46 +1,3 @@
-//! The CfxLua tool window: natives browser, runtime API, built-in events,
-//! manifest directives, CfxLua syntax and the bundled guides. The page
-//! (`web/`) is a thin client: searching and HTML building happen here.
-//!
-//! # Page protocol
-//!
-//! One JSON object per message, `op` names it. The page owns the UI state
-//! (tab, search text, filters, selection); every request carries what the
-//! plugin needs to answer it, so an instance restarted in between still can.
-//!
-//! Page → plugin:
-//! - `{op: "init"}`: sent when the page loads. Answer `init`.
-//! - `{op: "search", tab, seq, text, filters, selected?, select?, limit}`: a
-//!   new search. `selected` is the current selection (kept when still
-//!   listed), `select` an item to show (from `open` or a link: the natives set
-//!   filter widens, the search text clears if needed). Answer `items`.
-//! - `{op: "rows", tab, seq, text, filters, offset, limit}`: more rows of the
-//!   same search (the natives list is paged). Answer `rows`.
-//! - `{op: "detail", tab, id}`: the page of an item (runtime: a tree id, or
-//!   `type:<Class>` for a type link). Answer `detail`.
-//! - `{op: "insert", tab, id, variant}`: insert at the caret of the active
-//!   editor; `variant` is `call`, `handler`, `netHandler`, `directive` or
-//!   `example`. Answer `notice`.
-//! - `{op: "prefs", prefs}`: the page's preferences (reading size, natives
-//!   set, toggles, splitter proportions, search histories), stored as is.
-//!
-//! Plugin → page:
-//! - `{op: "init", prefs, open?}`: stored preferences, and an `open` the
-//!   page missed while it was hidden.
-//! - `{op: "items", tab, seq, text, filters, total, count, empty, offset,
-//!   rows, selected?, detail?, namespaces?}`: `rows` are the first `limit`
-//!   rows; `selected` the index to select and `detail` its page; `text` /
-//!   `filters` as applied (changed by a `select`).
-//! - `{op: "rows", tab, seq, offset, rows}`.
-//! - `{op: "detail", tab, id, html, copy, url?, insert}`: `copy` maps copy
-//!   actions (`name`, `signature`, `hash`, `nativeName`, `example`, `link`) to
-//!   their text, `insert` lists the insert variants offered.
-//! - `{op: "open", tab, id?}`: show that tab and item (`show-docs`).
-//! - `{op: "notice", text, error}`: a short message for the user.
-//!
-//! A row is `{id, label, icon?, bold?, strike?, parts?: [[text, class]],
-//! tip?, kind?, depth?, children?, expanded?}` (see [`tabs::Row`]).
-
 pub mod data;
 pub mod html;
 mod insert;
@@ -62,17 +19,12 @@ use std::cell::RefCell;
 use std::time::{Duration, Instant};
 use tabs::{Filters, Listing, Tab};
 
-/// The view id declared in plugin.toml.
+// The page protocol is listed at the top of web/app.js.
 pub const VIEW: &str = "docs";
-/// The command showing the documentation of what is at the caret.
 pub const SHOW_DOCS: &str = "show-docs";
-/// Storage key of the page's preferences.
 const PREFS: &str = "docs.prefs";
-/// Largest preferences object kept.
 const PREFS_MAX: usize = 64 * 1024;
-/// How long an `open` waits for a page that was hidden.
 const PENDING: Duration = Duration::from_secs(120);
-/// `show-docs` without a target.
 const WHERE: &str = "The documentation is in the CfxLua tool window (View > Tool Windows > CfxLua). \
                      Put the caret on a native, a hash literal, a built-in event or a manifest directive to show its page there.";
 
@@ -83,9 +35,7 @@ pub struct Docs {
 
 #[derive(Default)]
 struct State {
-    /// The last natives search (its key, its result), paged by `rows`.
     natives: Option<(String, Listing)>,
-    /// The last `open`, for a page that loads afterwards.
     pending: Option<(Instant, Value)>,
 }
 
@@ -130,10 +80,8 @@ struct Search {
     text: String,
     #[serde(default)]
     filters: Filters,
-    /// The current selection, kept when still listed.
     #[serde(default)]
     selected: Option<String>,
-    /// An item to show.
     #[serde(default)]
     select: Option<String>,
     #[serde(default = "page_rows")]
@@ -167,7 +115,6 @@ impl Docs {
         Ok(())
     }
 
-    /// The answer to a page request (none for `prefs`).
     fn reply(&self, cx: &CommandCx, request: Request) -> Option<Value> {
         match request {
             Request::Init => {
@@ -267,7 +214,6 @@ impl Docs {
         reply
     }
 
-    /// Runs `f` on the listing of a search, the cached one for the natives when it matches.
     fn with_listing<R>(
         &self,
         cx: &CommandCx,
@@ -292,7 +238,6 @@ impl Docs {
         out
     }
 
-    /// Asks the page to show `tab` / `id` (kept for a page that loads later).
     fn open(&self, tab: Tab, id: &str) {
         let message = json!({ "op": "open", "tab": tab.id(), "id": id });
         post(&message);
@@ -335,8 +280,6 @@ fn listing_key(text: &str, filters: &Filters, project: &[NativeSet]) -> String {
     format!("{text}\u{0}{filters:?}\u{0}{project:?}")
 }
 
-/// The natives sets of the project's enabled libraries (docs §2); empty
-/// (every set) without a project.
 fn project_sets(cx: &CommandCx) -> Vec<NativeSet> {
     let Some(ws) = cx.ws.filter(|_| cx.settings.enabled()) else { return Vec::new() };
     let mut sets = Vec::new();
@@ -349,7 +292,6 @@ fn project_sets(cx: &CommandCx) -> Vec<NativeSet> {
     sets
 }
 
-/// The page of item `id` of `tab`: `{tab, id, html, copy, url?, insert}`.
 fn detail(cx: &CommandCx, tab: Tab, id: &str) -> Map<String, Value> {
     let mut copy = Map::new();
     let mut url = None;
@@ -425,10 +367,8 @@ fn detail(cx: &CommandCx, tab: Tab, id: &str) -> Map<String, Value> {
     out
 }
 
-/// Builds an inserted text from the indentation of the caret's line.
 type InsertText = Box<dyn Fn(&str) -> String>;
 
-/// The text an insert action puts at the caret.
 fn insert_text(cx: &CommandCx, tab: Tab, id: &str, variant: &str) -> Option<InsertText> {
     match (tab, variant) {
         (Tab::Natives, "call") => {

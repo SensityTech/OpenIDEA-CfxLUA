@@ -1,18 +1,11 @@
-//! `GetDistanceBetweenCoords(x1, y1, z1, x2, y2, z2, useZ)` / `Vdist(…)` and
-//! their vector math equivalent `#(a - b)`: the fix of the distance check
-//! and the standalone code action.
-
 use super::ast::{Ast, ExprKind, Node};
 use super::classify::Perf;
 use super::spec::Work;
 use crate::lua::Source;
 use crate::natives::{NativeSet, Natives};
 
-/// Distance natives replaced by vector math (`Vdist2` is a squared distance).
 pub const NATIVES: &[&str] = &["GetDistanceBetweenCoords", "Vdist"];
 
-/// `#(a - b)` computing the same distance as `call`; `None` when it can't be
-/// written safely (`useZ` not a literal, unexpected arguments).
 pub fn replacement(p: &Perf, call: usize) -> Option<String> {
     let ast = &p.ast;
     let name = ast.callee_name(call)?;
@@ -45,7 +38,6 @@ fn literal_bool(ast: &Ast, src: &Source, e: usize) -> Option<bool> {
     }
 }
 
-/// `v` (`v.xy` in 2D, `v.xyz` for a vector4) when the coordinates are `v.x, v.y, v.z` of a vector, else `vector3(x, y, z)` / `vector2(x, y)`.
 fn operand(p: &Perf, coords: &[usize], use_z: bool) -> Option<String> {
     let ast = &p.ast;
     let text = |e: usize| ast.text(p.src, Node::Expr(e));
@@ -87,8 +79,6 @@ fn common_vector(p: &Perf, coords: &[usize]) -> Option<(String, &'static str)> {
     Some((text.to_owned(), created_vector(ast, p.cx.natives, p.sets(), obj)?))
 }
 
-/// `vector3` / `vector4` when `e` is created by a vector constructor or a
-/// native returning a vector, directly or through a local never assigned again.
 pub fn created_vector(ast: &Ast, natives: &Natives, sets: &[NativeSet], e: usize) -> Option<&'static str> {
     let e = ast.unwrap(e);
     let value = if matches!(ast.exprs[e].kind, ExprKind::Name { .. }) { ast.constant_initializer(e)? } else { e };

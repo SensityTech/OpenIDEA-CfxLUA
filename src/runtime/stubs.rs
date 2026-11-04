@@ -1,20 +1,8 @@
-//! The bundled runtime stubs (`data/runtime/<part>/*.lua`): Lua declarations
-//! with EmmyLua / LuaCATS `---` documentation, parsed once into a declaration
-//! tree (the Runtime API tab) and a global / member table (completion).
-//!
-//! Structure rules (those of the EmmyLua structure view): `---@class X` on
-//! `local XType = {}` declares class `X` whose members are the later
-//! `function XType:m()` / `XType.k = v`; `X = {}` declares a global table;
-//! `function a.b()` adds `b` to `a` (a global table of its own when the file
-//! does not declare `a`: library extensions such as `math`); re-assigning a
-//! declared name is ignored.
-
 use crate::lua::Source;
 use crate::lua::lexer::Tok;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-/// The stub directories, in tree order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Part {
     Shared,
@@ -26,7 +14,6 @@ pub enum Part {
 impl Part {
     pub const ALL: [Part; 4] = [Part::Shared, Part::Client, Part::Server, Part::Manifest];
 
-    /// Tree label: `Shared`, `Client`, `Server`, `Manifest`.
     pub fn label(self) -> &'static str {
         match self {
             Self::Shared => "Shared",
@@ -36,7 +23,6 @@ impl Part {
         }
     }
 
-    /// The library name: `Cfx runtime API (shared)`, …, `Cfx resource manifest`.
     pub fn display_name(self) -> &'static str {
         match self {
             Self::Shared => "Cfx runtime API (shared)",
@@ -47,7 +33,6 @@ impl Part {
     }
 }
 
-/// Stub files by part, sorted by file name.
 const FILES: &[(Part, &str, &str)] = &[
     (Part::Shared, "cfxlua_std.lua", include_str!("../../data/runtime/shared/cfxlua_std.lua")),
     (Part::Shared, "citizen.lua", include_str!("../../data/runtime/shared/citizen.lua")),
@@ -72,64 +57,46 @@ const FILES: &[(Part, &str, &str)] = &[
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
-    /// `---@class` on a local table.
     Class,
-    /// A global variable or table (`Citizen = {}`, `source = nil`, `math` of `function math.round()`).
     Global,
-    /// `local x = …`, `local function f()`.
     Local,
-    /// `function Name()`.
     Function,
-    /// `function A.b()`, `function A:b()`, a function in a table constructor.
     Method,
-    /// `A.b = …`, a field of a table constructor.
     Field,
 }
 
-/// A name, a type and a description: `---@param`, `---@field`, `---@return`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Typed {
     pub name: String,
     pub ty: String,
-    /// Markdown.
     pub desc: String,
 }
 
-/// What the `---` lines above a declaration say.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Annotations {
-    /// The untagged lines (Markdown).
     pub description: String,
     pub class: Option<String>,
     pub parents: Vec<String>,
     pub fields: Vec<Typed>,
-    /// `---@param` and `---@vararg` (named `...`).
     pub params: Vec<Typed>,
     pub returns: Vec<Typed>,
     pub ty: Option<String>,
     pub overloads: Vec<String>,
-    /// The message (possibly empty) of `---@deprecated`.
     pub deprecated: Option<String>,
     pub see: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
 pub struct Decl {
-    /// `CreateThread`, `Citizen`, `eps`; a class: its class name.
     pub name: String,
     pub kind: Kind,
-    /// Shown before a member's name: `Citizen` in `Citizen.CreateThread`, the class of a class member.
     pub owner: Option<String>,
-    /// Declared with `:`.
     pub colon: bool,
-    /// A function (statement or value).
     pub function: bool,
-    /// Parameter names of a function, in order (`...` for a vararg).
     pub params: Vec<String>,
     pub doc: Annotations,
     pub part: Part,
     pub file: &'static str,
-    /// Members, in declaration order (the tree sorts them).
     pub children: Vec<usize>,
 }
 
@@ -138,17 +105,14 @@ impl Decl {
         self.function
     }
 
-    /// Variables and tables (merged with a single variable child in the tree).
     pub fn is_var(&self) -> bool {
         matches!(self.kind, Kind::Global | Kind::Local | Kind::Field) && !self.function
     }
 
-    /// Tree label: `CreateThread(routine)`, `Citizen`.
     pub fn label(&self) -> String {
         if self.is_function() { format!("{}({})", self.name, self.params.join(", ")) } else { self.name.clone() }
     }
 
-    /// `Citizen.CreateThread`, `MsgpackPacker:any`, `joaat`.
     pub fn qualified(&self) -> String {
         match &self.owner {
             Some(o) => format!("{o}{}{}", if self.colon { ":" } else { "." }, self.name),
@@ -156,7 +120,6 @@ impl Decl {
         }
     }
 
-    /// The parameters of a function with their documented types (`any` when undocumented).
     pub fn typed_params(&self) -> Vec<Typed> {
         self.params
             .iter()
@@ -167,41 +130,32 @@ impl Decl {
             .collect()
     }
 
-    /// The type of a variable or field: `---@type`, or its class.
     pub fn var_type(&self) -> Option<&str> {
         self.doc.ty.as_deref().or(self.doc.class.as_deref())
     }
 }
 
-/// A global name of the runtime.
 #[derive(Clone, Debug)]
 pub struct Global {
-    /// Its first declaration.
     pub decl: usize,
-    /// The table holding its members (a class name, or its own name for a plain table).
     pub table: Option<String>,
-    /// Only extended here (`math`, `string`, `os`…): the standard library declares it.
     pub extension: bool,
 }
 
 pub struct Runtime {
     pub decls: Vec<Decl>,
-    /// Top-level declarations of each part ([`Part::ALL`] order), sorted for the tree.
     pub tops: [Vec<usize>; 4],
     globals: HashMap<String, Global>,
-    /// Member declarations by table (class name or global table name).
     members: HashMap<String, Vec<usize>>,
     classes: HashMap<String, usize>,
 }
 
-/// The bundled stubs, parsed on first use.
 pub fn runtime() -> &'static Runtime {
     static RUNTIME: OnceLock<Runtime> = OnceLock::new();
     RUNTIME.get_or_init(|| Runtime::parse(FILES))
 }
 
 impl Runtime {
-    /// Parses stub files `(part, file name, text)`, in order.
     pub fn parse(files: &[(Part, &'static str, &str)]) -> Self {
         let mut rt = Self {
             decls: Vec::new(),
@@ -227,17 +181,14 @@ impl Runtime {
         self.globals.get(name)
     }
 
-    /// Every global, in no particular order.
     pub fn globals(&self) -> impl Iterator<Item = (&str, &Global)> {
         self.globals.iter().map(|(k, v)| (k.as_str(), v))
     }
 
-    /// Declared members of table `table` (functions and fields, every part).
     pub fn members(&self, table: &str) -> &[usize] {
         self.members.get(table).map_or(&[], Vec::as_slice)
     }
 
-    /// The declaration of class `name`.
     pub fn class(&self, name: &str) -> Option<&Decl> {
         self.classes.get(name).map(|&i| &self.decls[i])
     }
@@ -246,8 +197,6 @@ impl Runtime {
         self.classes.contains_key(name)
     }
 
-    /// The first alternative of type expression `ty` that is a table with
-    /// members: `EventHandlerData|nil` → `EventHandlerData`.
     pub fn table_of<'a>(&self, ty: &'a str) -> Option<&'a str> {
         let first = ty.split(',').next().unwrap_or(ty);
         first
@@ -256,7 +205,6 @@ impl Runtime {
             .find(|t| self.classes.contains_key(*t) || self.members.contains_key(*t))
     }
 
-    /// The table a declaration's members belong to.
     fn table_key(&self, decl: usize) -> Option<String> {
         let d = &self.decls[decl];
         if let Some(c) = &d.doc.class {
@@ -268,7 +216,6 @@ impl Runtime {
         }
     }
 
-    /// Tables and classes first, then by lower-case label; children by label.
     fn sort(&mut self) {
         let key = |d: &Decl| d.label().to_lowercase();
         for part in 0..self.tops.len() {
@@ -284,13 +231,11 @@ impl Runtime {
     }
 }
 
-/// One stub file being read.
 struct FileParser<'a, 's> {
     rt: &'a mut Runtime,
     src: &'s Source,
     part: Part,
     file: &'static str,
-    /// Tables of this file by variable name (`PromiseType`, `Citizen`, `math`).
     vars: HashMap<String, usize>,
     tops: Vec<usize>,
 }
@@ -304,7 +249,6 @@ impl FileParser<'_, '_> {
         self.tops
     }
 
-    /// Reads the declaration starting at token `i`; the index after it, or `None` if there is none.
     fn statement(&mut self, i: usize) -> Option<usize> {
         let src = self.src;
         if src.is_kw(i, "function") {
@@ -394,7 +338,6 @@ impl FileParser<'_, '_> {
         }
     }
 
-    /// `a.b:c` from token `i`: the names, whether the last one follows `:`, the token after.
     fn path(&self, mut i: usize) -> (Vec<String>, bool, usize) {
         let src = self.src;
         let mut names = Vec::new();
@@ -413,7 +356,6 @@ impl FileParser<'_, '_> {
         (names, false, i)
     }
 
-    /// Parameter names of the list opening at token `open`.
     fn params(&self, open: usize) -> Option<Vec<String>> {
         let src = self.src;
         if !src.is_op(open, "(") {
@@ -428,8 +370,6 @@ impl FileParser<'_, '_> {
         )
     }
 
-    /// Reads the value assigned to `d` from token `i` (table constructor
-    /// fields become its children, a function gives it parameters); the index after it.
     fn value(&mut self, i: usize, d: usize) -> usize {
         let src = self.src;
         if src.is_kw(i, "function") {
@@ -461,7 +401,6 @@ impl FileParser<'_, '_> {
         close + 1
     }
 
-    /// Makes `d` a function with parameters `params`.
     fn function(&mut self, d: usize, params: Vec<String>) {
         let decl = &mut self.rt.decls[d];
         decl.function = true;
@@ -473,7 +412,6 @@ impl FileParser<'_, '_> {
         };
     }
 
-    /// The table `path` refers to, created (as a global table of this file) when unknown.
     fn owner(&mut self, path: &[String]) -> usize {
         let root = &path[0];
         let mut node = match self.vars.get(root) {
@@ -511,7 +449,6 @@ impl FileParser<'_, '_> {
         node
     }
 
-    /// Adds `child` to `parent` (tree) and to the members of parent's table.
     fn attach(&mut self, parent: usize, child: usize) {
         let table = self.rt.table_key(parent);
         self.rt.decls[child].owner = Some(table.clone().unwrap_or_else(|| self.rt.decls[parent].name.clone()));
@@ -541,7 +478,6 @@ impl FileParser<'_, '_> {
         self.rt.decls.len() - 1
     }
 
-    /// The `---` lines right above code token `i` (no blank line in between).
     fn doc_before(&self, i: usize) -> Annotations {
         let src = self.src;
         let Some(tok) = src.toks.get(i) else { return Annotations::default() };
@@ -568,8 +504,6 @@ impl FileParser<'_, '_> {
     }
 }
 
-/// Whether token `i` starts a statement: the token before it ends one (a
-/// value such as `nil` included, unlike [`Source::is_statement_start`]).
 fn statement_start(src: &Source, i: usize) -> bool {
     let Some(p) = i.checked_sub(1) else { return true };
     let text = src.tok_text(p);
@@ -580,7 +514,6 @@ fn statement_start(src: &Source, i: usize) -> bool {
     }
 }
 
-/// The index after the `end` closing a function body that starts at token `i`.
 fn skip_function(src: &Source, mut i: usize) -> usize {
     let mut depth = 1usize;
     while i < src.toks.len() {
@@ -601,7 +534,6 @@ fn skip_function(src: &Source, mut i: usize) -> usize {
     i
 }
 
-/// Parses `---` lines (with their dashes).
 pub fn annotations(lines: &[&str]) -> Annotations {
     let mut a = Annotations::default();
     let mut description: Vec<&str> = Vec::new();
@@ -650,7 +582,6 @@ pub fn annotations(lines: &[&str]) -> Annotations {
     a
 }
 
-/// `name type @desc` → name, type, description.
 fn named(rest: &str) -> Option<Typed> {
     let (name, rest) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
     if name.is_empty() {
@@ -660,7 +591,6 @@ fn named(rest: &str) -> Option<Typed> {
     Some(Typed { name: name.to_owned(), ty, desc })
 }
 
-/// `type @desc` (EmmyLua) or `type desc` (LuaCATS) → type, description.
 fn split_type(rest: &str) -> (String, String) {
     if let Some((ty, desc)) = rest.split_once(" @") {
         return (ty.trim().to_owned(), desc.trim().to_owned());

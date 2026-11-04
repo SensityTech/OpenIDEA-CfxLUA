@@ -1,5 +1,3 @@
-//! Navigation, gutter, completion, documentation and checks on the synthetic project.
-
 use super::EventsFeature;
 use super::tests::{PROJECT, db, indexed, project, tuple, wire};
 use crate::feature::Feature;
@@ -7,7 +5,6 @@ use crate::settings::Settings;
 use crate::testing::Fixture;
 use serde_json::Value;
 
-/// `path:line` of the definitions at the first `marker` of `rel` (plus `shift`).
 fn definitions(fx: &Fixture, feature: &EventsFeature, rel: &str, marker: &str, shift: usize) -> Vec<String> {
     let doc = fx.doc(rel);
     let at = doc.text().find(marker).unwrap_or_else(|| panic!("{marker} in {rel}")) + shift;
@@ -122,7 +119,6 @@ fn documentation_of_project_keys() {
     assert!(text.contains("**Aliases:** 'ev\\_legacy\\_spawn'"), "{text}");
 }
 
-/// Labels offered at the `<caret>` of `rel`.
 fn labels(fx: &Fixture, rel: &str) -> Vec<String> {
     let f = indexed(fx);
     let (doc, at) = fx.caret(rel);
@@ -254,7 +250,6 @@ fn other_strings_are_not_completed() {
 // ---------------------------------------------------------------------------------------------
 // checks
 
-/// `message @ highlighted text` of the event problems of `rel`.
 fn problems(fx: &Fixture, rel: &str) -> Vec<String> {
     let f = indexed(fx);
     let doc = fx.doc(rel);

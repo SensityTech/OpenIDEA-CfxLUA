@@ -1,10 +1,3 @@
-//! Cfx runtime API (Citizen, events, exports, state bags, json, msgpack,
-//! vectors…): the bundled stubs ([`stubs`]) and their completion in scripts —
-//! runtime globals by the script's side, and members after `Name.` / `Name:`
-//! (also through calls and fields: `Player(id).state:set`), each with its
-//! Markdown documentation. Manifest directives are completed by the manifest
-//! feature, state bag keys by the state bags feature.
-
 pub mod stubs;
 
 use crate::feature::{Ctx, Feature};
@@ -19,9 +12,6 @@ pub use stubs::{Decl, Kind, Part, Runtime, Typed, runtime};
 #[derive(Default)]
 pub struct RuntimeFeature;
 
-/// The runtime parts a script on `side` may use: shared everywhere, client
-/// and server as the side and the settings allow (natives-project §7.2),
-/// none in manifests.
 pub fn visible_parts(settings: &Settings, side: Side) -> Vec<Part> {
     if !settings.enabled() || !settings.bool(keys::RUNTIME_API, true) || side == Side::Manifest {
         return Vec::new();
@@ -61,7 +51,6 @@ impl Feature for RuntimeFeature {
     }
 }
 
-/// Whether `at` is inside a comment, a string or a hash literal.
 fn in_literal(src: &Source, at: usize) -> bool {
     if src.in_comment(at) {
         return true;
@@ -86,14 +75,11 @@ fn global_items(rt: &Runtime, parts: &[Part], prefix: &str) -> Vec<CompletionIte
     items
 }
 
-/// What a resolved expression is.
 enum Ty<'a> {
-    /// A table or class: the key of its members.
     Table(String),
     Function(&'a Decl),
 }
 
-/// Members of the expression ending before the `.` / `:` token `op`.
 fn member_items(rt: &Runtime, parts: &[Part], src: &Source, op: usize, colon: bool) -> Vec<CompletionItem> {
     let Some(Ty::Table(table)) = expression_type(rt, parts, src, op) else { return Vec::new() };
     let mut seen = HashSet::new();
@@ -114,8 +100,6 @@ fn member_items(rt: &Runtime, parts: &[Part], src: &Source, op: usize, colon: bo
     items
 }
 
-/// The type of the suffixed expression (`Citizen`, `Player(id).state`,
-/// `promise.new()`) that ends right before token `op`.
 fn expression_type<'a>(rt: &'a Runtime, parts: &[Part], src: &Source, op: usize) -> Option<Ty<'a>> {
     enum Seg<'s> {
         Member(&'s str),
@@ -200,8 +184,6 @@ fn field_item(class: &Decl, f: &Typed) -> CompletionItem {
     item
 }
 
-/// One-line signature: `Citizen.CreateThread(routine: fun()): integer`,
-/// `source: integer`, `class Citizen`.
 pub fn signature(rt: &Runtime, d: &Decl) -> String {
     if d.is_function() {
         let params: Vec<String> = d.typed_params().iter().map(|p| format!("{}: {}", p.name, p.ty)).collect();
@@ -223,8 +205,6 @@ pub fn signature(rt: &Runtime, d: &Decl) -> String {
     }
 }
 
-/// The Markdown documentation of a declaration: signature, description,
-/// fields, parameters, returns, overloads, deprecation, part.
 pub fn markdown(rt: &Runtime, d: &Decl) -> String {
     let a = &d.doc;
     let mut out = format!("```lua\n{}{}\n```", if d.is_function() { "function " } else { "" }, signature(rt, d));

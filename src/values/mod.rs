@@ -1,13 +1,3 @@
-//! Readable magic values: controls, blips, markers, HUD colours, explosions, animation flags, hashes.
-//!
-//! The integer literals passed to natives get their meaning as hint
-//! diagnostics (the IDE has no inlay hints or hover: the diagnostic message
-//! carries the label and the details of the original quick documentation),
-//! enumerated arguments complete with their named values, and two code
-//! actions name a value permanently: a `--[[ NAME ]]` comment, or a CfxLua
-//! `` `name` `` hash literal. Hash names come from the strings of the project
-//! (indexed here) and the bundled vehicle, ped and weapon names.
-
 pub mod decode;
 pub mod sites;
 pub mod tables;
@@ -27,9 +17,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use tables::Tables;
 
-/// Settings keys (`values.*`); every one defaults to true.
 pub mod keys {
-    /// Hint diagnostics with the meaning of magic values.
     pub const HINTS: &str = "values.hints";
     pub const CONTROLS: &str = "values.controls";
     pub const HASHES: &str = "values.hashes";
@@ -40,10 +28,8 @@ pub mod keys {
     pub const ANIM_FLAGS: &str = "values.animFlags";
 }
 
-/// Inspection id of the hint diagnostics.
 pub const CODE: &str = "CfxMagicValue";
 
-/// joaat → spellings of the project's strings, with the number of files holding each.
 #[derive(Default)]
 struct HashIndex {
     files: HashMap<String, Vec<(i32, String)>>,
@@ -75,13 +61,11 @@ impl HashIndex {
         }
     }
 
-    /// The lexicographically smallest spelling hashing to `hash`.
     fn find(&self, hash: i32) -> Option<&str> {
         self.names.get(&hash)?.keys().next().map(String::as_str)
     }
 }
 
-/// The hashable names of a Lua source (first spelling of a hash wins): game-name-looking strings and hash literals.
 fn names_of(src: &Source) -> Vec<(i32, String)> {
     let mut seen = HashMap::new();
     for t in &src.toks {
@@ -104,14 +88,12 @@ fn names_of(src: &Source) -> Vec<(i32, String)> {
     seen.into_iter().collect()
 }
 
-/// `^[A-Za-z0-9_.\-]{2,64}$` with a letter.
 fn is_game_name(name: &str) -> bool {
     (2..=64).contains(&name.len())
         && name.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-'))
         && name.bytes().any(|b| b.is_ascii_alphabetic())
 }
 
-/// Lua quoted-string escapes of a hash literal's content; `None` when invalid.
 fn unescape(raw: &str) -> Option<Vec<u8>> {
     let b = raw.as_bytes();
     let mut out = Vec::with_capacity(b.len());
@@ -178,7 +160,6 @@ fn unescape(raw: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// Lua's extended UTF-8 (code points up to 2^31).
 fn utf8_extended(code: u32) -> Vec<u8> {
     if code < 0x80 {
         return vec![code as u8];
@@ -196,7 +177,6 @@ fn utf8_extended(code: u32) -> Vec<u8> {
     bytes
 }
 
-/// Whether a name can be written as a hash literal without escapes.
 fn literal_safe(name: &str) -> bool {
     !name.is_empty() && !name.contains(['`', '\\', '\n', '\r'])
 }
@@ -211,7 +191,6 @@ impl ValuesFeature {
         cx.settings.enabled() && cx.doc.is_lua()
     }
 
-    /// The name of `hash`: a string of the project first, then the bundled names.
     fn hash_name(&self, hash: i32) -> Option<HashName> {
         if let Some(n) = self.hashes.borrow().find(hash) {
             return Some(HashName { name: n.to_owned(), origin: Origin::Project });
@@ -225,7 +204,6 @@ impl ValuesFeature {
         decode::decode(site.kind, site.value, site.game, &|h| self.hash_name(h))
     }
 
-    /// The decodable literal at byte `at` (or just before it).
     fn site_near<'a>(scope: &Scope<'a>, at: usize) -> Option<Site<'a>> {
         let src = scope.src();
         [Some(at), at.checked_sub(1)].into_iter().flatten().filter_map(|a| src.tok_at(a)).find_map(|tok| {
@@ -237,7 +215,6 @@ impl ValuesFeature {
     }
 }
 
-/// Whether the site is followed on its line by a comment naming the value (`38 --[[ INPUT_PICKUP ]]`).
 fn is_annotated(src: &Source, end: usize, name: &str) -> bool {
     let i = src.all.partition_point(|t| t.start < end);
     src.all.get(i).is_some_and(|t| {
@@ -349,7 +326,6 @@ impl Feature for ValuesFeature {
     }
 }
 
-/// Completion items of `kind` in `game` (kinds without a closed list of values have none).
 fn items(kind: Kind, game: Game, argument: &str, replace: Option<openidea_plugin::Range>) -> Vec<CompletionItem> {
     let t = Tables::get();
     let gta = game == Game::Gta5;

@@ -1,6 +1,3 @@
-//! The performance inspections (with their quick fixes) and the loop cost
-//! tooltips of the gutter.
-
 use super::ast::{Ast, ExprKind, Node, StatKind};
 use super::classify::{CallInfo, Perf, WaitValue};
 use super::edits::{self, Edit};
@@ -11,7 +8,6 @@ use super::{distance, spec};
 use crate::feature::{Fix, Problem};
 use openidea_plugin::Severity;
 
-/// The options of the checks (settings `perf.*`).
 pub struct Options {
     pub idle_sleep_ms: i64,
     pub throttle_ms: i64,
@@ -43,7 +39,6 @@ pub const DISTANCE_NATIVE: &str = "CfxDistanceNative";
 pub const PER_FRAME_SPAM: &str = "CfxPerFrameSpam";
 pub const REPEATED_REGISTRATION: &str = "CfxRepeatedRegistration";
 
-/// IntelliJ's weak warnings.
 const WEAK: Severity = Severity::Info;
 
 fn fix(title: String, edits: Vec<Edit>) -> Fix {
@@ -52,7 +47,6 @@ fn fix(title: String, edits: Vec<Edit>) -> Fix {
     f
 }
 
-/// Every problem of the document.
 pub fn problems(p: &Perf, opts: &Options) -> Vec<Problem> {
     let ast = &p.ast;
     let mut out = Vec::new();
@@ -114,7 +108,6 @@ fn per_frame_loop(lp: &LoopFacts, opts: &Options, out: &mut Vec<Problem>) {
     }
 }
 
-/// `local sleep = <idle>` first, `sleep = 0` first in each near block, `Wait(sleep)` last.
 fn adaptive_sleep(lp: &LoopFacts, polling: &Polling, idle: i64) -> Option<Vec<Edit>> {
     let p = lp.p;
     let (ast, src) = (&p.ast, p.src);
@@ -194,7 +187,6 @@ fn loop_without_wait(lp: &LoopFacts, out: &mut Vec<Problem>) {
     out.push(problem);
 }
 
-/// The `Has…Loaded` check of a loop that never waits.
 fn loading_check(lp: &LoopFacts) -> Option<std::rc::Rc<CallInfo>> {
     if !lp.p.may_run_on_client() || !lp.never_yields() {
         return None;
@@ -327,7 +319,6 @@ fn per_frame_spam(lp: &LoopFacts, out: &mut Vec<Problem>) {
     }
 }
 
-/// Whether every `if` branch between `call` and the loop body holds over many frames.
 fn runs_every_frame(lp: &LoopFacts, call: usize) -> bool {
     let ast = &lp.p.ast;
     let mut n = Node::Expr(call);
@@ -344,7 +335,6 @@ fn runs_every_frame(lp: &LoopFacts, call: usize) -> bool {
     true
 }
 
-/// The branch condition of `block` in `if` statement `s` (`None` for `else`), and every condition of the statement.
 fn branch(ast: &Ast, s: usize, block: usize) -> Option<(Option<usize>, Vec<usize>)> {
     let StatKind::If { conds, blocks, otherwise } = &ast.stats[s].kind else { return None };
     if let Some(i) = blocks.iter().position(|&b| b == block) {
@@ -463,7 +453,6 @@ fn repeated_registration(p: &Perf, call: usize, out: &mut Vec<Problem>) {
     out.push(Problem::new(REPEATED_REGISTRATION, Severity::Warning, start, stop, message));
 }
 
-/// Where `call` runs repeatedly: a handler, a command or a long-running loop.
 fn repeated_place(p: &Perf, call: usize) -> Option<Place> {
     let ast = &p.ast;
     let mut n = Node::Expr(call);
@@ -516,14 +505,12 @@ fn string_value(p: &Perf, e: usize) -> String {
     p.src.toks[p.ast.exprs[e].first].string_value(&p.src.text)
 }
 
-/// `if not done then done = true … end`: the branch runs once.
 fn is_one_shot_guard(ast: &Ast, s: usize, block: usize) -> bool {
     let Some((Some(cond), _)) = branch(ast, s, block) else { return false };
     let read = read_names(ast, Node::Expr(cond));
     assigned_names(ast, Node::Block(block)).iter().any(|n| read.contains(n))
 }
 
-/// A closure containing an endless `while` / `repeat` loop without exit.
 fn has_endless_loop(ast: &Ast, f: usize) -> bool {
     let ExprKind::Function { body, .. } = ast.exprs[ast.unwrap(f)].kind else { return false };
     let mut found = false;
@@ -540,7 +527,6 @@ fn has_endless_loop(ast: &Ast, f: usize) -> bool {
 
 // Loop cost markers
 
-/// The loop cost tooltips: (loop statement, cost, text).
 pub fn markers(p: &Perf) -> Vec<(usize, Cost, String)> {
     let mut out = Vec::new();
     for s in 0..p.ast.stats.len() {
@@ -610,7 +596,6 @@ fn per_frame_reason(lp: &LoopFacts) -> String {
     "No per-frame work found: the loop could wait longer between iterations".into()
 }
 
-/// Distinct names, the first 4 joined, `, …` when there are more.
 fn names<'s>(all: impl Iterator<Item = &'s str>) -> String {
     let mut distinct: Vec<&str> = Vec::new();
     for n in all {
@@ -626,7 +611,6 @@ fn names<'s>(all: impl Iterator<Item = &'s str>) -> String {
     out
 }
 
-/// Whitespace runs as one space, at most 60 characters.
 fn shorten(text: &str) -> String {
     let one = text.split_whitespace().collect::<Vec<_>>().join(" ");
     if one.chars().count() > 60 { format!("{}…", one.chars().take(59).collect::<String>()) } else { one }

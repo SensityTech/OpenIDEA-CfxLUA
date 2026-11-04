@@ -1,31 +1,19 @@
-//! HTML building blocks of the documentation pages: GitHub-flavoured Markdown
-//! (tables, strikethrough, task lists, bare URLs) with the tool window's
-//! post-processing, highlighted Lua code, badges and zebra tables. The page's
-//! style sheet (`web/style.css`) gives the classes their look.
-
 use super::data;
 use crate::lua::lexer::{Tok, tokenize};
 use pulldown_cmark::{CodeBlockKind, CowStr, Event, Options, Parser, Tag, TagEnd, html};
 
-/// Escapes text for HTML (`& < > " '`).
 pub fn esc(text: &str) -> String {
     crate::text::html_escape(text)
 }
 
-/// `<span class='{class}'>{text}</span>`: `badge`, `client`, `server`, `shared`, `warning`, `accent`.
 pub fn badge(text: &str, class: &str) -> String {
     format!("<span class='{class}'>{}</span>", esc(text))
 }
 
-/// `<div class='subhead'>{title}</div>`.
 pub fn subhead(title: &str) -> String {
     format!("<div class='subhead'>{}</div>", esc(title))
 }
 
-/// Markdown to HTML: `cfxdoc:<id>` code spans become links titled after the
-/// guide, Lua code blocks are highlighted, other code blocks lose their
-/// `<code>`, table rows are striped (`<tr class="alt">`) and raw HTML is shown
-/// as text (line breaks excepted).
 pub fn markdown(source: &str) -> String {
     if source.trim().is_empty() {
         return String::new();
@@ -82,7 +70,6 @@ pub fn markdown(source: &str) -> String {
     zebra(&out).trim().to_owned()
 }
 
-/// [`markdown`] without the wrapping `<p>` of a single paragraph.
 pub fn markdown_inline(source: &str) -> String {
     let html = markdown(source);
     match html.strip_prefix("<p>").and_then(|h| h.strip_suffix("</p>")) {
@@ -91,13 +78,10 @@ pub fn markdown_inline(source: &str) -> String {
     }
 }
 
-/// A `<pre>` block of highlighted Lua.
 pub fn code_block(code: &str) -> String {
     format!("<pre>{}</pre>", highlight(code.trim_end()))
 }
 
-/// Lua code as HTML, tokens in `<span class='l-…'>` (`kw`, `str`, `num`,
-/// `com`, `op`): the page colours them for the IDE theme.
 pub fn highlight(code: &str) -> String {
     let mut out = String::with_capacity(code.len() * 2);
     let mut last = 0;
@@ -122,8 +106,6 @@ pub fn highlight(code: &str) -> String {
     out
 }
 
-/// An HTML table (`cellspacing='0' width='100%'`), header optional, every
-/// second body row striped.
 #[derive(Default)]
 pub struct Table {
     header: Vec<String>,
@@ -135,7 +117,6 @@ impl Table {
         Self { header: header.iter().map(|h| (*h).to_owned()).collect(), rows: Vec::new() }
     }
 
-    /// One row of HTML cells.
     pub fn row(&mut self, cells: Vec<String>) {
         self.rows.push(cells);
     }
@@ -161,27 +142,22 @@ impl Table {
     }
 }
 
-/// The guide of a `cfxdoc:<id>[#…]` link.
 fn guide_of_link(link: &str) -> Option<&'static data::Guide> {
     let id = link.strip_prefix("cfxdoc:")?;
     data::guide(id.split('#').next().unwrap_or(id).trim())
 }
 
-/// `` `cfxdoc:natives` `` → a link titled after the guide.
 fn guide_link(code: &str) -> Option<String> {
     let valid = code.strip_prefix("cfxdoc:")?.bytes().all(|b| b.is_ascii_alphanumeric() || b"_#-".contains(&b));
     let guide = guide_of_link(code).filter(|_| valid)?;
     Some(format!("<a href=\"{}\">{}</a>", esc(code), esc(&guide.title)))
 }
 
-/// Raw HTML of the source: `<br>` kept, anything else shown as text (the
-/// natives database is downloaded content).
 fn raw_html(html: CowStr) -> Event {
     let tag = html.trim().to_ascii_lowercase().replace(' ', "");
     if matches!(tag.as_str(), "<br>" | "<br/>") { Event::Html("<br>".into()) } else { Event::Text(html) }
 }
 
-/// Emits the pending text, with bare `http(s)://` URLs as links outside links.
 fn flush_text(text: &mut String, autolink: bool, events: &mut Vec<Event>) {
     if text.is_empty() {
         return;
@@ -205,9 +181,6 @@ fn flush_text(text: &mut String, autolink: bool, events: &mut Vec<Event>) {
     }
 }
 
-/// The first bare URL of `text` (GFM extended autolink rules, simplified):
-/// starts a word, runs to whitespace or `<`, trailing punctuation and
-/// unbalanced `)` left out.
 fn find_url(text: &str) -> Option<(usize, usize)> {
     let mut from = 0;
     loop {
@@ -231,8 +204,6 @@ fn find_url(text: &str) -> Option<(usize, usize)> {
     }
 }
 
-/// Stripes the tables of `html`: the first row of each is the header, then
-/// every second row gets `class="alt"`.
 fn zebra(html: &str) -> String {
     let mut out = String::with_capacity(html.len() + 64);
     let mut rest = html;

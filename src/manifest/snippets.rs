@@ -1,15 +1,9 @@
-//! The manifest live templates of the JetBrains plugin (`fxm`, `cls`, `nui`…),
-//! offered as completion items at statement start: the IDE inserts plain
-//! text, so every variable takes its default value.
-
 use super::catalog::RDR3_WARNING;
 
-/// One template: abbreviation, description, text (`$NAME$` variables, `$END$` caret).
 pub struct Snippet {
     pub abbrev: &'static str,
     pub description: &'static str,
     text: &'static str,
-    /// Variable defaults (unlisted variables are empty).
     defaults: &'static [(&'static str, &'static str)],
 }
 
@@ -85,8 +79,6 @@ pub const SNIPPETS: &[Snippet] = &[
 ];
 
 impl Snippet {
-    /// The text with every variable at its default, `$END$` removed and the
-    /// lines after the first indented with `indent`.
     pub fn expand(&self, indent: &str) -> String {
         let mut text =
             self.text.replace("$HEADER$", HEADER).replace("$RDR3_WARNING$", RDR3_WARNING).replace("$END$", "");

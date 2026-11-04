@@ -1,41 +1,23 @@
-//! The natives search engine: a typed text (Lua name, `NATIVE_NAME`, camel
-//! humps, hash) against one or several natives sets, best matches first.
-//!
-//! Matching is allocation-free per native (case-insensitive byte comparisons,
-//! reused word buffers), so a search over a full catalog (~15k natives) is one
-//! cheap pass.
-
 use crate::natives::{Native, NativeSet, Natives};
 use crate::project::Side;
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashSet};
 
-/// How well a native matches the text, best first.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum MatchKind {
-    /// Lua name, native name or hash equal to the text (case-insensitive).
     Exact,
-    /// Lua name, native name or hash starting with the text.
     Prefix,
-    /// The text picks the start of consecutive words of the Lua name (`ggz` → `GetGroundZFor_3dCoord`).
     CamelHump,
-    /// Lua name, native name or hash containing the text.
     Substring,
-    /// Blank text: every native passing the filters.
     Any,
 }
 
-/// Search criteria.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Query {
-    /// `GetEntityCoords`, `GET_ENTITY_COORDS`, `GEC`, `0x3FEF770D40960D5A` (with or without `0x`); blank: everything.
     pub text: String,
-    /// Only this namespace (`ENTITY`).
     pub namespace: Option<String>,
-    /// Only these sides (apisets).
     pub sides: Option<Vec<Side>>,
     pub include_aliases: bool,
-    /// Natives known by their hash only (`N_0x…`).
     pub include_unnamed: bool,
     pub limit: usize,
 }
@@ -59,10 +41,6 @@ impl Query {
     }
 }
 
-/// The natives of `sets` matching `q`: by [`MatchKind`], then primaries before
-/// aliases, named before unnamed, then by name (case-insensitive) and set. A
-/// native present in several sets (CFX shared natives) is listed once, from
-/// the first set in GTA5, RDR3, SERVER order.
 pub fn search<'a>(natives: &'a Natives, sets: &[NativeSet], q: &Query) -> Vec<(&'a Native, MatchKind)> {
     let pattern = Pattern::new(&q.text);
     let sets: Vec<NativeSet> = NativeSet::ALL.into_iter().filter(|s| sets.contains(s)).collect();
@@ -99,7 +77,6 @@ pub fn search<'a>(natives: &'a Natives, sets: &[NativeSet], q: &Query) -> Vec<(&
     out
 }
 
-/// Namespaces of the natives of `sets`, sorted.
 pub fn namespaces(natives: &Natives, sets: &[NativeSet]) -> Vec<String> {
     let mut out = BTreeSet::new();
     for &set in sets {
@@ -128,21 +105,15 @@ fn lc_cmp(a: &[u8], b: &[u8]) -> Ordering {
     a.iter().map(u8::to_ascii_lowercase).cmp(b.iter().map(u8::to_ascii_lowercase))
 }
 
-/// `0xC906A7DA` / `C906A7DA` → `C906A7DA` (case kept: compared case-insensitively).
 fn hash_digits(hash: &str) -> &str {
     let h = hash.trim();
     h.strip_prefix("0x").or_else(|| h.strip_prefix("0X")).unwrap_or(h)
 }
 
-/// A search text, pre-processed once per search.
 struct Pattern {
-    /// Lower-cased, trimmed text.
     lower: Vec<u8>,
-    /// `lower` without `_` and whitespace.
     compact: Vec<u8>,
-    /// Hex digits when the text looks like a hash.
     hash: Option<Vec<u8>>,
-    /// Whether hashes may also match by prefix / substring (explicit `0x`, or 6 digits and more).
     hash_prefix: bool,
 }
 
@@ -198,7 +169,6 @@ impl Pattern {
     }
 }
 
-/// `a` equals the lower-case `q`, ignoring ASCII case.
 fn lc_eq(a: &[u8], q: &[u8]) -> bool {
     a.len() == q.len() && lc_starts(a, q)
 }
@@ -211,7 +181,6 @@ fn lc_contains(a: &[u8], q: &[u8]) -> bool {
     q.is_empty() || (a.len() >= q.len() && (0..=a.len() - q.len()).any(|i| lc_starts(&a[i..], q)))
 }
 
-/// Word ranges of a Lua name: `GetGroundZFor_3dCoord` → `Get`, `Ground`, `ZFor`, `3d`, `Coord`.
 fn split_words(name: &[u8], out: &mut Vec<(usize, usize)>) {
     out.clear();
     let mut start = 0;
@@ -238,8 +207,6 @@ fn split_words(name: &[u8], out: &mut Vec<(usize, usize)>) {
     }
 }
 
-/// Whether `q[qi..]` is a sequence of word prefixes of `words[wi..]`, in
-/// order: words may be skipped, except the first one when `anchored`.
 fn camel_humps(name: &[u8], words: &[(usize, usize)], q: &[u8], qi: usize, wi: usize, anchored: bool) -> bool {
     if qi == q.len() {
         return true;
@@ -295,7 +262,6 @@ pub(crate) mod tests {
         n
     }
 
-    /// The fixture catalogs of the original test suite.
     pub(crate) fn fixture() -> Vec<Native> {
         let g = NativeSet::Gta5;
         let mut ground = named(

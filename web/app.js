@@ -1,9 +1,4 @@
-// CfxLua documentation tool window: six tabs (Natives, Runtime API, Events,
-// Manifest, Syntax, Guides), each a searchable list beside an HTML page. The
-// plugin searches and builds every page (src/docs); this page only renders.
-//
-// Protocol: one JSON object per message, `op` names it (src/docs/mod.rs has
-// the reference).
+// Protocol with src/docs: one JSON object per message, `op` names it.
 // Page -> plugin:
 //   {op:"init"}                                       -> init
 //   {op:"search", tab, seq, text, filters, selected?, select?, limit}  -> items
@@ -115,7 +110,6 @@
   let active = null;
   let menu = null;
 
-  // ---------- helpers ----------
 
   function h(tag, attrs, ...children) {
     const el = document.createElement(tag);
@@ -179,7 +173,6 @@
     }
   }
 
-  // ---------- per-tab state and widgets ----------
 
   const state = {};
   const ui = {};
@@ -278,7 +271,6 @@
     savePrefs();
   }
 
-  // ---------- toolbar ----------
 
   function buildToolbar(t) {
     const bar = ui[t.id].toolbar;
@@ -385,7 +377,6 @@
     for (const t of TABS) updateZoom(t);
   }
 
-  // ---------- tabs ----------
 
   function activate(id) {
     const t = TAB[id] || TABS[0];
@@ -432,7 +423,6 @@
     e.preventDefault();
   });
 
-  // ---------- responsive split ----------
 
   function layout(t) {
     const u = ui[t.id];
@@ -473,7 +463,6 @@
     u.divider.addEventListener('pointerup', up);
   }
 
-  // ---------- searching ----------
 
   function search(t) {
     const st = state[t.id];
@@ -570,7 +559,6 @@
     updateToolbar(t);
   }
 
-  // ---------- the list ----------
 
   function rowAt(st, i) {
     return st.all.length ? st.all[i] : st.rows[i];
@@ -761,7 +749,6 @@
     if (t.action) insert(t, t.action);
   }
 
-  // ---------- runtime tree ----------
 
   function toggle(t, index) {
     const st = state[t.id];
@@ -801,7 +788,6 @@
     scrollToSelection(t);
   }
 
-  // ---------- actions ----------
 
   function insert(t, variant) {
     const st = state[t.id];
@@ -845,7 +831,6 @@
     }
   }
 
-  // ---------- messages from the plugin ----------
 
   function applyPrefs(p) {
     if (p && typeof p === 'object') prefs = Object.assign(prefs, p);
@@ -888,8 +873,7 @@
   for (const t of TABS) build(t);
   applyFont(100);
 
-  // Ask for the state; again if the plugin was not ready, and when the page is
-  // shown again (an `open` sent while it was hidden is waiting).
+  // Messages to a hidden view are lost: ask for the state again whenever the page is shown.
   let tries = 0;
   const hello = () => {
     if (initialized || tries++ >= 5) return;

@@ -1,14 +1,3 @@
-//! OpenIDEA-CfxLUA: FiveM / RedM (CfxLua) support for OpenIDEA.
-//!
-//! The IDE already reads Lua (tree-sitter, lua-language-server); this plugin
-//! adds what only a Cfx.re-aware tool knows: the natives of the right game and
-//! side, the runtime API, state bags, events, the resource manifest, NUI,
-//! magic values, CfxLua's syntax quirks, Asset Escrow and the documentation.
-//!
-//! This file connects the IDE (providers, events, commands, the view) to the
-//! features. Features never call the host for project data: they read the
-//! [`workspace::Workspace`] this file keeps up to date.
-
 pub mod coords;
 pub mod docs;
 pub mod escrow;
@@ -45,9 +34,7 @@ use settings::Settings;
 use text::slash;
 use workspace::Workspace;
 
-/// Status bar item showing the focused script's side.
 pub const STATUS_SIDE: &str = "side";
-/// Stop scanning a project after this long (the task budget is 60 s).
 const SCAN_BUDGET_MS: u128 = 40_000;
 
 pub fn all_features() -> Vec<Box<dyn Feature>> {
@@ -71,9 +58,7 @@ pub struct DevKit {
     docs: docs::Docs,
     settings: Settings,
     natives: Natives,
-    /// One per open project, plus a last one for files outside every project.
     workspaces: Vec<Workspace>,
-    /// The last document a provider was asked about, with its problems.
     last: Option<(Doc, Option<Vec<Problem>>)>,
 }
 
@@ -91,7 +76,6 @@ impl Default for DevKit {
 }
 
 impl DevKit {
-    /// Index of the workspace containing `path` (created, unscanned, for a new project).
     fn workspace_for(&mut self, path: &str) -> usize {
         let path = slash(path);
         let best = |wss: &[Workspace]| {
@@ -122,7 +106,6 @@ impl DevKit {
         self.workspaces.len() - 1
     }
 
-    /// Reads every file of the project the IDE has open at `root` (in a task).
     fn scan(&mut self, project: &openidea_plugin::Project, root: &str) {
         let start = std::time::Instant::now();
         let i = self.workspace_for(&format!("{}/", slash(root).trim_end_matches('/')));
@@ -181,7 +164,6 @@ impl DevKit {
         host::log(LogLevel::Info, &format!("indexed {} files of {root} in {} ms", total, start.elapsed().as_millis()));
     }
 
-    /// Re-reads one file after it was saved (or created).
     fn reread(&mut self, path: &str) {
         let i = self.workspace_for(path);
         if !self.workspaces[i].scanned {
@@ -216,8 +198,6 @@ impl DevKit {
         self.last = None;
     }
 
-    /// Parses the document of a provider request (once per version) and
-    /// indexes its unsaved text. Returns the workspace index.
     fn prepare(&mut self, d: &Document) -> Option<usize> {
         if !self.settings.enabled() {
             return None;
@@ -252,7 +232,6 @@ impl DevKit {
         Some(f(&cx, &self.features))
     }
 
-    /// Paths go back to the IDE in its own form (backslashes on Windows).
     fn native_path(&self, ws: usize, path: &str) -> String {
         let root = &self.workspaces[ws];
         if root.native_backslashes { path.replace('/', "\\") } else { path.to_owned() }
@@ -262,7 +241,6 @@ impl DevKit {
         Location { path: self.native_path(ws, &l.path), range: l.range }
     }
 
-    /// Problems of the current document, computed once per version.
     fn problems(&mut self, ws: usize) -> Vec<Problem> {
         if let Some((_, Some(problems))) = &self.last {
             return problems.clone();
@@ -292,7 +270,6 @@ impl DevKit {
         }
     }
 
-    /// The workspace and parsed document of a command's window.
     fn command_doc(&mut self, inv: &Invocation) -> (Option<usize>, Option<Doc>) {
         let ws =
             inv.project().and_then(|p| p.root().ok()).map(|root| self.workspace_for(&format!("{}/", slash(&root))));
@@ -305,7 +282,6 @@ impl DevKit {
         (ws, doc)
     }
 
-    /// The status bar item of the focused file: `Client script · shop · FiveM`.
     fn update_status(&mut self, path: Option<&str>) {
         let text = path.and_then(|p| {
             let kind = project::file_kind(p);
@@ -328,7 +304,6 @@ impl DevKit {
     }
 }
 
-/// Text and tooltip of the side status item for a Lua file.
 pub fn status_text(ws: &Workspace, settings: &Settings, path: &str) -> (String, String) {
     let side = ws.side_of(path);
     let resource = ws.resource_of(path);
@@ -561,7 +536,6 @@ mod tests {
         }
     }
 
-    /// Every feature over the demo resources, with the bundled natives: what a user sees when opening `examples/`.
     #[test]
     fn demo_resources_end_to_end() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples");

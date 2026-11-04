@@ -1,10 +1,3 @@
-//! Acceptance tests on the synthetic project of the original plugin
-//! (`src/test/resources/cfx/events`): `studio` (events keyed by
-//! `(eType, eName)` through helpers, obfuscated names, injected values, method
-//! triggers, a client redefinition of `TriggerServerEvent`, an alias),
-//! `standard_res` (the runtime functions) and `mixed_res` (both, loading the
-//! studio helpers with `@studio/…` manifest entries).
-
 use super::EventsFeature;
 use super::db::{Config, Db};
 use super::model::{Dirs, EventKey, Origin, Role, Site};
@@ -127,7 +120,6 @@ pub const PROJECT: &[(&str, &str)] = &[
     ),
 ];
 
-/// The synthetic project plus `extra` files.
 pub fn project(extra: &[(&str, &str)]) -> Fixture {
     let mut files: Vec<(&str, &str)> = PROJECT.to_vec();
     for (path, text) in extra {
@@ -143,7 +135,6 @@ pub fn indexed(fx: &Fixture) -> EventsFeature {
     feature
 }
 
-/// The database of a fixture.
 pub fn db(fx: &Fixture) -> Rc<Db> {
     let feature = indexed(fx);
     let doc = fx.doc("standard_res/client.lua");
@@ -384,7 +375,6 @@ fn annotations_override_the_detection() {
     assert_eq!(db.handlers(&tuple(&["Raw", "Ping"]))[0].callback_arity, Some(2));
 }
 
-/// The database of a fixture with these settings.
 fn db_with(fx: Fixture, settings: Settings) -> Rc<Db> {
     let fx = fx.with_settings(settings);
     let feature = indexed(&fx);

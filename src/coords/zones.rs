@@ -1,8 +1,3 @@
-//! GTA V zones from a `zones.json` file (the format of the community data
-//! dumps): `[{"Name", "DisplayName", "Bounds": [{"Minimum": {"X", "Y", "Z"},
-//! "Maximum": {…}}]}]`, keys of any case. Zones are approximated by
-//! overlapping boxes: the smallest box containing a point wins.
-
 use serde_json::{Map, Value};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -25,7 +20,6 @@ impl Box3 {
     }
 }
 
-/// A named zone: `Name` is the game's code (`DAVIS`), `display` what players see (`Davis`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Zone {
     pub name: String,
@@ -34,12 +28,10 @@ pub struct Zone {
 
 pub struct ZoneMap {
     zones: Vec<Zone>,
-    /// Every box with its zone index, smallest first.
     boxes: Vec<(Box3, usize)>,
 }
 
 impl ZoneMap {
-    /// Parses a zones file; `None` when it is not a zones array.
     pub fn parse(text: &str) -> Option<Self> {
         let Value::Array(items) = serde_json::from_str::<Value>(text).ok()? else { return None };
         let mut zones = Vec::new();
@@ -64,7 +56,6 @@ impl ZoneMap {
         Some(Self { zones, boxes })
     }
 
-    /// The zone of a point: the smallest box around (x, y), one also containing `z` first.
     pub fn find(&self, x: f64, y: f64, z: Option<f64>) -> Option<&Zone> {
         let mut around = self.boxes.iter().filter(|(b, _)| b.contains_xy(x, y)).peekable();
         let smallest = around.peek()?.1;
@@ -92,7 +83,6 @@ fn bounds_box(bound: &Value) -> Option<Box3> {
 pub mod tests {
     use super::*;
 
-    /// A tiny zones file in the format of the community data dumps.
     pub const ZONES: &str = r#"[
       {"Name": "DAVIS", "DisplayName": "Davis", "Bounds": [
         {"Minimum": {"X": 0.0, "Y": -1700.0, "Z": -100.0}, "Maximum": {"X": 300.0, "Y": -1400.0, "Z": 500.0}}

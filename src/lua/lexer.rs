@@ -1,34 +1,14 @@
-//! A tokenizer for CfxLua: Lua 5.4 plus what the Cfx.re runtime accepts
-//! (compound assignment, safe navigation, `` `hash` `` literals, C-style
-//! comments). It never fails: anything it does not understand becomes an
-//! [`Tok::Unknown`] token, so features keep working on half-typed code.
-//!
-//! Offsets are UTF-8 byte offsets into the source.
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tok {
     Name,
     Keyword,
     Number,
-    /// `'…'` / `"…"`; `closed` is false when the line ends first.
-    Str {
-        closed: bool,
-    },
-    /// `[[…]]`, `[==[…]==]`.
+    Str { closed: bool },
     LongStr,
-    /// `` `name` `` (compile-time joaat).
-    Hash {
-        closed: bool,
-    },
-    /// `-- …`
+    Hash { closed: bool },
     LineComment,
-    /// `--[[ … ]]`
     BlockComment,
-    /// `/* … */` (CfxLua).
     CComment,
-    /// Operators and punctuation, including the CfxLua ones (`+=`, `?.`) and
-    /// the ones it does not accept but people type (`!=`, `//=`), so
-    /// inspections can name them.
     Op,
     Unknown,
 }
@@ -65,7 +45,6 @@ impl Token {
         self.kind == Tok::Name && self.text(src) == name
     }
 
-    /// Byte range of a string's content (without quotes / brackets).
     pub fn content_range(&self, src: &str) -> (usize, usize) {
         match self.kind {
             Tok::Str { closed } | Tok::Hash { closed } => {
@@ -89,13 +68,11 @@ impl Token {
         }
     }
 
-    /// The content as written, escapes included.
     pub fn raw_value<'a>(&self, src: &'a str) -> &'a str {
         let (s, e) = self.content_range(src);
         &src[s..e]
     }
 
-    /// A string's value as text (invalid UTF-8 from `\xHH` / `\ddd` escapes is replaced).
     pub fn string_value(&self, src: &str) -> String {
         let raw = self.raw_value(src);
         if self.kind == Tok::LongStr || !raw.contains('\\') {
@@ -104,14 +81,12 @@ impl Token {
         String::from_utf8_lossy(&decode_escapes(raw)).into_owned()
     }
 
-    /// A string's value as the bytes the runtime sees (Lua escapes decoded).
     pub fn string_bytes(&self, src: &str) -> Vec<u8> {
         let raw = self.raw_value(src);
         if self.kind == Tok::LongStr { raw.as_bytes().to_vec() } else { decode_escapes(raw) }
     }
 }
 
-/// Lua 5.4 quoted-string escapes: `\n` `\t` `\\` … `\xHH`, `\ddd`, `\z`, `\u{XXX}`, escaped line breaks.
 pub fn decode_escapes(raw: &str) -> Vec<u8> {
     let b = raw.as_bytes();
     let mut out = Vec::with_capacity(b.len());
@@ -179,7 +154,6 @@ pub fn decode_escapes(raw: &str) -> Vec<u8> {
     out
 }
 
-/// Lua's `utf8.char` encoding, extended to 31 bits like `\u{7FFFFFFF}`.
 fn push_utf8_extended(out: &mut Vec<u8>, v: u32) {
     if v < 0x80 {
         out.push(v as u8);
@@ -204,7 +178,6 @@ pub const KEYWORDS: &[&str] = &[
     "not", "or", "repeat", "return", "then", "true", "until", "while",
 ];
 
-/// Longest first, so `>>=` wins over `>>` and `>`.
 const OPS: &[&str] = &[
     "...", "<<=", ">>=", "//=", "..=", "==", "~=", "<=", ">=", "//", "::", "..", "<<", ">>", "+=", "-=", "*=", "/=",
     "%=", "&=", "|=", "^=", "!=", "?.", "?[", "?:", "++", "+", "-", "*", "/", "%", "^", "#", "&", "~", "|", "<", ">",
@@ -215,7 +188,6 @@ pub fn is_keyword(s: &str) -> bool {
     KEYWORDS.contains(&s)
 }
 
-/// Level of a long bracket opening at `at` (`[[` → 0, `[==[` → 2).
 fn long_bracket(bytes: &[u8], at: usize) -> Option<usize> {
     if bytes.get(at) != Some(&b'[') {
         return None;
@@ -227,7 +199,6 @@ fn long_bracket(bytes: &[u8], at: usize) -> Option<usize> {
     (bytes.get(i) == Some(&b'[')).then_some(i - at - 1)
 }
 
-/// End (exclusive) of a long bracket body closing at level `level`.
 fn long_end(src: &str, from: usize, level: usize) -> usize {
     let close = format!("]{}]", "=".repeat(level));
     src[from..].find(&close).map_or(src.len(), |i| from + i + close.len())
@@ -347,8 +318,6 @@ fn number_end(bytes: &[u8], mut i: usize) -> usize {
     i
 }
 
-/// Parses a Lua number literal as an integer (hex wraps like Lua's 64-bit
-/// integers; `0xFFFFFFFF` stays positive).
 pub fn parse_int(text: &str) -> Option<i64> {
     let t = text.trim();
     if let Some(hex) = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
@@ -360,8 +329,6 @@ pub fn parse_int(text: &str) -> Option<i64> {
     t.parse::<i64>().ok()
 }
 
-/// The tokens of a source without comments, with the index of each in the
-/// full token list. Most analyses look past comments.
 pub fn code_tokens(tokens: &[Token]) -> Vec<Token> {
     tokens.iter().filter(|t| !t.is_comment()).copied().collect()
 }

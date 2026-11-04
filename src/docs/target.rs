@@ -1,8 +1,3 @@
-//! What `show-docs` documents at the caret: a native, a backtick hash
-//! literal, a built-in event name (the first string argument of an event
-//! function) or a manifest directive; and the plain-text summary of its
-//! notification.
-
 use super::data::{self, BuiltinEvent, Directive};
 use super::tabs::Tab;
 use crate::feature::Doc;
@@ -11,7 +6,6 @@ use crate::lua::lexer::Tok;
 use crate::natives::{Native, NativeSet, Natives};
 use pulldown_cmark::{Event, Parser, Tag, TagEnd};
 
-/// Functions whose first argument is an event name (docs §10.1).
 pub const EVENT_FUNCTIONS: [&str; 8] = [
     "AddEventHandler",
     "RegisterNetEvent",
@@ -25,13 +19,11 @@ pub const EVENT_FUNCTIONS: [&str; 8] = [
 
 pub enum Target<'a> {
     Native(&'a Native),
-    /// The literal as written and its value (`None`: invalid).
     Hash(String, Option<i32>),
     Event(&'static BuiltinEvent),
     Directive(&'static Directive),
 }
 
-/// The target at byte `at` of `doc`; natives are looked up in `sets`, then in every set.
 pub fn find<'a>(doc: &Doc, at: usize, natives: &'a Natives, sets: &[NativeSet]) -> Option<Target<'a>> {
     let src = &doc.src;
     if doc.is_manifest() {
@@ -68,12 +60,10 @@ pub fn find<'a>(doc: &Doc, at: usize, natives: &'a Natives, sets: &[NativeSet]) 
     }
 }
 
-/// A directive by name, plural forms included (`client_scripts` → `client_script`).
 pub fn directive(name: &str) -> Option<&'static Directive> {
     data::directive(name).or_else(|| name.strip_suffix('s').and_then(data::directive))
 }
 
-/// The joaat of a hash literal's content, Lua escapes decoded; `None` when an escape is invalid.
 pub fn hash_value(content: &str) -> Option<i32> {
     if !content.contains('\\') {
         return Some(joaat(content));
@@ -123,7 +113,6 @@ pub fn hash_value(content: &str) -> Option<i32> {
     String::from_utf8(out).ok().map(|s| joaat(&s))
 }
 
-/// The first sentence of a Markdown text, as plain text.
 pub fn first_sentence(md: &str) -> String {
     let mut out = String::new();
     let mut skip = false;
@@ -144,7 +133,6 @@ pub fn first_sentence(md: &str) -> String {
     out.trim().to_owned()
 }
 
-/// The page to open (tab, item id) and the notification (title, body) of a target.
 pub fn summary(t: &Target) -> (Tab, String, String, String) {
     let footer = "See the CfxLua tool window.";
     let lines = |head: String, md: &str| {

@@ -1,23 +1,13 @@
-//! A manifest's directives as the checks and completion read them, on top of
-//! [`crate::project::manifest::entries`]: which argument each value belongs
-//! to (`data_file 'TYPE' 'path'`), whether the directive is written in table
-//! form (FXServer records `client_scripts { … }` as `client_script`, but
-//! `client_scripts 'x'` as `client_scripts`), and whether it is a statement.
-
 use crate::lua::Source;
 use crate::lua::lexer::Tok;
 use crate::project::manifest::entries;
 use crate::project::{Entry, Value};
 
-/// One directive call of a manifest.
 #[derive(Clone, Debug)]
 pub struct Decl {
     pub entry: Entry,
-    /// For each value of `entry.values`: its argument (0: the value, 1: the chained extra value, 2: a later one).
     pub arg: Vec<u8>,
-    /// The first argument is a table (`name { … }`, `name({ … })`).
     pub table_form: bool,
-    /// A whole statement (not nested in an expression or a table).
     pub statement: bool,
 }
 
@@ -26,24 +16,20 @@ impl Decl {
         &self.entry.name
     }
 
-    /// Values with their argument index, first and extra arguments only.
     pub fn args(&self) -> impl Iterator<Item = (usize, &Value)> {
         self.entry.values.iter().zip(&self.arg).filter(|(_, a)| **a < 2).map(|(v, a)| (*a as usize, v))
     }
 
-    /// The values of the first argument.
     pub fn values(&self) -> impl Iterator<Item = &Value> {
         self.args().filter(|(a, _)| *a == 0).map(|(_, v)| v)
     }
 
-    /// The name FXServer records: the `s` of a table form removed (`games { … }` → `game`).
     pub fn metadata_key(&self) -> &str {
         let name = self.name();
         if self.table_form { name.strip_suffix('s').unwrap_or(name) } else { name }
     }
 }
 
-/// The directives of a manifest, in order.
 pub struct View {
     pub decls: Vec<Decl>,
 }
@@ -80,13 +66,11 @@ impl View {
         self.first_named(name).is_some()
     }
 
-    /// The directive whose value is the string token `tok`, with the value's argument index.
     pub fn value_at(&self, tok: usize) -> Option<(&Decl, usize, &Value)> {
         self.decls.iter().find_map(|d| d.args().find(|(_, v)| v.tok == tok).map(|(a, v)| (d, a, v)))
     }
 }
 
-/// Token ranges `[start, end)` of the call arguments after the name at `name_tok` (`'x'`, `{ … }`, `( … )`).
 fn arg_ranges(src: &Source, name_tok: usize) -> Vec<(usize, usize)> {
     let mut out = Vec::new();
     let mut i = name_tok + 1;
@@ -110,7 +94,6 @@ fn arg_ranges(src: &Source, name_tok: usize) -> Vec<(usize, usize)> {
     out
 }
 
-/// Whether the argument `[a, b)` is a table, or a parenthesised list starting with one.
 fn is_table_arg(src: &Source, a: usize, b: usize) -> bool {
     if src.is_op(a, "{") {
         return true;
@@ -124,7 +107,6 @@ fn is_table_arg(src: &Source, a: usize, b: usize) -> bool {
         .is_some_and(|&(s, e)| src.is_op(s, "{") && src.pair[s].is_some_and(|c| c + 1 == e))
 }
 
-/// Bracket depth before each code token.
 fn depths(src: &Source) -> Vec<u32> {
     let mut depth = 0u32;
     src.toks
@@ -148,7 +130,6 @@ fn depths(src: &Source) -> Vec<u32> {
         .collect()
 }
 
-/// Whether a statement may start at token `i`: the previous token ends a statement or opens a block.
 pub fn starts_statement(src: &Source, i: usize) -> bool {
     let Some(p) = i.checked_sub(1).and_then(|p| src.toks.get(p)) else { return true };
     let text = p.text(&src.text);
@@ -160,7 +141,6 @@ pub fn starts_statement(src: &Source, i: usize) -> bool {
     }
 }
 
-/// Whether byte `at` is outside every bracket pair (at top level, or directly in a block).
 pub fn at_depth_zero(src: &Source, at: usize) -> bool {
     let mut depth = 0i32;
     for t in src.toks.iter().take_while(|t| t.start < at) {

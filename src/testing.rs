@@ -1,16 +1,3 @@
-//! Test fixtures: an in-memory project, indexed by the feature under test.
-//!
-//! ```ignore
-//! let fx = Fixture::new(&[
-//!     ("shop/fxmanifest.lua", "fx_version 'cerulean'\ngame 'gta5'\nclient_script 'client/*.lua'"),
-//!     ("shop/client/main.lua", "AddEventHandler('<caret>')"),
-//! ]);
-//! let feature = MyFeature::default();
-//! fx.index(&feature);
-//! let (doc, at) = fx.caret("shop/client/main.lua");
-//! let items = feature.completion(&fx.cx(&doc), at, None);
-//! ```
-
 use crate::feature::{Ctx, Doc, Feature};
 use crate::lua::Source;
 use crate::natives::{Native, Natives};
@@ -30,7 +17,6 @@ pub struct Fixture {
 }
 
 impl Fixture {
-    /// Files relative to [`ROOT`]; a `<caret>` marker is removed and remembered.
     pub fn new(files: &[(&str, &str)]) -> Self {
         let mut carets = HashMap::new();
         let stripped: Vec<(String, String)> = files
@@ -65,7 +51,6 @@ impl Fixture {
         format!("{ROOT}/{rel}")
     }
 
-    /// Indexes every file of the fixture with `feature`, as a project scan does.
     pub fn index(&self, feature: &dyn Feature) {
         for f in self.ws.files() {
             let Some(text) = f.text.as_deref() else { continue };
@@ -76,14 +61,12 @@ impl Fixture {
         feature.indexed(&self.ws);
     }
 
-    /// The document of a fixture file.
     pub fn doc(&self, rel: &str) -> Doc {
         let path = Self::path(rel);
         let text = self.ws.text(&path).unwrap_or_else(|| panic!("no fixture file {rel}"));
         Doc::new(&self.ws, &path, language_of(rel), 1, text)
     }
 
-    /// The document of a fixture file and its `<caret>` offset.
     pub fn caret(&self, rel: &str) -> (Doc, usize) {
         let at = *self.carets.get(&Self::path(rel)).unwrap_or_else(|| panic!("no <caret> in {rel}"));
         (self.doc(rel), at)
@@ -94,7 +77,6 @@ impl Fixture {
     }
 }
 
-/// The IDE's language id for a file name.
 pub fn language_of(path: &str) -> &'static str {
     let ext = path.rsplit_once('.').map_or("", |(_, e)| e).to_ascii_lowercase();
     match ext.as_str() {
@@ -111,7 +93,6 @@ pub fn language_of(path: &str) -> &'static str {
     }
 }
 
-/// A minimal native for fixtures.
 pub fn native(set: crate::natives::NativeSet, lua_name: &str, apiset: crate::project::Side) -> Native {
     Native {
         set,

@@ -1,23 +1,12 @@
-//! The files of a resource as FXServer's `MatchFiles` sees them: paths
-//! relative to the resource directory, matched as plain paths, globs or
-//! directories, case-insensitively like the Windows servers most resources
-//! run on ([`crate::project::CASE_SENSITIVE`]).
-//!
-//! Only files the workspace lists are known (see [`checkable`]).
-
 use super::catalog::PathKind;
 use crate::project::CASE_SENSITIVE;
 use crate::project::glob::Glob;
 use crate::workspace::Workspace;
 use std::collections::BTreeSet;
 
-/// Directories a glob only enters when it names them.
 const SKIPPED_DIRS: [&str; 4] = ["node_modules", ".git", ".svn", ".idea"];
-/// At most this many matches per pattern.
 const MAX_MATCHES: usize = 500;
 
-/// Whether the workspace lists the files with extension `ext` (the `**/*.ext`
-/// and `**/*.{a,b}` globs of [`crate::workspace::SCAN`]).
 fn listed(ext: &str) -> bool {
     crate::workspace::SCAN.iter().filter_map(|(glob, _)| glob.strip_prefix("**/*.")).any(|exts| {
         let exts = exts.strip_prefix('{').and_then(|e| e.strip_suffix('}')).unwrap_or(exts);
@@ -25,7 +14,6 @@ fn listed(ext: &str) -> bool {
     })
 }
 
-/// `./a\b` → `a/b`: trimmed, forward slashes, no leading `./` or `/`.
 pub fn normalize(p: &str) -> String {
     let mut s = p.trim().replace('\\', "/");
     while let Some(rest) = s.strip_prefix("./") {
@@ -42,14 +30,11 @@ pub fn is_url(v: &str) -> bool {
     v.contains("://")
 }
 
-/// `@ox_lib/init.lua` → `("ox_lib", "init.lua")`; `@ox_lib` → `("ox_lib", "")`.
 pub fn split_resource_path(v: &str) -> Option<(&str, &str)> {
     let rest = v.trim().strip_prefix('@')?;
     Some(rest.split_once('/').unwrap_or((rest, "")))
 }
 
-/// Whether the workspace would list the files `pattern` names: a missing match
-/// only means something for extensions it lists (`.meta`, `.png`, `.css`… are not).
 pub fn checkable(pattern: &str, kind: PathKind) -> bool {
     let last = pattern.rsplit(['/', '\\']).next().unwrap_or(pattern);
     match last.rsplit_once('.') {
@@ -59,17 +44,14 @@ pub fn checkable(pattern: &str, kind: PathKind) -> bool {
     }
 }
 
-/// A file or directory a path matched (relative to the base directory).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Match {
     pub rel: String,
     pub dir: bool,
 }
 
-/// The files under a directory, relative to it.
 pub struct Tree {
     pub base: String,
-    /// `(key, relative path)` sorted by key (the lowercased path when matching is case-insensitive).
     files: Vec<(String, String)>,
 }
 
@@ -90,14 +72,12 @@ impl Tree {
         Self { base, files }
     }
 
-    /// The files whose key starts with `prefix` (a key).
     fn with_prefix<'a>(&'a self, prefix: &str) -> &'a [(String, String)] {
         let start = self.files.partition_point(|(k, _)| k.as_str() < prefix);
         let len = self.files[start..].partition_point(|(k, _)| k.starts_with(prefix));
         &self.files[start..start + len]
     }
 
-    /// The file `rel` as it is written in the project.
     pub fn file(&self, rel: &str) -> Option<&str> {
         let k = key(rel);
         self.files.binary_search_by(|(f, _)| f.as_str().cmp(&k)).ok().map(|i| self.files[i].1.as_str())
@@ -108,7 +88,6 @@ impl Tree {
         !rel.is_empty() && !self.with_prefix(&key(&format!("{rel}/"))).is_empty()
     }
 
-    /// Immediate subdirectories and files of `dir` (`""` or `a/b/`), names only, sorted.
     pub fn children(&self, dir: &str) -> (Vec<String>, Vec<String>) {
         let mut dirs: Vec<String> = Vec::new();
         let mut files = Vec::new();
@@ -126,8 +105,6 @@ impl Tree {
         (dirs, files)
     }
 
-    /// What `pattern` matches, like FXServer: a plain path (a directory too when
-    /// `kind` allows it, a name prefix for data files) or a glob.
     pub fn matches(&self, pattern: &str, kind: PathKind) -> Vec<Match> {
         let p = normalize(pattern);
         if p.is_empty() || p.starts_with('@') {

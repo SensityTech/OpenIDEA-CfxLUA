@@ -1,44 +1,26 @@
-//! `fxmanifest.lua` / `__resource.lua` read token-wise: every statement that
-//! calls a plain name (`client_scripts { … }`, `game 'gta5'`, `ui_page('x')`)
-//! is a directive; its string values are kept with their positions so the
-//! manifest features (completion, checks, fixes) and the side detection share
-//! one reading.
-
 use crate::lua::lexer::Tok;
 use crate::lua::{Seg, Source};
 
-/// One string value of a directive.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Value {
     pub text: String,
-    /// The literal token (quotes included).
     pub start: usize,
     pub end: usize,
-    /// Token index in `Source::toks`.
     pub tok: usize,
-    /// Inside a table constructor (`files { 'a' }`).
     pub in_table: bool,
 }
 
-/// A directive statement.
 #[derive(Clone, Debug)]
 pub struct Entry {
-    /// `client_scripts`.
     pub name: String,
-    /// Token index of the name and its byte span.
     pub name_tok: usize,
     pub name_start: usize,
     pub name_end: usize,
-    /// Whole statement span (name to the end of its last argument).
     pub start: usize,
     pub end: usize,
-    /// Every positional string value (tables flattened).
     pub values: Vec<Value>,
-    /// The first table constructor argument: `{` and `}` token indices.
     pub table: Option<(usize, Option<usize>)>,
-    /// Number of arguments (a table counts as one).
     pub args: usize,
-    /// Keyed table fields (`{ name = 'x' }`), e.g. `data_file` / `convar_category`.
     pub has_keyed_fields: bool,
 }
 
@@ -48,7 +30,6 @@ impl Entry {
     }
 }
 
-/// Every directive of a manifest source, in order.
 pub fn entries(src: &Source) -> Vec<Entry> {
     let chains = src.chains();
     let mut out = Vec::new();
@@ -123,7 +104,6 @@ fn push_string(src: &Source, tok: usize, in_table: bool, out: &mut Vec<Value>) {
     }
 }
 
-/// Positional string fields of the table `{` at `open` (nested tables flattened).
 fn collect_table(src: &Source, open: usize, close: usize, e: &mut Entry) {
     for (a, b) in src.split_args(open + 1, close) {
         if a >= b {
@@ -146,7 +126,6 @@ fn collect_table(src: &Source, open: usize, close: usize, e: &mut Entry) {
     }
 }
 
-/// Whether token `i` is where a new directive may be typed (statement start of a manifest).
 pub fn at_statement_start(src: &Source, i: usize) -> bool {
     if i == 0 {
         return true;

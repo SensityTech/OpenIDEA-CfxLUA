@@ -1,27 +1,18 @@
-//! The plugin's settings (Settings › Plugins › OpenIDEA-CfxLUA, per project or
-//! global), declared in `settings.schema.json`. Features read them through
-//! [`Settings`] with the schema's default, so a missing or mistyped value never
-//! breaks anything; tests set values with [`Settings::with`].
-
 use serde_json::Value;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
 #[derive(Default)]
 pub struct Settings {
-    /// Values set by tests (or read from the IDE), by key.
     values: RefCell<HashMap<String, Option<Value>>>,
-    /// Read the IDE's settings on first use of a key (false in tests).
     live: bool,
 }
 
 impl Settings {
-    /// Settings read from the IDE (cached until [`Settings::reset`]).
     pub fn live() -> Self {
         Self { values: RefCell::default(), live: true }
     }
 
-    /// Defaults only (tests), plus what [`Settings::with`] sets.
     pub fn defaults() -> Self {
         Self::default()
     }
@@ -31,7 +22,6 @@ impl Settings {
         self
     }
 
-    /// Forgets cached values (the user may have changed them).
     pub fn reset(&self) {
         if self.live {
             self.values.borrow_mut().clear();
@@ -67,7 +57,6 @@ impl Settings {
         self.get(key).and_then(|v| v.as_i64()).unwrap_or(default)
     }
 
-    /// A list written as text: items separated by commas, semicolons, spaces or new lines.
     pub fn list(&self, key: &str, default: &str) -> Vec<String> {
         let raw = self.string(key, default);
         let mut out: Vec<String> = Vec::new();
@@ -79,16 +68,13 @@ impl Settings {
         out
     }
 
-    /// Master switch: every FiveM feature is off when false.
     pub fn enabled(&self) -> bool {
         self.bool(keys::ENABLED, true)
     }
 }
 
-/// Keys shared by several features. Feature-specific keys live in their module.
 pub mod keys {
     pub const ENABLED: &str = "enabled";
-    /// `auto` (from the manifests), `fivem`, `redm`, `both`.
     pub const GAME: &str = "game";
     pub const CLIENT_NATIVES: &str = "clientNatives";
     pub const SERVER_NATIVES: &str = "serverNatives";

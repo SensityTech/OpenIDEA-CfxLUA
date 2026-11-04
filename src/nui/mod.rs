@@ -1,12 +1,3 @@
-//! NUI bridge: callbacks and messages between Lua client scripts and the page.
-//!
-//! The page calls Lua callbacks (`fetchNui('close')` → `RegisterNUICallback('close')`)
-//! and Lua sends messages to the page (`SendNUIMessage({ action = 'open' })` →
-//! `case 'open':`). Both sides are read from their text (Lua, JavaScript,
-//! TypeScript, Vue, Svelte, HTML), wrappers included, and matched by name
-//! within a resource: go to definition both ways, gutter markers in Lua,
-//! completion of the other side's names, and the checks of the bridge.
-
 mod answer;
 mod bridge;
 mod build;
@@ -31,20 +22,14 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
-/// Setting keys (Settings › Plugins › OpenIDEA-CfxLUA).
 pub mod keys {
-    /// Keys of a `SendNUIMessage` table naming the message, compared by the page.
     pub const MESSAGE_KEYS: &str = "nui.messageKeys";
-    /// JavaScript functions taking a NUI callback name as first argument.
     pub const FETCH_FUNCTIONS: &str = "nui.fetchFunctions";
-    /// JavaScript functions or decorators taking a message name as first argument.
     pub const LISTENER_FUNCTIONS: &str = "nui.listenerFunctions";
-    /// Port of the UI dev server when no bundler configuration declares one.
     pub const DEV_SERVER_PORT: &str = "nui.devServerPort";
 }
 
 const DEFAULT_PORT: u16 = 5173;
-/// Locations listed in a gutter tooltip.
 const MAX_LOCATIONS: usize = 10;
 
 fn read_keys(settings: &Settings) -> Keys {
@@ -70,12 +55,9 @@ struct State {
     lua: BTreeMap<String, lua::Facts>,
     web: BTreeMap<String, web::Facts>,
     configs: Configs,
-    /// Calls of the Lua files calling a wrapper, read when the bridge is built.
     calls: HashMap<String, Rc<[LuaCall]>>,
-    /// Resource of each file of the bridge, until a manifest or a bundler configuration changes.
     resources: HashMap<String, Option<String>>,
     bridge: Option<(Keys, Rc<Bridge>)>,
-    /// The settings of the last request (index updates rebuild with them).
     keys: Keys,
     dirty: bool,
 }
@@ -97,7 +79,6 @@ impl Default for NuiFeature {
     }
 }
 
-/// Web files under dependency or VCS folders are not the page's sources.
 fn skipped(path: &str) -> bool {
     parent(path).split('/').any(|s| matches!(s, "node_modules" | "bower_components" | ".git"))
 }
@@ -107,8 +88,6 @@ fn extension(path: &str) -> &str {
 }
 
 impl State {
-    /// The resource of a file in the bridge: its manifest's folder, else, for a web file of a UI project
-    /// kept outside the resources, the resource its build goes to.
     fn resource_of(&self, ws: &Workspace, path: &str) -> Option<String> {
         resource_of(ws, &self.configs, path)
     }
@@ -149,7 +128,6 @@ fn resource_of(ws: &Workspace, configs: &Configs, path: &str) -> Option<String> 
     (crate::project::file_kind(path) == FileKind::Web).then(|| configs.build_target(ws, path)).flatten()
 }
 
-/// `shop/web/src/App.tsx`: the resource's folder name and the path in it, else the project path.
 fn display_path(ws: &Workspace, path: &str) -> String {
     if let Some(r) = ws.resource_of(path)
         && let Some(rel) = r.relative(path)
@@ -159,7 +137,6 @@ fn display_path(ws: &Workspace, path: &str) -> String {
     if ws.contains(path) { ws.relative(path).to_owned() } else { file_name(path).to_owned() }
 }
 
-/// `shop/web/src/App.tsx:19`
 fn location_text(ws: &Workspace, s: &Site) -> String {
     format!("{}:{}", display_path(ws, &s.file), s.at.range.start.line + 1)
 }
@@ -168,7 +145,6 @@ fn location(s: &Site) -> Location {
     Location { path: s.file.to_string(), range: s.at.range }
 }
 
-/// Whether the typed prefix starts the name or one of its words (`shop` in `closeShop`), ignoring case.
 fn matches_prefix(prefix: &str, name: &str) -> bool {
     let prefix = prefix.to_ascii_lowercase();
     let lower = name.to_ascii_lowercase();
@@ -182,7 +158,6 @@ fn matches_prefix(prefix: &str, name: &str) -> bool {
 }
 
 impl NuiFeature {
-    /// The bridge for the current settings (rebuilt when the files or the settings changed).
     fn bridge(&self, ws: &Workspace, settings: &Settings) -> Rc<Bridge> {
         let keys = read_keys(settings);
         let mut st = self.state.borrow_mut();
@@ -196,7 +171,6 @@ impl NuiFeature {
         st.rebuild(ws, keys)
     }
 
-    /// The string token of a Lua document at `at` (the caret may be right after its closing quote).
     fn lua_string(doc: &Doc, at: usize) -> Option<usize> {
         let k = doc.src.tok_at(at)?;
         doc.src.toks[k].is_string().then_some(k)
@@ -266,7 +240,6 @@ impl NuiFeature {
         items(doc, &bridge, role, resource.as_deref(), None, start, at)
     }
 
-    /// `CfxNuiCallbackNotRegistered`: a callback the page calls that no client script of the resource registers.
     fn not_registered(&self, cx: &Ctx) -> Vec<Problem> {
         let bridge = self.bridge(cx.ws, cx.settings);
         let mut out: Vec<Problem> = Vec::new();
@@ -297,7 +270,6 @@ impl NuiFeature {
     }
 }
 
-/// The names of `role` offered at a string whose typed prefix is `[start, at)`.
 fn items(
     doc: &Doc,
     bridge: &Bridge,

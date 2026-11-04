@@ -1,13 +1,3 @@
-//! Performance linter: per-frame loops, expensive calls, distance checks.
-//!
-//! Six checks on the `while` / `repeat` loops and calls of a script (polling
-//! loops waiting one frame, endless loops that never wait, natives called
-//! repeatedly in a frame, distance natives, per-frame spam, registrations
-//! repeated in handlers or loops), each with its quick fixes; a gutter marker
-//! with the cost class of every long-running loop; and the "replace a
-//! distance native with vector math" code action. The statement structure
-//! comes from [`ast`], shared with the values and coordinates features.
-
 pub mod ast;
 pub mod checks;
 pub mod classify;
@@ -27,7 +17,6 @@ use loops::Cost;
 use openidea_plugin::providers::LineMarker;
 use std::cell::RefCell;
 
-/// Settings keys (`perf.*`).
 pub mod keys {
     pub const IDLE_SLEEP_MS: &str = "perf.idleSleepMs";
     pub const THROTTLE_MS: &str = "perf.throttleMs";
@@ -40,12 +29,10 @@ pub mod keys {
 
 #[derive(Default)]
 pub struct PerfFeature {
-    /// What the functions of every project file call.
     index: RefCell<ProjectIndex>,
 }
 
 impl PerfFeature {
-    /// Whether the checks apply: a Lua script (not a manifest) with the plugin on.
     fn applies(cx: &Ctx) -> bool {
         cx.settings.enabled() && cx.doc.is_lua() && !cx.doc.is_manifest() && cx.doc.side != Side::Manifest
     }
@@ -118,7 +105,6 @@ impl Feature for PerfFeature {
     }
 }
 
-/// «Replace GetDistanceBetweenCoords with #(a - b)» on the innermost distance call around `at`.
 fn distance_intention(p: &Perf, at: usize) -> Option<Fix> {
     let ast = &p.ast;
     let toks = [p.src.tok_at(at), at.checked_sub(1).and_then(|a| p.src.tok_at(a))];

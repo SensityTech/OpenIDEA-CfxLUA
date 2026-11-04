@@ -1,8 +1,3 @@
-//! Bundler configurations of UI projects (`vite.config.ts`,
-//! `webpack.config.js`), read from their text: where they build (a UI kept
-//! outside its resource belongs to the resource holding its output folder)
-//! and the port of their dev server.
-
 use crate::text::{file_name, parent};
 use crate::workspace::Workspace;
 use std::collections::BTreeMap;
@@ -11,14 +6,11 @@ const VITE_NAMES: &[&str] =
     &["vite.config.ts", "vite.config.js", "vite.config.mts", "vite.config.mjs", "vite.config.cts", "vite.config.cjs"];
 const WEBPACK_NAMES: &[&str] = &["webpack.config.js", "webpack.config.ts", "webpack.config.cjs", "webpack.config.mjs"];
 const SKIPPED_DIRS: &[&str] = &["node_modules", ".git", ".idea"];
-/// Directory levels below a resource searched for configurations.
 const MAX_DEPTH: usize = 3;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Config {
-    /// The build output directory, relative to the configuration's folder.
     pub out_dir: String,
-    /// The dev server port it declares.
     pub port: Option<u16>,
 }
 
@@ -43,12 +35,10 @@ fn skip_ws(s: &[u8], mut i: usize) -> usize {
     i
 }
 
-/// `literal` at `i`, returning the index after it.
 fn expect(s: &[u8], i: usize, literal: &str) -> Option<usize> {
     s.get(i..i + literal.len()).filter(|w| *w == literal.as_bytes()).map(|_| i + literal.len())
 }
 
-/// `(path.)resolve(__dirname, ` / `join(__dirname, ` at `i`.
 fn from_dirname(s: &[u8], i: usize) -> Option<usize> {
     let mut j = i;
     if let Some(k) = expect(s, j, "path") {
@@ -72,7 +62,6 @@ fn quoted(s: &[u8], i: usize) -> Option<String> {
     (len > 0).then(|| String::from_utf8_lossy(&s[i + 1..i + 1 + len]).into_owned())
 }
 
-/// The first `key: 'dir'` (or `key: path.resolve(__dirname, 'dir')`; `dirname` makes that form required).
 fn assigned_path(text: &str, key: &str, dirname: bool) -> Option<String> {
     let s = text.as_bytes();
     let mut from = 0;
@@ -95,7 +84,6 @@ fn assigned_path(text: &str, key: &str, dirname: bool) -> Option<String> {
     None
 }
 
-/// The `port` of the dev server block (`server: { port: 3000 }`), at the top level of the block only.
 pub fn server_port(text: &str, vite: bool) -> Option<u16> {
     let key = if vite { "server" } else { "devServer" };
     let s = text.as_bytes();
@@ -126,7 +114,6 @@ pub fn server_port(text: &str, vite: bool) -> Option<u16> {
     None
 }
 
-/// `port: 1234` at `i`: `Some(None)` for a literal out of 1..=65535.
 fn port_at(s: &[u8], i: usize) -> Option<Option<u16>> {
     let j = skip_ws(s, expect(s, i, "port")?);
     let j = skip_ws(s, expect(s, j, ":")?);
@@ -138,12 +125,10 @@ fn port_at(s: &[u8], i: usize) -> Option<Option<u16>> {
     Some(u16::try_from(v).ok().filter(|p| *p >= 1))
 }
 
-/// The configurations of the project, by path.
 #[derive(Default)]
 pub struct Configs(BTreeMap<String, Config>);
 
 impl Configs {
-    /// Reads a configuration file (other `*.config.*` names are not configurations).
     pub fn set(&mut self, path: &str, text: &str) {
         let name = file_name(path);
         if VITE_NAMES.contains(&name) {
@@ -159,13 +144,10 @@ impl Configs {
         self.0.remove(path);
     }
 
-    /// The configuration of directory `dir` itself (Vite first, in name order).
     pub fn in_dir(&self, dir: &str) -> Option<&Config> {
         VITE_NAMES.iter().chain(WEBPACK_NAMES).find_map(|n| self.0.get(&format!("{dir}/{n}")))
     }
 
-    /// The configurations under `dir` (a few levels deep, dependencies left out), in path order,
-    /// with their folder.
     pub fn under<'a>(&'a self, dir: &str) -> impl Iterator<Item = (&'a str, &'a Config)> + 'a {
         let prefix = format!("{dir}/");
         let len = prefix.len();
@@ -180,13 +162,10 @@ impl Configs {
             .map(|(p, c)| (parent(p), c))
     }
 
-    /// The dev server port of the UI of the resource at `dir`: a configuration's, else `default`.
     pub fn dev_port(&self, dir: &str, default: u16) -> u16 {
         self.under(dir).find_map(|(_, c)| c.port).unwrap_or(default)
     }
 
-    /// The resource a web file outside every resource belongs to: the one holding the output folder of
-    /// the nearest configuration above it.
     pub fn build_target(&self, ws: &Workspace, path: &str) -> Option<String> {
         let mut dir = parent(path);
         while within(&ws.root, dir) {
@@ -203,17 +182,14 @@ impl Configs {
     }
 }
 
-/// Whether `dir` is `root` or inside it.
 pub fn within(root: &str, dir: &str) -> bool {
     !dir.is_empty() && (dir == root || dir.strip_prefix(root).is_some_and(|r| r.starts_with('/')))
 }
 
-/// Whether a directory exists: the workspace knows a file under it.
 pub fn dir_exists(ws: &Workspace, dir: &str) -> bool {
     !dir.is_empty() && ws.files_under(dir).next().is_some()
 }
 
-/// `base` joined with the relative path `rel` (`..` and `.` resolved), `None` above the file system root.
 pub fn join(base: &str, rel: &str) -> Option<String> {
     let mut dir = base.to_owned();
     for seg in rel.split('/').filter(|s| !s.is_empty() && *s != ".") {
@@ -230,7 +206,6 @@ pub fn join(base: &str, rel: &str) -> Option<String> {
     Some(dir)
 }
 
-/// The deepest existing folder of `rel` (`../res/html`) from `base`.
 fn existing_ancestor(ws: &Workspace, base: &str, rel: &str) -> Option<String> {
     let mut dir = base.to_owned();
     for seg in rel.split('/').filter(|s| !s.is_empty() && *s != ".") {
@@ -247,7 +222,6 @@ fn existing_ancestor(ws: &Workspace, base: &str, rel: &str) -> Option<String> {
     Some(dir)
 }
 
-/// The resource folder (holding a manifest) containing `dir`, within the project.
 fn resource_holding(ws: &Workspace, dir: &str) -> Option<String> {
     let mut current = dir;
     while within(&ws.root, current) {

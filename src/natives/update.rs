@@ -1,13 +1,3 @@
-//! Natives updates ("Update Natives"): the four databases are downloaded
-//! conditionally (validators kept in the plugin's storage) and each set whose
-//! content changed is converted again.
-//!
-//! The plugin's storage (1 MiB) cannot hold the databases: what is kept per
-//! set is its difference with the bundled snapshot (groups added or changed,
-//! primaries removed), gzip + base64, with the fingerprints of the content it
-//! was made from. A difference too large to store is used by this instance
-//! only. Catalogs apply the difference when they load ([`super::load`]).
-
 use super::Natives;
 use super::convert::{self, Group};
 use super::model::NativeSet;
@@ -25,25 +15,19 @@ use std::rc::Rc;
 
 pub const UPDATE: &str = "natives.update";
 pub const SCHEDULED_UPDATE: &str = "natives.scheduled-update";
-/// Setting: check for new natives automatically (at most once a day).
 pub const AUTO_UPDATE: &str = "natives.autoUpdate";
 
 const STATE_KEY: &str = "natives.state";
 const DELTA_FORMAT: u32 = 1;
-/// Largest stored difference of a set (base64): the three fit in a third of
-/// the storage at most, leaving room for the other features.
 pub const MAX_STORED_DELTA: usize = 112 * 1024;
 const CHECK_INTERVAL_SECS: u64 = 24 * 60 * 60;
 const TIMEOUT_MS: u32 = 15_000;
 const TASK_TITLE: &str = "CfxLua: updating natives";
 
-/// What the plugin remembers between sessions.
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct State {
-    /// When the databases were last checked (seconds since the epoch).
     #[serde(default)]
     checked: u64,
-    /// The last download of each database, by id.
     #[serde(default)]
     databases: BTreeMap<String, Validators>,
 }
@@ -52,28 +36,20 @@ struct State {
 struct Validators {
     etag: Option<String>,
     last_modified: Option<String>,
-    /// Fingerprint of the content they validate.
     fingerprint: String,
 }
 
-/// The difference between a set and the bundled snapshot.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Delta {
     format: u32,
-    /// The snapshot it applies to ([`sources::snapshot_id`]).
     base: String,
-    /// What the set was converted from.
     inputs: Inputs,
-    /// Functions of the set once applied.
     functions: usize,
-    /// Primaries of the snapshot that are gone.
     removed: Vec<String>,
-    /// Groups added or changed.
     groups: Vec<Group>,
 }
 
 thread_local! {
-    /// The update in effect per set, once this instance knows it (`Some(None)`: none).
     static IN_EFFECT: RefCell<[Option<Option<Rc<Delta>>>; 3]> = const { RefCell::new([None, None, None]) };
 }
 
@@ -89,7 +65,6 @@ fn delta_key(set: NativeSet) -> String {
     format!("natives.delta.{}", set.id().to_ascii_lowercase())
 }
 
-/// The stored update of `set`; one made for another snapshot or unreadable is deleted.
 fn read_stored(set: NativeSet) -> Option<Delta> {
     let key = delta_key(set);
     let raw = host::storage::get(&key).ok()??;
@@ -100,7 +75,6 @@ fn read_stored(set: NativeSet) -> Option<Delta> {
     delta
 }
 
-/// The update in effect for `set`, read from the storage once per instance.
 fn effective(set: NativeSet) -> Option<Rc<Delta>> {
     if let Some(delta) = known(set) {
         return delta;
@@ -110,13 +84,10 @@ fn effective(set: NativeSet) -> Option<Rc<Delta>> {
     stored
 }
 
-/// The update catalogs of `set` apply. Unit tests of every area build catalogs
-/// without a host: there, only updates made in the test count.
 pub fn current_delta(set: NativeSet) -> Option<Rc<Delta>> {
     if cfg!(test) { known(set).flatten() } else { effective(set) }
 }
 
-/// The bundled groups of a set with an update applied, sorted.
 pub fn apply(groups: Vec<Group>, delta: &Delta) -> Vec<Group> {
     let replaced: HashSet<&str> = delta
         .removed
@@ -130,7 +101,6 @@ pub fn apply(groups: Vec<Group>, delta: &Delta) -> Vec<Group> {
     out
 }
 
-/// The update that turns the `bundled` groups of `set` into `new`.
 fn diff(set: NativeSet, bundled: &[Group], new: Vec<Group>, inputs: Inputs) -> Delta {
     let removed = {
         let names: HashSet<&str> = new.iter().map(|g| g.native.lua_name.as_str()).collect();
@@ -158,7 +128,6 @@ fn decode_delta(text: &str) -> Option<Delta> {
 
 const BASE64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-/// Standard base64 with padding (the storage keeps text).
 fn base64_encode(data: &[u8]) -> String {
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
@@ -207,38 +176,26 @@ fn base64_decode(text: &str) -> Option<Vec<u8>> {
 // ---------------------------------------------------------------------------
 // The update
 
-/// Where the natives in effect come from (the worst database is reported).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum Origin {
-    /// Downloaded now, or confirmed by the server.
     Remote,
-    /// The server could not be reached: the previous download is used.
     Cache,
-    /// Nothing downloaded: the snapshot bundled with the plugin.
     Bundled,
 }
 
-/// What an update did.
 #[derive(Debug)]
 struct Outcome {
     changed: Vec<NativeSet>,
-    /// Functions per set, for the sets the notification names.
     counts: [Option<usize>; 3],
     origin: Origin,
     error: Option<String>,
-    /// Changed sets whose update is kept in memory only.
     unstored: Vec<NativeSet>,
-    /// Whether the plugin may use its storage.
     storage: bool,
 }
 
-/// A database during an update.
 enum Content {
-    /// Not obtained (the error is reported).
     Failed,
-    /// Unchanged since the last download (HTTP 304): its fingerprint.
     Known(String),
-    /// Downloaded by this update.
     Fetched { fingerprint: String, text: String },
 }
 
@@ -272,8 +229,6 @@ fn download(db: Database, validators: Option<&Validators>) -> Result<Answer, Str
     }
 }
 
-/// Downloads `db` (`conditional`: with the validators of the last download);
-/// new content is checked before its validators are kept.
 fn obtain(db: Database, state: &mut State, errors: &mut Vec<String>, conditional: bool) -> Content {
     let last = state.databases.get(db.id()).cloned();
     match download(db, last.as_ref().filter(|_| conditional)) {
@@ -303,8 +258,6 @@ fn obtain(db: Database, state: &mut State, errors: &mut Vec<String>, conditional
     }
 }
 
-/// The content `set` should be built from: what the databases have now, or
-/// what is in effect for those that could not be checked.
 fn wanted(set: NativeSet, content: &[Content], in_effect: &Inputs) -> Inputs {
     sources::databases(set)
         .iter()
@@ -318,7 +271,6 @@ fn wanted(set: NativeSet, content: &[Content], in_effect: &Inputs) -> Inputs {
         .collect()
 }
 
-/// Stores the update of `set` (`None`: back to the snapshot); false when it does not fit.
 fn save(set: NativeSet, delta: Option<&Delta>, budget: usize) -> bool {
     let key = delta_key(set);
     match delta {
@@ -334,8 +286,6 @@ fn now_secs() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
 }
 
-/// Checks the four databases and converts the sets whose content changed.
-/// `None` when the user cancelled it.
 fn update(task: &host::Task, natives: &Natives, manual: bool, budget: usize) -> Option<Outcome> {
     let (mut state, storage) = match host::storage::get(STATE_KEY) {
         Ok(raw) => (raw.and_then(|r| serde_json::from_str(&r).ok()).unwrap_or_default(), true),
@@ -433,7 +383,6 @@ fn update(task: &host::Task, natives: &Natives, manual: bool, budget: usize) -> 
     Some(outcome)
 }
 
-/// `7,088`.
 fn grouped(n: usize) -> String {
     let digits = n.to_string();
     let mut out = String::with_capacity(digits.len() + digits.len() / 3);
@@ -472,7 +421,6 @@ fn describe(o: &Outcome) -> String {
     format!("{} functions from {source}, {changes}.{error}", grouped(total))
 }
 
-/// The notification of an update: changes always, the rest when asked for.
 fn notification(o: &Outcome, manual: bool) -> Option<(NotificationLevel, &'static str, String)> {
     let level = if o.error.is_some() { NotificationLevel::Warning } else { NotificationLevel::Info };
     if !o.changed.is_empty() {
@@ -527,13 +475,10 @@ fn run_with(natives: &Natives, manual: bool, budget: usize) -> CommandResult {
     Ok(None)
 }
 
-/// `natives.update`: checks now and always reports.
 pub fn run(natives: &Natives) -> CommandResult {
     run_with(natives, true, MAX_STORED_DELTA)
 }
 
-/// `natives.scheduled-update` (the plugin's scheduled event): at most one
-/// silent check a day, when automatic updates are on.
 pub fn scheduled(cx: &CommandCx) -> CommandResult {
     if !cx.settings.enabled() || !cx.settings.bool(AUTO_UPDATE, true) {
         return Ok(None);
@@ -563,12 +508,10 @@ mod tests {
     const NET: &[&str] = &["storage", "net:static.cfx.re", "net:raw.githubusercontent.com"];
     const LAST_MODIFIED: &str = "Mon, 22 Jun 2026 13:09:01 GMT";
 
-    /// The bundled databases, with `edit` applied to some.
     fn databases(edit: impl Fn(Database, String) -> String) -> HashMap<String, String> {
         Database::ALL.into_iter().map(|d| (d.url().to_owned(), edit(d, d.bundled_text().unwrap_or_default()))).collect()
     }
 
-    /// Serves `bodies` by URL, with an ETag (the content's fingerprint) and a Last-Modified; 304 when it matches.
     fn serve(mock: &MockHost, bodies: HashMap<String, String>) {
         mock.on_fetch(move |r| {
             let body = bodies.get(&r.url).ok_or_else(|| openidea_plugin::Error::Failed("connection refused".into()))?;
@@ -584,7 +527,6 @@ mod tests {
         mock.notifications().pop().expect("a notification")
     }
 
-    /// GTA V natives.json with one description changed and one native added.
     fn edited_gta5(d: Database, text: String) -> String {
         if d != Database::Gta5 {
             return text;

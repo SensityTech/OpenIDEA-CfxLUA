@@ -1,21 +1,13 @@
-//! Identical calls of natives whose result does not change during a frame
-//! (`PlayerPedId()`, `GetEntityCoords(ped)`), repeated in one iteration of a
-//! loop, and the edits caching them in a local.
-
 use super::ast::{Ast, DeclKind, ExprKind, Node, StatKind};
 use super::edits::{self, Edit};
 use super::loops::{LoopFacts, assigned_names, is_wait_loop};
 use super::spec::{Work, Yield};
 use std::collections::HashSet;
 
-/// What can change the value between two calls.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Stability {
-    /// Only waiting: `GetGameTimer()`.
     Frame,
-    /// Waiting, or a model change of the player: `PlayerPedId()`.
     Ped,
-    /// Waiting, or any call that may act on the game.
     State,
 }
 
@@ -36,22 +28,17 @@ const CACHEABLE: &[(&str, &str, Stability)] = &[
     ("GetSelectedPedWeapon", "weapon", Stability::State),
 ];
 
-/// Natives giving the player another ped.
 const MODEL_CHANGES: &[&str] = &["SetPlayerModel", "ChangePlayerPed", "NetworkResurrectLocalPlayer", "ResurrectPed"];
 
-/// The canonical text of `GetPlayerPed(-1)`.
 pub const PLAYER_PED_ID: &str = "PlayerPedId()";
 
-/// Identical calls found in one frame of a loop.
 pub struct Group {
-    /// Canonical text (`PlayerPedId()` for `GetPlayerPed(-1)` too).
     pub key: String,
     pub local: &'static str,
     pub stability: Stability,
     pub calls: Vec<usize>,
 }
 
-/// Edits caching a group in local `name`; `reuse` when the local exists.
 pub struct Cache {
     pub name: String,
     pub reuse: bool,
@@ -64,7 +51,6 @@ struct Shape {
     stability: Stability,
 }
 
-/// Calls in evaluation order; a nested `while` / `repeat` loop is a barrier (`None`).
 fn sequence(ast: &Ast, n: Node, out: &mut Vec<Option<usize>>) {
     ast.children(n, |c| {
         if is_wait_loop(ast, c) {
@@ -80,7 +66,6 @@ fn sequence(ast: &Ast, n: Node, out: &mut Vec<Option<usize>>) {
     }
 }
 
-/// Groups of at least `min` identical calls between two waits of the loop's body.
 pub fn groups(lp: &LoopFacts, min: usize) -> Vec<Group> {
     let ast = &lp.p.ast;
     let assigned = assigned_names(ast, Node::Block(lp.body));
@@ -127,7 +112,6 @@ fn max_on_one_path(ast: &Ast, g: &Group) -> usize {
     g.calls.iter().map(|&a| 1 + g.calls.iter().filter(|&&b| b != a && !exclusive(ast, a, b)).count()).max().unwrap_or(0)
 }
 
-/// Whether `a` and `b` are in parts of an `if` that never both run.
 fn exclusive(ast: &Ast, a: usize, b: usize) -> bool {
     let Some(common @ Node::Stat(s)) = ast.common(Node::Expr(a), Node::Expr(b)) else { return false };
     if !matches!(ast.stats[s].kind, StatKind::If { .. }) {
@@ -207,7 +191,6 @@ fn is_literal(ast: &Ast, e: usize) -> bool {
     )
 }
 
-/// `GetPlayerPed(-1)`.
 pub fn is_player_ped_minus_one(ast: &Ast, src: &crate::lua::Source, call: usize) -> bool {
     if ast.callee_name(call) != Some("GetPlayerPed") {
         return false;
@@ -217,7 +200,6 @@ pub fn is_player_ped_minus_one(ast: &Ast, src: &crate::lua::Source, call: usize)
     text == "-1"
 }
 
-/// Display text of a group: `PlayerPedId()`, else the first call on one line.
 pub fn display(ast: &Ast, src: &crate::lua::Source, g: &Group) -> String {
     if g.key == PLAYER_PED_ID {
         return PLAYER_PED_ID.into();
@@ -225,9 +207,6 @@ pub fn display(ast: &Ast, src: &crate::lua::Source, g: &Group) -> String {
     ast.text(src, Node::Expr(g.calls[0])).split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Edits caching `g` in a local: reuse `local x = <call>` when the first call
-/// initialises one, else declare the local before the statement holding the
-/// first call. `None` when the value can't be hoisted safely.
 pub fn cache_edits(lp: &LoopFacts, g: &Group) -> Option<Cache> {
     let p = lp.p;
     let ast = &p.ast;
@@ -303,7 +282,6 @@ pub fn cache_edits(lp: &LoopFacts, g: &Group) -> Option<Cache> {
     Some(Cache { name, reuse: false, edits: out })
 }
 
-/// Whether local `d` is declared before statement `anchor`, in a scope enclosing it.
 fn visible_before(ast: &Ast, d: usize, anchor: usize) -> bool {
     let a = Node::Stat(anchor);
     match ast.decls[d].kind {

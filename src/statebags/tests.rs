@@ -1,6 +1,3 @@
-//! Acceptance tests of the original plugin (`CfxStateBag*Test`): a resource
-//! whose server script writes player, entity and global keys.
-
 use super::sites::{Kind, SERVER};
 use super::{StateBagsFeature, key_doc};
 use crate::feature::Feature;
@@ -232,7 +229,6 @@ fn documentation_describes_the_key() {
 // ---------------------------------------------------------------------------------------------
 // the unknown-key check
 
-/// The messages of the document's problems and the result of its first fix.
 fn check(fx: &Fixture, rel: &str) -> (Vec<String>, Option<(String, String)>) {
     let f = indexed(fx);
     let doc = fx.doc(rel);

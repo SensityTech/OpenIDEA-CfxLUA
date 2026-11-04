@@ -1,54 +1,33 @@
-//! A light structural view of a Lua source: code tokens (comments left out),
-//! matching brackets, and "chains" — suffixed expressions such as
-//! `Player(src).state:set('job', job)` — which is what FiveM features look
-//! for (calls with string arguments, state bag accesses, event APIs). No full
-//! parse: it stays correct enough on code that is being typed.
-
 use super::lexer::{Tok, Token, code_tokens, tokenize};
 use crate::text::LineIndex;
 
-/// A parsed document.
 pub struct Source {
     pub text: String,
-    /// Every token, comments included.
     pub all: Vec<Token>,
-    /// Tokens without comments.
     pub toks: Vec<Token>,
-    /// For each bracket token in `toks`, the index of its partner.
     pub pair: Vec<Option<usize>>,
     pub lines: LineIndex,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Seg {
-    /// `.name` / `?.name`; `tok` is the name token.
     Field { name: String, tok: usize, safe: bool },
-    /// `:name` (a call follows) / `?:name`.
     Method { name: String, tok: usize },
-    /// `[ … ]`: the bracket tokens.
     Index { open: usize, close: Option<usize> },
-    /// `( … )`: arguments as token ranges `[start, end)` split at top-level commas.
     Call { open: usize, close: Option<usize>, args: Vec<(usize, usize)> },
-    /// `f 'str'`, `f "str"`, `f [[…]]`: the string token is the only argument.
     StrCall { tok: usize },
-    /// `f { … }`.
     TableCall { open: usize, close: Option<usize> },
 }
 
-/// A suffixed expression starting at a name (or a parenthesised expression).
 #[derive(Clone, Debug)]
 pub struct Chain {
-    /// Index (in `toks`) of the first token.
     pub start: usize,
     pub head: String,
     pub segs: Vec<Seg>,
-    /// Index of the token after the chain.
     pub end: usize,
 }
 
 impl Chain {
-    /// Dotted path of the leading names (`Citizen.CreateThread`,
-    /// `exports.ox_lib:notify`) up to segment `n` (exclusive).
     pub fn path(&self, n: usize) -> String {
         let mut out = self.head.clone();
         for s in &self.segs[..n.min(self.segs.len())] {
@@ -69,19 +48,13 @@ impl Chain {
     }
 }
 
-/// A function call found in the source.
 #[derive(Clone, Debug)]
 pub struct Call {
-    /// Callee path (`AddEventHandler`, `Citizen.CreateThread`, `lib.callback.register`).
     pub callee: String,
-    /// The last name of the callee (`register`), its token index.
     pub name_tok: usize,
-    /// The `(` token (or the string / `{` of a sugar call).
     pub open: usize,
     pub close: Option<usize>,
-    /// Arguments as token ranges.
     pub args: Vec<(usize, usize)>,
-    /// The chain the call belongs to and the call's segment index in it.
     pub chain: usize,
     pub seg: usize,
 }
@@ -94,7 +67,6 @@ impl Source {
         Self { text: text.to_owned(), lines: LineIndex::new(text), all, toks, pair }
     }
 
-    /// Text only, no tokens (documents that are not Lua: JS, HTML…).
     pub fn plain(text: &str) -> Self {
         Self { text: text.to_owned(), lines: LineIndex::new(text), all: Vec::new(), toks: Vec::new(), pair: Vec::new() }
     }
@@ -115,30 +87,25 @@ impl Source {
         self.toks.get(i).is_some_and(|t| t.kind == Tok::Name)
     }
 
-    /// The string value of token `i` if it is a string literal.
     pub fn string_at(&self, i: usize) -> Option<String> {
         let t = self.toks.get(i)?;
         t.is_string().then(|| t.string_value(&self.text))
     }
 
-    /// If argument `arg` is exactly one string literal: its token index.
     pub fn string_arg(&self, arg: (usize, usize)) -> Option<usize> {
         (arg.1 == arg.0 + 1 && self.toks[arg.0].is_string()).then_some(arg.0)
     }
 
-    /// Index of the code token containing byte `at`, or the last one before it.
     pub fn tok_before(&self, at: usize) -> Option<usize> {
         let i = self.toks.partition_point(|t| t.start < at);
         if i == 0 { None } else { Some(i - 1) }
     }
 
-    /// Index of the code token that contains `at` (end inclusive).
     pub fn tok_at(&self, at: usize) -> Option<usize> {
         let i = self.tok_before(at)?;
         (self.toks[i].end >= at).then_some(i)
     }
 
-    /// Whether byte `at` is inside a comment.
     pub fn in_comment(&self, at: usize) -> bool {
         let i = self.all.partition_point(|t| t.start < at);
         i > 0 && {
@@ -147,7 +114,6 @@ impl Source {
         }
     }
 
-    /// Byte span of token range `[a, b)`.
     pub fn span(&self, a: usize, b: usize) -> (usize, usize) {
         if a >= b || a >= self.toks.len() {
             let at = self.toks.get(a).map_or(self.text.len(), |t| t.start);
@@ -156,7 +122,6 @@ impl Source {
         (self.toks[a].start, self.toks[b - 1].end)
     }
 
-    /// Every chain of the source, outer chains before the chains nested in their arguments.
     pub fn chains(&self) -> Vec<Chain> {
         let mut out = Vec::new();
         for i in 0..self.toks.len() {
@@ -229,7 +194,6 @@ impl Source {
         Chain { start, head, segs, end: i }
     }
 
-    /// Splits tokens `[from, to)` at top-level commas.
     pub fn split_args(&self, from: usize, to: usize) -> Vec<(usize, usize)> {
         let mut args = Vec::new();
         if from >= to {
@@ -275,7 +239,6 @@ impl Source {
         args
     }
 
-    /// Every call of the source.
     pub fn calls(&self, chains: &[Chain]) -> Vec<Call> {
         let mut out = Vec::new();
         for (ci, c) in chains.iter().enumerate() {
@@ -303,7 +266,6 @@ impl Source {
         out
     }
 
-    /// The argument of `call` that contains byte `at` (index, token range).
     pub fn arg_at(&self, call: &Call, at: usize) -> Option<(usize, (usize, usize))> {
         let open = self.toks[call.open];
         let close_at = call.close.map_or(self.text.len(), |c| self.toks[c].start);
@@ -328,8 +290,6 @@ impl Source {
         call.args.get(index).map(|a| (index, *a))
     }
 
-    /// Whether the statement containing token `i` starts at `i` (after
-    /// `;`, a keyword that ends a block header, or another statement's end).
     pub fn is_statement_start(&self, i: usize) -> bool {
         if i == 0 {
             return true;
@@ -350,7 +310,6 @@ impl Source {
     }
 }
 
-/// Matches `(` `[` `{` `?[` with their closers.
 fn match_brackets(src: &str, toks: &[Token]) -> Vec<Option<usize>> {
     let mut pair = vec![None; toks.len()];
     let mut stack: Vec<(usize, u8)> = Vec::new();

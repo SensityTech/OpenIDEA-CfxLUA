@@ -1,9 +1,3 @@
-//! The acceptance fixtures of the NUI bridge: `shop` (React / Vite, wrappers,
-//! a minified build), `legacy` (jQuery, direct URLs), `vueres` (a Vue
-//! component calling wrappers imported under another name), `other` (a
-//! callback of the same name in another resource), `dynamic` (callbacks
-//! registered in a loop).
-
 use super::*;
 use crate::testing::Fixture;
 use serde_json::Value;
@@ -275,7 +269,6 @@ fn files(extra: &[(&'static str, &'static str)]) -> Vec<(&'static str, String)> 
     out
 }
 
-/// The synthetic project plus `extra` files, indexed.
 fn project(extra: &[(&'static str, &'static str)]) -> (Fixture, NuiFeature) {
     let all = files(extra);
     let refs: Vec<(&str, &str)> = all.iter().map(|(p, t)| (*p, t.as_str())).collect();
@@ -307,7 +300,6 @@ fn sites_of(fx: &Fixture, f: &NuiFeature, channel: Channel, name: &str) -> Vec<S
     out
 }
 
-/// `path:line` of the definitions at the first `marker` of `path` (plus `shift`).
 fn definitions(fx: &Fixture, f: &NuiFeature, path: &str, marker: &str, shift: usize) -> Vec<String> {
     let doc = fx.doc(path);
     let at = doc.text().find(marker).unwrap_or_else(|| panic!("{marker} not in {path}")) + shift;

@@ -1,13 +1,3 @@
-//! Coordinates toolbox: vector conversions and checks.
-//!
-//! Code actions on the coordinates at the caret (to a vector, a keyed table
-//! or an array, rounding, adding / removing the heading, spreading a vector
-//! into x, y, z arguments), checks of literal positions (z = 0, outside of
-//! the map, duplicates in a Config table), zone hints from a zones file of
-//! the workspace, and the command converting the selected coordinates text
-//! (the original converted on paste). The distance code action lives with
-//! the performance check sharing it (`crate::perf::distance`).
-
 pub mod checks;
 pub mod expr;
 pub mod paste;
@@ -28,23 +18,16 @@ use std::rc::Rc;
 use std::sync::Arc;
 use zones::ZoneMap;
 
-/// Settings keys (`coords.*`).
 pub mod keys {
-    /// Decimals kept when rounding coordinates (0 to 6, default 2).
     pub const ROUND_DECIMALS: &str = "coords.roundDecimals";
-    /// A `zones.json` of the workspace for the zone hints (empty: none).
     pub const ZONES_FILE: &str = "coords.zonesFile";
-    /// Root names of the Config tables checked for duplicates.
     pub const CONFIG_TABLES: &str = "coords.configTables";
 }
 
-/// The command converting the selected coordinates.
 pub const CONVERT_SELECTION: &str = "coords.convert-selection";
 
-/// Zones files larger than this are ignored.
 const MAX_ZONES_FILE: usize = 20 * 1024 * 1024;
 
-/// Parameter names of the global functions of every project file.
 #[derive(Default)]
 struct ParamIndex {
     files: HashMap<String, Vec<(String, Vec<String>)>>,
@@ -77,7 +60,6 @@ impl ParamIndex {
     }
 }
 
-/// Names of a function expression's parameters (`None` for methods with an implicit `self`).
 fn function_params(ast: &Ast, f: usize) -> Option<Vec<String>> {
     match &ast.exprs[ast.unwrap(f)].kind {
         ExprKind::Function { params, method: false, .. } => {
@@ -95,7 +77,6 @@ fn global_functions(ast: &Ast) -> Vec<(String, Vec<String>)> {
         .collect()
 }
 
-/// The zones file last read: its path, text and zones.
 struct LoadedZones {
     path: String,
     text: Arc<str>,
@@ -108,7 +89,6 @@ pub struct CoordsFeature {
     zones: RefCell<Option<LoadedZones>>,
 }
 
-/// What resolving parameter names needs.
 struct Resolver<'a> {
     cx: &'a Ctx<'a>,
     ast: &'a Ast,
@@ -124,8 +104,6 @@ impl Resolver<'_> {
         Resolver { cx, ast, index, sets }
     }
 
-    /// Parameter names of the function `call` calls: a local function, a
-    /// native, a function of the project (`:` method calls excluded).
     fn params(&self, call: usize) -> Option<Vec<String>> {
         let ast = self.ast;
         let ExprKind::Call { callee, method: None, .. } = ast.exprs[call].kind else { return None };
@@ -160,7 +138,6 @@ impl Resolver<'_> {
         self.index.params(path, &self.cx.doc.path)
     }
 
-    /// «Spread into x, y, z arguments» for the innermost call argument around `at` taking x, y, z.
     fn spread(&self, at: usize) -> Option<Fix> {
         let (ast, src) = (self.ast, &self.cx.doc.src);
         for start in nodes_at(ast, src, at) {
@@ -209,7 +186,6 @@ impl Resolver<'_> {
     }
 }
 
-/// The conversion code actions of the coordinates `c`.
 fn conversions(ast: &Ast, src: &Source, c: &Coord, decimals_kept: usize) -> Vec<Fix> {
     let texts = c.texts(ast, src);
     let n = texts.len();
@@ -268,7 +244,6 @@ impl CoordsFeature {
         cx.settings.enabled() && cx.doc.is_lua() && !cx.doc.is_manifest()
     }
 
-    /// The zones of the file named in the settings, parsed once per text.
     fn zone_map(&self, cx: &Ctx) -> Option<Rc<ZoneMap>> {
         let setting = cx.settings.string(keys::ZONES_FILE, "");
         let setting = setting.trim();

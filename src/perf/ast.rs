@@ -1,20 +1,9 @@
-//! A small syntax tree of a CfxLua source, built by a forgiving
-//! recursive-descent parser over [`Source::toks`]: statements, blocks,
-//! expressions and local variable scopes. The performance checks need the
-//! statement structure; the values and coordinates features reuse it for
-//! call arguments, table constructors and local resolution.
-//!
-//! It never fails: missing expressions become [`ExprKind::Error`] nodes and
-//! unexpected tokens are skipped, so half-typed code still has a tree. One
-//! parse per text is cached ([`parse`]), shared by every feature.
-
 use crate::lua::Source;
 use crate::lua::lexer::Tok;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-/// A node of the tree, by index into its table.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Node {
     Expr(usize),
@@ -29,82 +18,39 @@ pub enum ExprKind {
     False,
     Vararg,
     Number,
-    /// Quoted or long-bracket string.
     Str,
-    /// `` `name` `` (CfxLua compile-time hash).
     Hash,
-    /// `decl`: the local it refers to (`None` for a global).
-    Name {
-        name: String,
-        decl: Option<usize>,
-    },
-    /// `obj.name` / `obj?.name`.
-    Field {
-        obj: usize,
-        name: String,
-        safe: bool,
-    },
-    /// `obj[key]`.
-    Index {
-        obj: usize,
-        key: usize,
-    },
-    /// `callee(args)`, `callee:method(args)`, `callee 'str'`, `callee { }`.
-    Call {
-        callee: usize,
-        method: Option<String>,
-        args: Vec<usize>,
-    },
-    /// `function (params) body end`; `ordinal` is its index in [`Ast::functions`].
-    /// `method`: declared with `:` (an implicit `self` before `params`).
-    Function {
-        params: Vec<usize>,
-        body: usize,
-        ordinal: usize,
-        method: bool,
-    },
-    Table {
-        fields: Vec<Field>,
-    },
-    Binary {
-        op: &'static str,
-        lhs: usize,
-        rhs: usize,
-    },
-    Unary {
-        op: &'static str,
-        operand: usize,
-    },
+    Name { name: String, decl: Option<usize> },
+    Field { obj: usize, name: String, safe: bool },
+    Index { obj: usize, key: usize },
+    Call { callee: usize, method: Option<String>, args: Vec<usize> },
+    Function { params: Vec<usize>, body: usize, ordinal: usize, method: bool },
+    Table { fields: Vec<Field> },
+    Binary { op: &'static str, lhs: usize, rhs: usize },
+    Unary { op: &'static str, operand: usize },
     Paren(usize),
-    /// Something missing or not understood.
     Error,
 }
 
 #[derive(Clone, Debug)]
 pub enum FieldKey {
     Positional,
-    /// `name = value`.
     Named(String),
-    /// `[key] = value`.
     Expr(usize),
-    /// CfxLua set constructors: `{ .name }`, `{ [key] }`.
     Set,
 }
 
 #[derive(Clone, Debug)]
 pub struct Field {
     pub key: FieldKey,
-    /// `None` for set fields.
     pub value: Option<usize>,
 }
 
 #[derive(Clone, Debug)]
 pub struct Expr {
     pub kind: ExprKind,
-    /// Token range `[first, end)` (empty for a missing expression).
     pub first: usize,
     pub end: usize,
-    /// Byte span.
     pub start: usize,
     pub stop: usize,
     pub parent: Option<Node>,
@@ -112,56 +58,18 @@ pub struct Expr {
 
 #[derive(Clone, Debug)]
 pub enum StatKind {
-    Local {
-        names: Vec<usize>,
-        values: Vec<usize>,
-    },
-    LocalFunction {
-        decl: usize,
-        func: usize,
-    },
-    /// `function a.b:c() end`: `target` is the name path, `method` the `:` name.
-    Function {
-        target: usize,
-        method: Option<String>,
-        func: usize,
-    },
-    Assign {
-        targets: Vec<usize>,
-        values: Vec<usize>,
-    },
-    /// CfxLua `x += 1`.
-    Compound {
-        target: usize,
-        op: &'static str,
-        value: usize,
-    },
-    /// A call (or anything else written as a statement).
+    Local { names: Vec<usize>, values: Vec<usize> },
+    LocalFunction { decl: usize, func: usize },
+    Function { target: usize, method: Option<String>, func: usize },
+    Assign { targets: Vec<usize>, values: Vec<usize> },
+    Compound { target: usize, op: &'static str, value: usize },
     Expr(usize),
     Do(usize),
-    While {
-        cond: usize,
-        body: usize,
-    },
-    Repeat {
-        body: usize,
-        cond: usize,
-    },
-    If {
-        conds: Vec<usize>,
-        blocks: Vec<usize>,
-        otherwise: Option<usize>,
-    },
-    NumFor {
-        var: usize,
-        exprs: Vec<usize>,
-        body: usize,
-    },
-    GenFor {
-        vars: Vec<usize>,
-        exprs: Vec<usize>,
-        body: usize,
-    },
+    While { cond: usize, body: usize },
+    Repeat { body: usize, cond: usize },
+    If { conds: Vec<usize>, blocks: Vec<usize>, otherwise: Option<usize> },
+    NumFor { var: usize, exprs: Vec<usize>, body: usize },
+    GenFor { vars: Vec<usize>, exprs: Vec<usize>, body: usize },
     Return(Vec<usize>),
     Break,
     Goto,
@@ -182,7 +90,6 @@ pub struct Stat {
 #[derive(Clone, Debug)]
 pub struct Block {
     pub stats: Vec<usize>,
-    /// Byte offsets: just after the opening token, at the closing token.
     pub start: usize,
     pub stop: usize,
     pub parent: Option<Node>,
@@ -190,42 +97,26 @@ pub struct Block {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DeclKind {
-    /// `local a, b = …`: the statement and the name's index.
-    Local {
-        stat: usize,
-        index: usize,
-    },
-    LocalFunction {
-        stat: usize,
-    },
-    Param {
-        func: usize,
-    },
-    ForVar {
-        stat: usize,
-    },
+    Local { stat: usize, index: usize },
+    LocalFunction { stat: usize },
+    Param { func: usize },
+    ForVar { stat: usize },
 }
 
-/// A local variable (parameters and loop variables included).
 #[derive(Clone, Debug)]
 pub struct Decl {
     pub name: String,
     pub tok: usize,
     pub kind: DeclKind,
-    /// Token range where the name refers to this local.
     pub from: usize,
     pub to: usize,
-    /// The value it is declared with (`local x = <init>`, the function of a `local function`).
     pub init: Option<usize>,
-    /// Statements assigning it (`x = …`, `x += …`, `function x() end`).
     pub assigned: Vec<usize>,
 }
 
-/// A function given a name.
 #[derive(Clone, Debug)]
 pub struct Named {
     pub path: String,
-    /// The local the path starts with (`None`: a global).
     pub root: Option<usize>,
     pub func: usize,
 }
@@ -236,20 +127,15 @@ pub struct Ast {
     pub blocks: Vec<Block>,
     pub decls: Vec<Decl>,
     pub root: usize,
-    /// For each code token, the innermost node it belongs to.
     pub owner: Vec<Option<Node>>,
-    /// Function expressions, by ordinal.
     pub functions: Vec<usize>,
     by_name: HashMap<String, Vec<usize>>,
 }
 
 thread_local! {
-    /// The last parsed sources, by (length, hash) of their text.
     static CACHE: RefCell<Vec<(usize, u64, Rc<Ast>)>> = const { RefCell::new(Vec::new()) };
 }
 
-/// The tree of `src`, parsed once per text (the features of one request,
-/// and the indexing of a file by every feature, share it).
 pub fn parse(src: &Source) -> Rc<Ast> {
     let key = (src.text.len(), fnv(&src.text));
     if let Some(ast) = CACHE.with(|c| c.borrow().iter().find(|(l, h, _)| (*l, *h) == key).map(|(_, _, a)| a.clone())) {
@@ -291,7 +177,6 @@ impl Ast {
         ast
     }
 
-    /// Byte span of a node.
     pub fn span(&self, n: Node) -> (usize, usize) {
         match n {
             Node::Expr(e) => (self.exprs[e].start, self.exprs[e].stop),
@@ -313,7 +198,6 @@ impl Ast {
         }
     }
 
-    /// Whether `a` is `b` or one of its ancestors (`strict`: not `b` itself).
     pub fn is_ancestor(&self, a: Node, b: Node, strict: bool) -> bool {
         let mut n = if strict { self.parent(b) } else { Some(b) };
         while let Some(x) = n {
@@ -325,7 +209,6 @@ impl Ast {
         false
     }
 
-    /// Lowest common ancestor of two nodes.
     pub fn common(&self, a: Node, b: Node) -> Option<Node> {
         let mut n = Some(a);
         while let Some(x) = n {
@@ -337,7 +220,6 @@ impl Ast {
         None
     }
 
-    /// `e` without enclosing parentheses.
     pub fn unwrap(&self, mut e: usize) -> usize {
         while let ExprKind::Paren(inner) = self.exprs[e].kind {
             e = inner;
@@ -349,12 +231,10 @@ impl Ast {
         matches!(n, Node::Expr(e) if matches!(self.exprs[e].kind, ExprKind::Function { .. }))
     }
 
-    /// The node owning the code token `tok`.
     pub fn owner_of(&self, tok: usize) -> Option<Node> {
         self.owner.get(tok).copied().flatten()
     }
 
-    /// Calls `f` with the children of `n`, in evaluation order.
     pub fn children(&self, n: Node, mut f: impl FnMut(Node)) {
         let mut ex = |e: usize| f(Node::Expr(e));
         match n {
@@ -431,8 +311,6 @@ impl Ast {
         }
     }
 
-    /// Visits `root` and its descendants (pre-order), skipping function
-    /// definitions and the subtrees `skip` rejects (`root` itself is always visited).
     pub fn walk(&self, root: Node, skip: &dyn Fn(Node) -> bool, visit: &mut dyn FnMut(Node)) {
         visit(root);
         self.children(root, |c| {
@@ -442,14 +320,11 @@ impl Ast {
         });
     }
 
-    /// Visits `root` and every descendant, function definitions included.
     pub fn walk_all(&self, root: Node, visit: &mut dyn FnMut(Node)) {
         visit(root);
         self.children(root, |c| self.walk_all(c, visit));
     }
 
-    /// Call expressions under `root` in evaluation order (arguments before
-    /// the call using them), function definitions and `skip`ped subtrees excluded.
     pub fn calls(&self, root: Node, skip: &dyn Fn(Node) -> bool) -> Vec<usize> {
         let mut out = Vec::new();
         self.post_calls(root, skip, &mut out);
@@ -469,7 +344,6 @@ impl Ast {
         }
     }
 
-    /// The local named `name` visible at token `tok`.
     pub fn local_at(&self, name: &str, tok: usize) -> Option<usize> {
         self.by_name
             .get(name)?
@@ -479,7 +353,6 @@ impl Ast {
             .max_by_key(|&d| self.decls[d].from)
     }
 
-    /// The local a name expression refers to.
     pub fn decl_of(&self, e: usize) -> Option<usize> {
         match &self.exprs[e].kind {
             ExprKind::Name { decl, .. } => *decl,
@@ -494,8 +367,6 @@ impl Ast {
         }
     }
 
-    /// The declared value of the local `e` refers to (`None` for globals,
-    /// parameters and locals without a value).
     pub fn local_initializer(&self, e: usize) -> Option<usize> {
         let d = self.decl_of(e)?;
         match self.decls[d].kind {
@@ -504,7 +375,6 @@ impl Ast {
         }
     }
 
-    /// [`Ast::local_initializer`] of a local never assigned again.
     pub fn constant_initializer(&self, e: usize) -> Option<usize> {
         let d = self.decl_of(e)?;
         if !self.decls[d].assigned.is_empty() {
@@ -513,8 +383,6 @@ impl Ast {
         self.local_initializer(e)
     }
 
-    /// Dotted path of a name expression (`Citizen.Wait`), `None` when an
-    /// index is computed or the root is not a name.
     pub fn path(&self, e: usize) -> Option<String> {
         match &self.exprs[e].kind {
             ExprKind::Name { name, .. } => Some(name.clone()),
@@ -523,7 +391,6 @@ impl Ast {
         }
     }
 
-    /// The name at the root of `a.b.c` / `a[b].c`.
     pub fn root_name(&self, mut e: usize) -> Option<usize> {
         loop {
             match &self.exprs[e].kind {
@@ -534,7 +401,6 @@ impl Ast {
         }
     }
 
-    /// The callee's name when it is a plain name (`Wait(…)`, not `a.b(…)` or `a:b(…)`).
     pub fn callee_name(&self, call: usize) -> Option<&str> {
         match &self.exprs[call].kind {
             ExprKind::Call { callee, method: None, .. } => self.name_of(*callee),
@@ -549,7 +415,6 @@ impl Ast {
         }
     }
 
-    /// Byte span of a call's callee, the method name included (`a.b:c`).
     pub fn callee_span(&self, src: &Source, call: usize) -> (usize, usize) {
         let ExprKind::Call { callee, method, .. } = &self.exprs[call].kind else { return self.span(Node::Expr(call)) };
         let start = self.exprs[*callee].start;
@@ -563,12 +428,10 @@ impl Ast {
         (start, stop)
     }
 
-    /// Whether `e` is a number literal.
     pub fn is_number(&self, e: usize) -> bool {
         matches!(self.exprs[e].kind, ExprKind::Number)
     }
 
-    /// The text of a number literal, or `-` + literal for a negated one.
     pub fn number_text(&self, src: &Source, e: usize) -> Option<String> {
         match &self.exprs[e].kind {
             ExprKind::Number => Some(self.text(src, Node::Expr(e)).to_owned()),
@@ -579,7 +442,6 @@ impl Ast {
         }
     }
 
-    /// Ordinal of a function expression.
     pub fn ordinal(&self, func: usize) -> Option<usize> {
         match self.exprs.get(func)?.kind {
             ExprKind::Function { ordinal, .. } => Some(ordinal),
@@ -587,7 +449,6 @@ impl Ast {
         }
     }
 
-    /// Functions given a name: `function a.b()`, `a.b = function`, `T = { f = function }`.
     pub fn named_functions(&self) -> Vec<Named> {
         let mut out = Vec::new();
         let mut add = |target: usize, func: usize, field: Option<&str>| {
@@ -625,7 +486,6 @@ impl Ast {
         out
     }
 
-    /// Sets the parent links, from the root down.
     fn link(&mut self) {
         let mut stack = vec![Node::Block(self.root)];
         let mut kids = Vec::new();
@@ -650,7 +510,6 @@ impl Ast {
 
 const UNARY_PRIORITY: u8 = 12;
 
-/// Left and right priorities of a binary operator (Lua 5.4).
 fn binary(op: &str) -> Option<(&'static str, u8, u8)> {
     Some(match op {
         "or" => ("or", 1, 1),
@@ -709,16 +568,12 @@ fn compound(op: &str) -> Option<&'static str> {
 struct Parser<'a> {
     src: &'a Source,
     pos: usize,
-    /// Tokens at or after this index are out of reach (the closing bracket of the enclosing call or table).
     limit: usize,
     ast: Ast,
     scopes: Vec<Vec<usize>>,
-    /// Nesting of statements and expressions being parsed (see [`MAX_DEPTH`]).
     depth: usize,
 }
 
-/// Deeper nesting (and longer operator or suffix chains) is left unparsed: the
-/// tree, and the recursive walks over it, stay within the WebAssembly stack.
 const MAX_DEPTH: usize = 200;
 
 impl<'a> Parser<'a> {
@@ -768,7 +623,6 @@ impl<'a> Parser<'a> {
         yes
     }
 
-    /// Byte offset where token `i` starts (the end of the reachable text past the limit).
     fn byte_at(&self, i: usize) -> usize {
         if i < self.limit {
             self.src.toks[i].start
@@ -791,7 +645,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Records that the unowned tokens of `[first, end)` belong to `node`.
     fn own(&mut self, first: usize, end: usize, node: Node) {
         let mut i = first;
         while i < end {
@@ -836,7 +689,6 @@ impl<'a> Parser<'a> {
         self.scopes.push(Vec::new());
     }
 
-    /// Ends the innermost scope: its locals are visible up to token `to`.
     fn close_scope(&mut self, to: usize) {
         for d in self.scopes.pop().unwrap_or_default() {
             self.ast.decls[d].to = to;
@@ -869,7 +721,6 @@ impl<'a> Parser<'a> {
                 && matches!(self.text(self.pos), "end" | "else" | "elseif" | "until"))
     }
 
-    /// Statements up to the end of the block.
     fn statements(&mut self, out: &mut Vec<usize>) {
         while !self.at_block_end() {
             let before = self.pos;
@@ -882,7 +733,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// A block in its own scope; `opener` is the token before it.
     fn block(&mut self, opener: usize) -> usize {
         self.open_scope();
         let block = self.block_in_scope(opener);
@@ -1043,7 +893,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// `a.b.c` / `a.b:c` after `function`.
     fn function_name(&mut self) -> (usize, Option<String>) {
         let first = self.pos;
         if self.kind(self.pos) != Some(Tok::Name) {
@@ -1066,7 +915,6 @@ impl<'a> Parser<'a> {
         (target, method)
     }
 
-    /// Parameters and body; `first` is the `function` keyword (or the name of a `local function`).
     fn function_body(&mut self, first: usize, method: bool) -> usize {
         self.open_scope();
         let mut params = Vec::new();
@@ -1275,7 +1123,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Runs `f` with the limit at `close` (when known), then moves past `close`.
     fn bounded<T>(&mut self, close: Option<usize>, f: impl FnOnce(&mut Self) -> T) -> T {
         let saved = self.limit;
         if let Some(c) = close {

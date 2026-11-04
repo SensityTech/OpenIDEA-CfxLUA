@@ -1,8 +1,3 @@
-//! Lexical scoping over a [`Tree`]: which declaration (local, local function,
-//! parameter, loop variable) each name token refers to. `do`, `then`,
-//! `else`, loop bodies, `repeat … until` and functions open scopes; a local is
-//! visible after its statement, a local function inside its own body.
-
 use super::tree::{Block, Func, Kind, Span, Stmt, Tree};
 use crate::lua::Source;
 use crate::lua::lexer::Tok;
@@ -20,20 +15,15 @@ pub enum DeclKind {
 pub struct Decl {
     pub tok: usize,
     pub kind: DeclKind,
-    /// `<const>` / `<close>`: the `<` and `>` tokens.
     pub attr: Option<(usize, usize)>,
-    /// The value of `local x = v` at the same position.
     pub init: Option<Span>,
-    /// Parameters: their function and position.
     pub func: Option<usize>,
     pub index: usize,
-    /// Assigned after its declaration (`x = …`, `x += …`, `x.f = …`, `function x()`).
     pub assigned: bool,
 }
 
 pub struct Scopes {
     pub decls: Vec<Decl>,
-    /// Per code token: declaration index + 1 (0 for a global, a field, a keyword…).
     refs: Vec<u32>,
 }
 
@@ -50,7 +40,6 @@ impl Scopes {
         w.out
     }
 
-    /// The declaration code token `tok` names (a reference or the declaration itself).
     pub fn decl_of(&self, tok: usize) -> Option<usize> {
         self.refs.get(tok).and_then(|&r| r.checked_sub(1)).map(|r| r as usize)
     }
@@ -59,14 +48,12 @@ impl Scopes {
         self.decl_of(tok).map(|d| &self.decls[d])
     }
 
-    /// The tokens of `[from, to)` referring to declaration `decl` (the declaration excluded).
     pub fn uses(&self, decl: usize, from: usize, to: usize) -> impl Iterator<Item = usize> + '_ {
         let target = decl as u32 + 1;
         let skip = self.decls[decl].tok;
         (from..to.min(self.refs.len())).filter(move |&t| self.refs[t] == target && t != skip)
     }
 
-    /// The text of the attribute of `decl` (`const`, `close`), if any.
     pub fn attr<'a>(&self, src: &'a Source, decl: &Decl) -> Option<&'a str> {
         decl.attr.map(|(lt, _)| src.tok_text(lt + 1))
     }
@@ -215,7 +202,6 @@ impl<'a> Walker<'a> {
         self.pop();
     }
 
-    /// An assignment target: its first name is written, the rest of it is read.
     fn target(&mut self, (a, b): Span) {
         if self.src.is_name(a) {
             if let Some(d) = self.reference(a) {
@@ -253,7 +239,6 @@ impl<'a> Walker<'a> {
     }
 }
 
-/// Whether name token `i` reads a variable (not a field, a method, a label or a table key).
 fn is_reference(src: &Source, i: usize) -> bool {
     if i > 0 {
         let p = src.toks[i - 1];
@@ -279,12 +264,10 @@ mod tests {
         (src, scopes)
     }
 
-    /// Index of the `n`-th token named `name`.
     fn nth(src: &Source, name: &str, n: usize) -> usize {
         src.toks.iter().enumerate().filter(|(_, t)| t.text(&src.text) == name).nth(n).unwrap().0
     }
 
-    /// The declaration token the `n`-th token named `name` refers to.
     fn decl_tok(src: &Source, scopes: &Scopes, name: &str, n: usize) -> Option<usize> {
         scopes.decl(nth(src, name, n)).map(|d| d.tok)
     }

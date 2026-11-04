@@ -1,12 +1,3 @@
-//! The description of an event helper written by hand: a `---@cfx.event`
-//! annotation, or a helper of the settings (same text after the function path).
-//!
-//! ```text
-//! ---@cfx.event handler|trigger|register|alias [net|local] [server|client|both] [logical]
-//!               [key(p, ...)] [callback(p)] [inject(n)] [target(p)] [payload(p|...)] [wire(p)]
-//! ```
-//! Words come in any order after the kind; parameters by name or 1-based position.
-
 use super::model::{Dirs, EventFn, FnKind, KeySpec, Origin, Role, Seg, is_standard_name};
 use crate::project::Side;
 use std::rc::Rc;
@@ -22,18 +13,14 @@ pub struct Spec {
     pub callback: Option<usize>,
     pub injected: usize,
     pub net: bool,
-    /// Trigger directions; `None`: the other side than the definition.
     pub directions: Option<Dirs>,
-    /// Explicit side of use (`both` is shared).
     pub side: Option<Side>,
     pub target: Option<usize>,
     pub payload: Option<usize>,
     pub wire: Option<usize>,
-    /// Problems found while parsing; the rest of the text is still used.
     pub errors: Vec<String>,
 }
 
-/// One token of the grammar: a word with optional `(args)`, or another character.
 enum Token<'a> {
     Word(&'a str, Option<&'a str>),
     Char(char),
@@ -67,8 +54,6 @@ fn tokens(text: &str) -> Vec<Token<'_>> {
 }
 
 impl Spec {
-    /// Parses `text` for a function with parameters `params` (`None` when unknown: positions only)
-    /// and a vararg. `None` when the kind is missing or unknown.
     pub fn parse(text: &str, params: Option<&[String]>, vararg: bool) -> Option<Spec> {
         let names: &[String] = params.unwrap_or(&[]);
         let mut errors = Vec::new();
@@ -213,7 +198,6 @@ impl Spec {
         Some(Spec { role, key, logical, callback, injected, net, directions, side, target, payload, wire, errors })
     }
 
-    /// The event function described, for a function at `path` defined on `defined_side`.
     #[allow(clippy::too_many_arguments)]
     pub fn to_function(
         &self,
@@ -276,7 +260,6 @@ fn side_word(side: Side) -> Option<&'static str> {
     }
 }
 
-/// The `---@cfx.event` text describing `f` (1-based positions), as detected or declared.
 pub fn format(f: &EventFn) -> String {
     let mut words: Vec<String> = Vec::new();
     match f.role {
@@ -343,7 +326,6 @@ pub fn format(f: &EventFn) -> String {
     words.join(" ")
 }
 
-/// A helper declared in the settings: `Path rest-of-annotation` (`Legacy.Emit trigger server key(1)`).
 pub fn settings_helper(line: &str) -> Option<EventFn> {
     let line = line.trim();
     let split = line.find(char::is_whitespace)?;

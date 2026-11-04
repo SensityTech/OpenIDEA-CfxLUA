@@ -1,15 +1,12 @@
-//! Jenkins one-at-a-time hash, the GTA / RDR `GetHashKey` (and CfxLua's `` `name` `` literals): ASCII lower-cased,
-//! signed 32-bit result.
-
 pub fn joaat(text: &str) -> i32 {
     joaat_bytes(text.as_bytes())
 }
 
-/// The runtime reads the bytes as signed chars: bytes above 0x7F are sign-extended before they are added.
 pub fn joaat_bytes(bytes: &[u8]) -> i32 {
     let mut h: u32 = 0;
     for &b in bytes {
         let c = if b.is_ascii_uppercase() { b + 32 } else { b };
+        // The runtime adds the bytes as signed chars (sign-extended above 0x7F).
         h = h.wrapping_add(c as i8 as i32 as u32);
         h = h.wrapping_add(h << 10);
         h ^= h >> 6;
@@ -20,7 +17,6 @@ pub fn joaat_bytes(bytes: &[u8]) -> i32 {
     h as i32
 }
 
-/// `0x` + 8 upper-case hex digits of the unsigned hash.
 pub fn hex(hash: i32) -> String {
     format!("0x{:08X}", hash as u32)
 }

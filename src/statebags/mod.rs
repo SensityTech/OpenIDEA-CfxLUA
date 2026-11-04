@@ -1,8 +1,3 @@
-//! State bags: keys written anywhere in the project, completed, navigated and checked where they are read.
-//!
-//! Each Lua file is reduced to its key sites when indexed; the project's map
-//! key → occurrences is rebuilt after a batch, and the providers look it up.
-
 pub mod sites;
 
 use crate::events::{display_path, location, md};
@@ -21,10 +16,8 @@ use std::rc::Rc;
 
 const MAX_LOCATIONS: usize = 10;
 
-/// A key site as indexed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Entry {
-    /// [`DYNAMIC`] for computed keys.
     key: String,
     kind: Kind,
     access: Access,
@@ -33,7 +26,6 @@ struct Entry {
     range: Range,
 }
 
-/// An occurrence of a key in the project.
 #[derive(Clone, Debug)]
 struct Occurrence {
     path: Rc<str>,
@@ -47,7 +39,6 @@ struct Occurrence {
 #[derive(Default)]
 struct Project {
     files: BTreeMap<String, Vec<Entry>>,
-    /// Occurrences by key (natural order), each list by file path and offset.
     all: BTreeMap<String, Vec<Occurrence>>,
     dirty: bool,
 }
@@ -72,12 +63,10 @@ impl Project {
         self.dirty = false;
     }
 
-    /// Occurrences of `key` in bags compatible with `kind`.
     fn occurrences(&self, key: &str, kind: Kind) -> Vec<&Occurrence> {
         self.all.get(key).into_iter().flatten().filter(|o| kind.matches(o.kind)).collect()
     }
 
-    /// Keys written (or watched by a change handler) on bags compatible with `kind`, with their occurrences.
     fn known_keys(&self, kind: Kind) -> Vec<(&str, Vec<&Occurrence>)> {
         self.all
             .iter()
@@ -89,7 +78,6 @@ impl Project {
             .collect()
     }
 
-    /// The names of [`Self::known_keys`].
     fn known_key_names(&self, kind: Kind) -> impl Iterator<Item = &str> {
         self.all
             .iter()
@@ -103,7 +91,6 @@ impl Project {
         self.occurrences(DYNAMIC, kind).iter().any(|o| o.access == Access::Write)
     }
 
-    /// Whether `key` has a write or a change handler on any kind of bag.
     fn is_set(&self, key: &str) -> bool {
         self.all.get(key).is_some_and(|occs| occs.iter().any(|o| o.access != Access::Read))
     }
@@ -113,7 +100,6 @@ fn writes<'a>(occurrences: &[&'a Occurrence]) -> Vec<&'a Occurrence> {
     occurrences.iter().copied().filter(|o| o.access == Access::Write).collect()
 }
 
-/// The value types of writes, `nil` (deletions) left out unless there is nothing else.
 fn value_type_names(writes: &[&Occurrence]) -> Vec<&'static str> {
     let mut names: Vec<&'static str> = Vec::new();
     for w in writes {
@@ -125,7 +111,6 @@ fn value_type_names(writes: &[&Occurrence]) -> Vec<&'static str> {
     if values.is_empty() { names } else { values }
 }
 
-/// `integer|string`: the known types, `any` when none is known.
 fn type_text(writes: &[&Occurrence]) -> Option<String> {
     let names = value_type_names(writes);
     if names.is_empty() {
@@ -135,7 +120,6 @@ fn type_text(writes: &[&Occurrence]) -> Option<String> {
     Some(if known.is_empty() { names.join("|") } else { known.join("|") })
 }
 
-/// Whether a write replicates the value to the other side (`None`: can't be told).
 fn is_replicated(ws: &Workspace, w: &Occurrence) -> Option<bool> {
     match w.replication {
         Replication::Replicated => Some(true),
@@ -149,7 +133,6 @@ fn is_replicated(ws: &Workspace, w: &Occurrence) -> Option<bool> {
     }
 }
 
-/// ` set in res/server/main.lua (replicated)`, ` watched in res/client/main.lua +1`.
 fn tail_text(ws: &Workspace, occurrences: &[&Occurrence]) -> String {
     let writes = writes(occurrences);
     let shown: Vec<&Occurrence> = if writes.is_empty() {
@@ -216,7 +199,6 @@ fn location_lines(ws: &Workspace, occurrences: &[&Occurrence], details: bool) ->
     Some(lines.join("  \n"))
 }
 
-/// The documentation of a key on a bag of `kind` (Markdown).
 fn key_doc(ws: &Workspace, project: &Project, key: &str, kind: Kind) -> String {
     let occurrences = project.occurrences(key, kind);
     let writes = writes(&occurrences);
@@ -268,12 +250,10 @@ fn starts_with_ci(s: &str, prefix: &str) -> bool {
 
 #[derive(Default)]
 pub struct StateBagsFeature {
-    /// By project root.
     projects: RefCell<HashMap<String, Project>>,
 }
 
 impl StateBagsFeature {
-    /// Runs `f` on the request's project (rebuilt if needed); `None` until the project is scanned.
     fn with_project<R>(&self, cx: &Ctx, f: impl FnOnce(&Project) -> R) -> Option<R> {
         if !cx.settings.enabled() || !cx.ws.scanned || !cx.doc.is_lua() {
             return None;
@@ -287,7 +267,6 @@ impl StateBagsFeature {
     }
 }
 
-/// The literal key site at `at` (or right after it).
 fn site_at(sites: &[Site], at: usize) -> Option<&Site> {
     sites.iter().find(|s| s.key.is_some() && s.start <= at && at <= s.end)
 }
@@ -443,7 +422,6 @@ impl Feature for StateBagsFeature {
     }
 }
 
-/// Up to 3 keys known for the site's bag close to `key` (case-insensitive edit distance).
 fn suggestions<'a>(p: &'a Project, site: &Site, key: &str) -> Vec<&'a str> {
     let max = (key.chars().count() / 3).max(2);
     let mut found: Vec<(usize, &str)> = p

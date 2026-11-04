@@ -1,12 +1,3 @@
-//! "Check Resource Before Escrow Upload": the pre-publish check of the focused
-//! file's resource (every resource without one): upload blockers, files buyers
-//! could no longer edit, files loaded at runtime that would be encrypted,
-//! `escrow_ignore` patterns matching nothing, and what ships readable.
-//!
-//! The IDE cannot open a report tab: the findings go to a notification and the
-//! full Markdown report is the command's result. The resource size is not
-//! known (the workspace keeps no file sizes), so the size check is left out.
-
 use super::rules::{self, EscrowFile, NUI_EXTENSIONS, Status};
 use crate::feature::{CommandCx, CommandResult};
 use crate::lua::Source;
@@ -19,22 +10,16 @@ use crate::workspace::Workspace;
 use openidea_plugin::{NotificationLevel, host};
 
 pub const COMMAND: &str = "escrow.check";
-/// Encrypted files listed in the report before the list is summarized.
 const MAX_LISTED_FILES: usize = 40;
-/// Findings of each severity shown in the notification.
 const NOTIFIED: usize = 5;
-/// Resources listed in the notification of a check of several.
 const NOTIFIED_RESOURCES: usize = 20;
 const SCRIPT_DIRECTIVES: [&str; 6] =
     ["client_script", "client_scripts", "server_script", "server_scripts", "shared_script", "shared_scripts"];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Level {
-    /// The upload fails or the resource does not start.
     Blocker,
-    /// The protected build does not work as the vendor expects.
     Warning,
-    /// Worth knowing before uploading.
     Note,
 }
 
@@ -54,16 +39,12 @@ impl Level {
 pub struct Finding {
     pub level: Level,
     pub message: String,
-    /// The file, relative to the resource (`None`: the whole resource).
     pub path: Option<String>,
-    /// 1-based line in `path` (0: not relevant).
     pub line: usize,
-    /// The `escrow_ignore` pattern that fixes it.
     pub pattern: Option<String>,
 }
 
 impl Finding {
-    /// `` `path:line`: message Fix: add `pattern` to escrow_ignore.``
     fn markdown(&self) -> String {
         let location = match (&self.path, self.line) {
             (Some(p), 0) => format!("`{p}`: "),
@@ -77,7 +58,6 @@ impl Finding {
 
 pub struct Report {
     pub name: String,
-    /// The resource folder, relative to the project.
     pub folder: String,
     pub findings: Vec<Finding>,
     pub files: Vec<EscrowFile>,
@@ -88,7 +68,6 @@ impl Report {
         self.findings.iter().filter(|f| f.level == level).count()
     }
 
-    /// Distinct fix patterns, in finding order.
     pub fn patterns(&self) -> Vec<String> {
         let mut out: Vec<String> = Vec::new();
         for p in self.findings.iter().filter_map(|f| f.pattern.as_ref()) {
@@ -104,7 +83,6 @@ impl Report {
     }
 }
 
-/// `1,234`.
 fn grouped(n: usize) -> String {
     let digits = n.to_string();
     let mut out = String::new();
@@ -117,7 +95,6 @@ fn grouped(n: usize) -> String {
     out
 }
 
-/// `0 blockers`, `1 blocker`, `2 blockers`.
 fn count(n: usize, one: &str, many: &str) -> String {
     format!("{} {}", grouped(n), if n == 1 { one } else { many })
 }
@@ -139,7 +116,6 @@ pub fn run(cx: &CommandCx) -> CommandResult {
     Ok(Some(markdown(&reports)))
 }
 
-/// The resource of `path`, else every resource of the project (by name).
 pub fn resources_for<'a>(ws: &'a Workspace, path: Option<&str>) -> Vec<&'a Resource> {
     if let Some(r) = path.and_then(|p| ws.resource_of(p)) {
         return vec![r];
@@ -149,9 +125,6 @@ pub fn resources_for<'a>(ws: &'a Workspace, path: Option<&str>) -> Vec<&'a Resou
     all
 }
 
-/// The first syntax error of a source, approximated from its tokens: unfinished
-/// strings and comments, unbalanced brackets, `,,`, `= =`, unknown symbols. A
-/// bracket left open is only reported when nothing else is (Lua notices it last).
 pub fn syntax_error(src: &Source) -> Option<(usize, String)> {
     let mut first: Option<(usize, String)> = None;
     let mut unclosed: Option<(usize, String)> = None;
@@ -196,7 +169,6 @@ pub fn syntax_error(src: &Source) -> Option<(usize, String)> {
     first.or(unclosed)
 }
 
-/// Whether a long bracket (`[==[ … ]==]`) is closed.
 fn long_closed(text: &str) -> bool {
     let level = text.bytes().skip(1).take_while(|b| *b == b'=').count();
     let close = format!("]{}]", "=".repeat(level));
@@ -207,7 +179,6 @@ fn line_of(src: &Source, at: usize) -> usize {
     src.lines.line_of(at) + 1
 }
 
-/// Runs every check on one resource.
 pub fn check(ws: &Workspace, res: &Resource) -> Report {
     let manifest = ws.text(&res.manifest_path()).unwrap_or("");
     let msrc = Source::new(manifest);
@@ -354,7 +325,6 @@ pub fn check(ws: &Workspace, res: &Resource) -> Report {
     Report { name: res.name.clone(), folder, findings: out, files }
 }
 
-/// The Markdown report of the reports.
 pub fn markdown(reports: &[Report]) -> String {
     let mut md = String::new();
     let mut block = |text: &str| {
@@ -434,7 +404,6 @@ pub fn markdown(reports: &[Report]) -> String {
     md
 }
 
-/// Level, title and body of the notification summarizing the reports.
 pub fn notification(reports: &[Report]) -> (NotificationLevel, String, String) {
     let b: usize = reports.iter().map(|r| r.count(Level::Blocker)).sum();
     let w: usize = reports.iter().map(|r| r.count(Level::Warning)).sum();

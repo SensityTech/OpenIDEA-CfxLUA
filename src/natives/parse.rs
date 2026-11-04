@@ -1,11 +1,3 @@
-//! Readers of the Cfx.re native databases: the docs.fivem.net JSON
-//! (`natives.json`, `natives_cfx.json`), the RedM runtime DSL
-//! (`natives_rdr3.lua`, read line by line and never executed) and alloc8or's
-//! RDR3 NativeDB (descriptions only, joined to the DSL by hash).
-//!
-//! Strings borrow from the database text where they can: a catalog is built
-//! from megabytes of JSON the first time a script needs it.
-
 use super::convert::lua_name;
 use serde::Deserialize;
 use serde::de::{self, DeserializeSeed, Deserializer, IgnoredAny, MapAccess, SeqAccess, Visitor};
@@ -13,18 +5,13 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt;
 
-/// Which database a [`RawNative`] was read from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Origin {
-    /// `natives.json`: GTA V game natives.
     Gta5Json,
-    /// `natives_cfx.json`: CitizenFX natives (client / server / shared).
     CfxJson,
-    /// `natives_rdr3.lua`: RDR3 game natives as the RedM runtime compiles them.
     Rdr3Dsl,
 }
 
-/// How the runtime marshals a type (case matters: `Object` is a handle, `object` a msgpack value).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Int,
@@ -41,7 +28,6 @@ pub enum Kind {
     Unknown,
 }
 
-/// Script handle types: integers at runtime, the name documents what they are.
 const HANDLES: &[&str] = &[
     "Entity",
     "Ped",
@@ -92,20 +78,16 @@ impl Kind {
         }
     }
 
-    /// Passed and returned as an integer by the runtime.
     pub fn int_like(self) -> bool {
         matches!(self, Self::Int | Self::Hash | Self::Any | Self::Handle | Self::Player | Self::Unknown)
     }
 }
 
-/// A type token, normalised from the JSON (`Ped*`, `const char*`) or DSL (`PedPtr`, `charPtr`) spelling.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NativeType {
     pub kind: Kind,
-    /// A pointer argument (strings are not pointers).
     pub pointer: bool,
     pub vararg: bool,
-    /// As documented: `Ped*`, `char*`, `BOOL`, `...`.
     pub display: String,
 }
 
@@ -119,7 +101,6 @@ impl NativeType {
         Self { kind: Kind::String, pointer: false, vararg: false, display: "char*".into() }
     }
 
-    /// A type of the JSON databases (`int`, `Ped*`, `const char*`; `""` / `...` for varargs).
     pub fn from_json(raw: &str) -> Self {
         let t = raw.trim();
         let t = t.strip_prefix("const ").unwrap_or(t).trim();
@@ -137,7 +118,6 @@ impl NativeType {
         }
     }
 
-    /// A type token of the DSL; every `XPtr` is a pointer except `charPtr`.
     pub fn from_dsl(token: &str) -> Self {
         if token == "charPtr" {
             return Self::string();
@@ -151,36 +131,28 @@ impl NativeType {
 
 #[derive(Clone, Debug)]
 pub struct RawParam<'a> {
-    /// As written in the database (sanitised by the converter).
     pub name: Cow<'a, str>,
     pub ty: NativeType,
     pub description: Option<Cow<'a, str>>,
 }
 
-/// A native as a database describes it, before the Lua conversion.
 #[derive(Clone, Debug)]
 pub struct RawNative<'a> {
     pub origin: Origin,
     pub hash: Cow<'a, str>,
-    /// `None` for unnamed natives (the Lua name derives from the hash).
     pub name: Option<Cow<'a, str>>,
     pub namespace: Cow<'a, str>,
     pub params: Vec<RawParam<'a>>,
     pub result: Option<NativeType>,
-    /// Markdown, not normalised yet.
     pub description: Cow<'a, str>,
     pub results_description: Option<Cow<'a, str>>,
     pub lua_example: Option<Cow<'a, str>>,
     pub aliases: Vec<Cow<'a, str>>,
-    /// `client` for game natives.
     pub apiset: Cow<'a, str>,
-    /// `gta5` / `rdr3` for game natives, the CFX `game` field otherwise.
     pub game: Option<Cow<'a, str>>,
-    /// RDR3 NativeDB name, when it differs from the runtime name.
     pub alt_name: Option<String>,
 }
 
-/// A database whose content is not what it should be (an HTML error page, a truncated download).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FormatError(pub String);
 
@@ -190,7 +162,6 @@ impl fmt::Display for FormatError {
     }
 }
 
-/// Canonical join key of a hash: `0x` + upper-case hex digits.
 pub fn normalize_hash(hash: &str) -> String {
     let h = hash.trim();
     let h = h.strip_prefix("0x").unwrap_or(h);
@@ -198,7 +169,6 @@ pub fn normalize_hash(hash: &str) -> String {
     format!("0x{}", h.to_uppercase())
 }
 
-/// Java's `\s`.
 fn is_ws(b: u8) -> bool {
     matches!(b, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r')
 }
@@ -214,28 +184,24 @@ fn non_blank(s: &str) -> bool {
 // ---------------------------------------------------------------------------
 // JSON databases
 
-/// `natives.json` / `natives_cfx.json`: `{ "<NAMESPACE>": { "<hash>": { name?, params[], results, … } } }`, in document order.
 pub fn parse_json(text: &str, origin: Origin) -> Result<Vec<RawNative<'_>>, FormatError> {
     let mut sink = JsonSink { origin, out: Vec::new() };
     read_namespaces(text, &mut sink)?;
     Ok(sink.out)
 }
 
-/// An RDR3 NativeDB entry: its name (when it has one) and comment.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RdrDoc<'a> {
     pub name: Option<Cow<'a, str>>,
     pub comment: Cow<'a, str>,
 }
 
-/// `rdr3_nativedb.json`, keyed by [`normalize_hash`].
 pub fn parse_nativedb(text: &str) -> Result<HashMap<String, RdrDoc<'_>>, FormatError> {
     let mut sink = DocsSink { out: HashMap::new() };
     read_namespaces(text, &mut sink)?;
     Ok(sink.out)
 }
 
-/// What a database does with each `namespace → key → object` entry.
 trait Sink<'de> {
     type Entry: Visitor<'de>;
     fn entry(&self) -> Self::Entry;
@@ -248,7 +214,6 @@ trait Sink<'de> {
     fn is_empty(&self) -> bool;
 }
 
-/// Walks `{ namespace: { key: object } }`, reporting the structural errors of the source.
 fn read_namespaces<'de, S: Sink<'de>>(text: &'de str, sink: &mut S) -> Result<(), FormatError> {
     let mut error = None;
     let mut de = serde_json::Deserializer::from_str(text);
@@ -267,7 +232,6 @@ fn read_namespaces<'de, S: Sink<'de>>(text: &'de str, sink: &mut S) -> Result<()
     }
 }
 
-/// A string that borrows from the source when it has no escapes.
 struct Text<'a>(Cow<'a, str>);
 
 impl<'de> Deserialize<'de> for Text<'de> {
@@ -289,7 +253,6 @@ impl<'de> Deserialize<'de> for Text<'de> {
     }
 }
 
-/// A JSON primitive as text (numbers and booleans stringified); `None` for null, objects and arrays.
 struct Prim<'a>(Option<Cow<'a, str>>);
 
 impl<'de> Deserialize<'de> for Prim<'de> {
@@ -344,7 +307,6 @@ fn skip_map<'de, A: MapAccess<'de>>(mut map: A) -> Result<(), A::Error> {
     Ok(())
 }
 
-/// Scalars are none of the expected shapes.
 macro_rules! scalars_are_none {
     () => {
         fn visit_bool<E: de::Error>(self, _: bool) -> Result<Self::Value, E> {
@@ -368,7 +330,6 @@ macro_rules! scalars_are_none {
     };
 }
 
-/// `Some` when the value is a JSON object (read by the inner visitor), `None` for anything else.
 struct IfObject<V>(V);
 
 impl<'de, V: Visitor<'de>> DeserializeSeed<'de> for IfObject<V> {
@@ -393,7 +354,6 @@ impl<'de, V: Visitor<'de>> Visitor<'de> for IfObject<V> {
     scalars_are_none!();
 }
 
-/// `Some` when the value is a JSON array (read by the inner visitor), `None` for anything else.
 struct IfArray<V>(V);
 
 impl<'de, V: Visitor<'de>> DeserializeSeed<'de> for IfArray<V> {
@@ -418,7 +378,6 @@ impl<'de, V: Visitor<'de>> Visitor<'de> for IfArray<V> {
     scalars_are_none!();
 }
 
-/// The root object: one entry per namespace.
 struct Namespaces<'s, S> {
     sink: &'s mut S,
     error: &'s mut Option<String>,
@@ -443,7 +402,6 @@ impl<'de, S: Sink<'de>> Visitor<'de> for Namespaces<'_, S> {
     }
 }
 
-/// The natives of one namespace.
 struct Entries<'s, 'n, 'de, S> {
     namespace: &'n Cow<'de, str>,
     sink: &'s mut S,
@@ -470,7 +428,6 @@ impl<'de, S: Sink<'de>> Visitor<'de> for Entries<'_, '_, 'de, S> {
     }
 }
 
-/// The fields of a docs.fivem.net native the converter uses.
 #[derive(Default)]
 struct NativeFields<'a> {
     name: Option<Cow<'a, str>>,
@@ -524,7 +481,6 @@ impl<'de> Visitor<'de> for NativeVisitor {
     }
 }
 
-/// `params`: each element an object (`None` otherwise, reported by the caller).
 struct ParamsVisitor;
 
 impl<'de> Visitor<'de> for ParamsVisitor {
@@ -564,7 +520,6 @@ impl<'de> Visitor<'de> for ParamVisitor {
     }
 }
 
-/// `examples`: the code of the first example whose `lang` is Lua.
 struct ExamplesVisitor;
 
 impl<'de> Visitor<'de> for ExamplesVisitor {
@@ -608,7 +563,6 @@ impl<'de> Visitor<'de> for ExampleVisitor {
     }
 }
 
-/// `aliases`: the primitive items.
 struct AliasesVisitor;
 
 impl<'de> Visitor<'de> for AliasesVisitor {
@@ -722,24 +676,19 @@ impl<'de> Sink<'de> for DocsSink<'de> {
 // ---------------------------------------------------------------------------
 // RedM runtime DSL
 
-/// One `native "…"` block of `natives_rdr3.lua`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DslNative<'a> {
-    /// Native name, or `0x<hash>` when unnamed.
     pub name: &'a str,
     pub hash: Option<&'a str>,
     pub namespace: Option<&'a str>,
-    /// `(type token, name)` pairs.
     pub arguments: Vec<(&'a str, &'a str)>,
     pub aliases: Vec<&'a str>,
     pub returns: Option<&'a str>,
     pub apisets: Vec<&'a str>,
     pub game: Option<&'a str>,
-    /// The raw `doc [[! … ]]` content.
     pub doc: String,
 }
 
-/// Lines split at `\n`, `\r\n` and `\r`.
 fn lines(text: &str) -> impl Iterator<Item = &str> {
     let mut rest = Some(text);
     std::iter::from_fn(move || {
@@ -758,25 +707,21 @@ fn lines(text: &str) -> impl Iterator<Item = &str> {
     })
 }
 
-/// `keyword` followed by at least one space, at the start of the line (after spaces).
 fn after_keyword<'a>(line: &'a str, keyword: &str) -> Option<&'a str> {
     let rest = skip_ws(line).strip_prefix(keyword)?;
     let t = skip_ws(rest);
     (t.len() < rest.len()).then_some(t)
 }
 
-/// `"text"` at the start of `s`: the text.
 fn quoted(s: &str) -> Option<&str> {
     let t = s.strip_prefix('"')?;
     t.find('"').map(|end| &t[..end])
 }
 
-/// `native "NAME"`.
 fn dsl_native(line: &str) -> Option<&str> {
     quoted(after_keyword(line, "native")?).filter(|n| !n.is_empty())
 }
 
-/// `hash "…"`, `alias '…'`, `ns`, `returns`, `apiset`, `game`.
 fn dsl_directive(line: &str) -> Option<(&str, &str)> {
     let s = skip_ws(line);
     let end = s.find(|c: char| !c.is_ascii_alphabetic()).unwrap_or(s.len());
@@ -788,7 +733,6 @@ fn dsl_directive(line: &str) -> Option<(&str, &str)> {
     value.find(['"', '\'']).map(|close| (word, &value[..close]))
 }
 
-/// `Type "name"` inside `arguments { … }`.
 fn dsl_argument(line: &str) -> Option<(&str, &str)> {
     let s = skip_ws(line);
     if !s.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') {
@@ -799,13 +743,11 @@ fn dsl_argument(line: &str) -> Option<(&str, &str)> {
     Some((ty, quoted(after_keyword(s, ty)?)?))
 }
 
-/// The rest of a `doc [[` / `doc [[!` line.
 fn dsl_doc(line: &str) -> Option<&str> {
     let s = skip_ws(skip_ws(line).strip_prefix("doc")?).strip_prefix("[[")?;
     Some(s.strip_prefix('!').unwrap_or(s))
 }
 
-/// Reads the DSL line by line; a `native` line inside a doc block is doc text.
 pub fn parse_dsl(text: &str) -> Result<Vec<DslNative<'_>>, FormatError> {
     let mut out = Vec::new();
     let mut cur: Option<DslNative> = None;
@@ -872,13 +814,11 @@ pub fn parse_dsl(text: &str) -> Result<Vec<DslNative<'_>>, FormatError> {
     Ok(out)
 }
 
-/// The text between the first `open` and the next `close`, trimmed.
 fn tag<'a>(text: &'a str, open: &str, close: &str) -> Option<&'a str> {
     let start = text.find(open)? + open.len();
     text[start..].find(close).map(|end| text[start..start + end].trim())
 }
 
-/// `<param name="x">text</param>` pairs of a DSL doc.
 fn param_docs(doc: &str) -> Vec<(&str, &str)> {
     const OPEN: &str = "<param name=\"";
     let mut out = Vec::new();
@@ -903,7 +843,6 @@ fn param_docs(doc: &str) -> Vec<(&str, &str)> {
     out
 }
 
-/// NativeDB comments are plain text: fenced to keep their layout; else the DSL `<summary>`.
 fn describe(doc: Option<&RdrDoc>, dsl_doc: &str) -> String {
     let comment = doc.map(|d| d.comment.replace("\r\n", "\n")).unwrap_or_default();
     let comment = comment.trim();
@@ -914,13 +853,10 @@ fn describe(doc: Option<&RdrDoc>, dsl_doc: &str) -> String {
     format!("{fence}\n{comment}\n{fence}")
 }
 
-/// Length of the longest run of backticks in `text`.
 pub fn longest_backtick_run(text: &str) -> usize {
     text.split(|c| c != '`').map(str::len).max().unwrap_or(0)
 }
 
-/// The RDR3 natives: the DSL's names and signatures (the only names RedM can
-/// call) with the NativeDB descriptions.
 pub fn join_rdr3<'a>(dsl: Vec<DslNative<'a>>, docs: &HashMap<String, RdrDoc<'_>>) -> Vec<RawNative<'a>> {
     dsl.into_iter()
         .filter_map(|n| {

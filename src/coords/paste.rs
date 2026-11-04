@@ -1,27 +1,17 @@
-//! The "smart paste" conversion of the original, run on selected text: the
-//! coordinates of each line become `vector3(…)` / `vector4(…)` where a value
-//! is expected, or separate numbers in the x, y, z arguments of a function.
-
 use super::expr::{is_heading_name, is_xyz_at, json_number};
 use super::text::{self, CoordText, Format};
 use crate::lua::Source;
 use crate::lua::lexer::Tok;
 use crate::perf::ast::{Ast, ExprKind, Node, StatKind};
 
-/// Where text at an offset lands, as far as coordinates are concerned.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Site {
-    /// One value is expected: `x = |`, `{ key = |`, an operand.
     Value,
-    /// A table entry: `{ |`, `{ a, |`; several coordinates may be pasted.
     TableEntry,
-    /// One of several values: `return |`, `local a, b = |`.
     ValueList,
-    /// Argument `index` of call `call`.
     Argument { call: usize, index: usize },
 }
 
-/// An output format chosen explicitly (the command's argument).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Target {
     Vector,
@@ -62,12 +52,9 @@ impl Target {
     }
 }
 
-/// Longest selection converted.
 pub const MAX_TEXT_LENGTH: usize = 20_000;
-/// Most coordinates converted at once.
 const MAX_LINES: usize = 500;
 
-/// A line: indentation, content, trailing `,` / `;`, trailing blanks.
 struct Piece<'a> {
     leading: &'a str,
     body: &'a str,
@@ -89,8 +76,6 @@ fn split(line: &str) -> Piece<'_> {
     Piece { leading, body, separator, trailing }
 }
 
-/// `text` converted for `site` (`None`: nothing to change). `params` gives the
-/// parameter names of a called function; `target` forces an output format.
 pub fn convert(
     text: &str,
     site: Option<Site>,
@@ -145,7 +130,6 @@ pub fn convert(
     changed.then(|| out.join("\n"))
 }
 
-/// Where text at byte `at` lands: from the last code token before it.
 pub fn site(ast: &Ast, src: &Source, at: usize) -> Option<Site> {
     let i = src.toks.partition_point(|t| t.end <= at).checked_sub(1)?;
     let tok = src.toks[i];
@@ -196,7 +180,6 @@ pub fn site(ast: &Ast, src: &Source, at: usize) -> Option<Site> {
     }
 }
 
-/// The argument of `call` at byte `at`: the number of its commas before it.
 fn argument(ast: &Ast, src: &Source, call: usize, at: usize) -> Site {
     let e = &ast.exprs[call];
     let index = (e.first..e.end)
@@ -210,7 +193,6 @@ mod tests {
     use super::*;
     use crate::perf::ast::parse;
 
-    /// Text pasted at `<caret>` of `before` (functions with x, y, z parameters known by name).
     fn paste(before: &str, clipboard: &str) -> String {
         let at = before.find("<caret>").unwrap();
         let doc = before.replace("<caret>", "");

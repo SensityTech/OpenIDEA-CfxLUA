@@ -1,10 +1,3 @@
-//! `CfxNuiCallbackWithoutCb`: a NUI callback whose function can end without
-//! calling `cb(…)`, so the page's request waits until it times out. The
-//! control flow is approximated (an early `return`, an `if` without `else`,
-//! a loop that may not run); silent when `cb` escapes (passed on, stored,
-//! called from a nested function: the answer is asynchronous) or when the
-//! function takes `...`.
-
 use super::lua::{Analysis, CALLBACK_FUNCTIONS, string_value};
 use super::web::NUI_EVENT_PREFIX;
 use crate::feature::{Fix, Problem};
@@ -96,37 +89,31 @@ fn text(src: &crate::lua::Source, (a, b): Span) -> &str {
     &src.text[s..e]
 }
 
-/// Whether `cb` is called on every path of the closure.
 struct Flow<'a> {
     an: &'a Analysis<'a>,
     func: usize,
     cb: Option<usize>,
-    /// `return` statements reached without calling `cb` (their keyword token).
     failures: Vec<usize>,
 }
 
 impl Flow<'_> {
-    /// Uses of `cb` other than a direct call written in the closure itself.
     fn escapes(&self) -> bool {
         let Some(cb) = self.cb else { return false };
         let f = &self.an.tree.funcs[self.func];
         self.an.scopes.uses(cb, f.kw, f.next).any(|t| !self.direct_call(t))
     }
 
-    /// Token `t` is the callee of a call made in the closure itself (not in a nested function).
     fn direct_call(&self, t: usize) -> bool {
         let src = self.an.src;
         let args = src.is_op(t + 1, "(") || src.is_op(t + 1, "{") || src.toks.get(t + 1).is_some_and(|n| n.is_string());
         args && self.an.tree.owner(t) == Some(self.func)
     }
 
-    /// Whether span `s` contains a direct call of `cb`.
     fn calls_cb(&self, (a, b): Span) -> bool {
         let Some(cb) = self.cb else { return false };
         self.an.scopes.uses(cb, a, b).any(|t| self.direct_call(t))
     }
 
-    /// `true`: every path reaching the end called `cb`; `false`: one does not; `None`: no path reaches the end.
     fn statements(&mut self, stmts: &[Stmt], called_before: bool) -> Option<bool> {
         let mut called = called_before;
         for s in stmts {
@@ -177,7 +164,6 @@ impl Flow<'_> {
         Some(called)
     }
 
-    /// `error(…)`: the path stops (the request fails; not reported).
     fn is_error(&self, (a, b): Span) -> bool {
         let src = self.an.src;
         src.tok_text(a) == "error"
@@ -187,7 +173,6 @@ impl Flow<'_> {
     }
 }
 
-/// A `break` of the loop whose body is `b` (nested loops and functions left out).
 fn has_break(b: &Block) -> bool {
     b.stmts.iter().any(|s| match &s.kind {
         Kind::Break => true,
@@ -197,7 +182,6 @@ fn has_break(b: &Block) -> bool {
     })
 }
 
-/// A name for a new responder parameter no name of the closure uses.
 fn free_name(an: &Analysis, f: usize) -> String {
     let src = an.src;
     let func = &an.tree.funcs[f];
@@ -217,7 +201,6 @@ fn line_end(text: &str, at: usize) -> usize {
     text[at..].find('\n').map_or(text.len(), |i| at + i)
 }
 
-/// Leading whitespace of the line holding byte `at`.
 fn indent_of(text: &str, at: usize) -> &str {
     let ls = line_start(text, at);
     let n = text[ls..].bytes().take_while(|b| *b == b' ' || *b == b'\t').count();
@@ -228,7 +211,6 @@ fn starts_line(text: &str, at: usize) -> bool {
     text[line_start(text, at)..at].trim().is_empty()
 }
 
-/// Inserts `line` before the statement starting at byte `at`: on its own line when the statement starts one.
 fn insert_before(src: &crate::lua::Source, at: usize, line: &str) -> (usize, String) {
     let text = &src.text;
     if starts_line(text, at) {
@@ -238,7 +220,6 @@ fn insert_before(src: &crate::lua::Source, at: usize, line: &str) -> (usize, Str
     }
 }
 
-/// Inserts `line` after the last statement of the closure's body.
 fn insert_last(an: &Analysis, f: usize, body: &Block, line: &str) -> (usize, String) {
     let src = an.src;
     let text = &src.text;
@@ -265,7 +246,6 @@ fn insert_last(an: &Analysis, f: usize, body: &Block, line: &str) -> (usize, Str
     (at, format!("\n{}{line}", indent_of(text, start)))
 }
 
-/// One indentation level: the first indentation of the file, else four spaces.
 fn indent_unit(text: &str) -> &str {
     text.split('\n')
         .find_map(|l| {

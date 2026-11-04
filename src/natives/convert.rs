@@ -1,12 +1,3 @@
-//! The Lua view of the database natives, as the Cfx.re Lua runtime builds it
-//! (FiveM `ext/natives/codegen.lua` and `codegen_out_lua.lua`):
-//! - a set holds the natives whose apiset / game match it;
-//! - pointer parameters (except `char*`) leave the call and come back after
-//!   the result, in declaration order, unless the native has a single pointer
-//!   that is its last parameter: that one stays in the call too;
-//! - one function per Lua name: a primary beats an alias, the CFX entry beats
-//!   a game native of the same name, the first alias beats a later one.
-
 use super::model::{Native, NativeSet, Param, Return};
 use super::parse::{Kind, NativeType, Origin, RawNative};
 use crate::project::{Game, Side};
@@ -17,46 +8,35 @@ use std::collections::{HashMap, HashSet};
 pub const FIVEM_DOC_URL: &str = "https://docs.fivem.net/natives/?_";
 pub const RDR3_DOC_URL: &str = "https://alloc8or.re/rdr3/nativedb/?n=";
 
-/// Lua types the databases cannot express (`data/natives/overrides.json`).
-/// Keys are original native names and database parameter names.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Overrides {
-    /// Type of the `retval` of a native.
     #[serde(default)]
     pub return_types: HashMap<String, String>,
-    /// Types of by-value parameters of a native.
     #[serde(default)]
     pub param_types: HashMap<String, HashMap<String, String>>,
-    /// Types of `char*` parameters of the CFX natives, by parameter name.
     #[serde(default)]
     pub string_param_types: HashMap<String, String>,
 }
 
 impl Overrides {
-    /// The overrides bundled with the plugin.
     pub fn bundled() -> Self {
         serde_json::from_str(super::sources::OVERRIDES).unwrap_or_default()
     }
 }
 
-/// A deprecated alias of a primary: its Lua name and, unless it is a hash alias, its old native name.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Alias {
     pub lua: String,
     pub name: Option<String>,
 }
 
-/// A primary native and its deprecated aliases (full copies of it once flattened).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Group {
     pub native: Native,
     pub aliases: Vec<Alias>,
 }
 
-/// The Lua global of a native, port of
-/// `name:lower():gsub('0x', 'n_0x'):gsub('_(%a)', string.upper):gsub('(%a)(.+)', upperFirst)`:
-/// `GET_GROUND_Z_FOR_3D_COORD` → `GetGroundZFor_3dCoord`, `0x0B40ED49D7D6FF84` → `N_0x0b40ed49d7d6ff84`.
 pub fn lua_name(native: &str) -> String {
     let lower = native.to_lowercase().replace("0x", "n_0x");
     let mut out = String::with_capacity(lower.len());
@@ -79,7 +59,6 @@ pub fn lua_name(native: &str) -> String {
     out
 }
 
-/// A valid, non-reserved Lua identifier for a parameter (`end` → `end_`, `""` → `p<index>`).
 pub fn param_name(raw: &str, index: usize) -> String {
     let mut name: String =
         raw.trim().chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect();
@@ -106,7 +85,6 @@ fn belongs_to(raw: &RawNative, set: NativeSet) -> bool {
     }
 }
 
-/// Lua type of a by-value argument (strings are hashed by the runtime where a `Hash` is expected).
 fn param_type(t: &NativeType, server: bool) -> &'static str {
     match t.kind {
         Kind::Int | Kind::Handle => "integer",
@@ -122,7 +100,6 @@ fn param_type(t: &NativeType, server: bool) -> &'static str {
     }
 }
 
-/// Lua type of the value returned for a pointer (`BOOL*` comes back as an integer 0/1).
 fn out_type(t: &NativeType) -> &'static str {
     match t.kind {
         Kind::Float => "number",
@@ -131,7 +108,6 @@ fn out_type(t: &NativeType) -> &'static str {
     }
 }
 
-/// A kept single trailing pointer: an optional initial value for numbers, ignored otherwise.
 fn kept_pointer_type(t: &NativeType) -> &'static str {
     match t.kind {
         Kind::Float => "number|nil",
@@ -140,7 +116,6 @@ fn kept_pointer_type(t: &NativeType) -> &'static str {
     }
 }
 
-/// Lua type of a native's result.
 fn return_type(t: &NativeType, server: bool) -> &'static str {
     if t.pointer {
         return "integer";
@@ -161,7 +136,6 @@ fn normalize_line_breaks(text: &str) -> Cow<'_, str> {
     if text.contains('\r') { Cow::Owned(text.replace("\r\n", "\n").replace('\r', "\n")) } else { Cow::Borrowed(text) }
 }
 
-/// `](#\_0xHASH)` / `](?\_0xHASH)` at the start of `s` (after `](`): the hash and the length to skip.
 fn relative_link(s: &str) -> Option<(&str, usize)> {
     let b = s.as_bytes();
     if !matches!(b.first(), Some(b'#' | b'?')) {
@@ -178,7 +152,6 @@ fn relative_link(s: &str) -> Option<(&str, usize)> {
     (digits > 0 && b.get(i) == Some(&b')')).then(|| (&s[start..i], i + 1))
 }
 
-/// Normalised line breaks, trimmed, links to other natives made absolute.
 pub fn normalize_markdown(text: &str) -> String {
     let text = normalize_line_breaks(text);
     let mut rest = text.trim();
@@ -200,7 +173,6 @@ pub fn normalize_markdown(text: &str) -> String {
     out
 }
 
-/// Example code: normalised line breaks, no trailing spaces, no blank first / last lines.
 pub fn normalize_code(code: &str) -> String {
     let code = normalize_line_breaks(code);
     let lines: Vec<&str> = code.split('\n').map(str::trim_end).collect();
@@ -211,7 +183,6 @@ fn non_empty(s: String) -> Option<String> {
     (!s.is_empty()).then_some(s)
 }
 
-/// The Lua view of one database entry.
 fn build(set: NativeSet, raw: &RawNative, overrides: &Overrides) -> Native {
     let server = set == NativeSet::Server;
     let pointers = raw.params.iter().filter(|p| p.ty.pointer).count();
@@ -302,8 +273,6 @@ struct Candidate<'a> {
     alias_sources: Vec<Cow<'a, str>>,
 }
 
-/// Same Lua name twice: the CFX entry beats a game native, else the first one
-/// wins; a blank description is filled from the other; aliases are pooled.
 fn merge<'a>(existing: &mut Candidate<'a>, mut other: Candidate<'a>) {
     if other.origin == Origin::CfxJson && existing.origin != Origin::CfxJson {
         std::mem::swap(existing, &mut other);
@@ -314,7 +283,6 @@ fn merge<'a>(existing: &mut Candidate<'a>, mut other: Candidate<'a>) {
     existing.alias_sources.append(&mut other.alias_sources);
 }
 
-/// The groups of `set` among `natives` (database order matters: first wins), sorted.
 pub fn convert(set: NativeSet, natives: Vec<RawNative<'_>>, overrides: &Overrides) -> Vec<Group> {
     let mut primaries: Vec<Candidate> = Vec::new();
     let mut index: HashMap<String, usize> = HashMap::new();
@@ -356,12 +324,10 @@ pub fn convert(set: NativeSet, natives: Vec<RawNative<'_>>, overrides: &Override
     groups
 }
 
-/// Case-insensitive (ASCII) order of two names.
 pub fn cmp_ignore_case(a: &str, b: &str) -> std::cmp::Ordering {
     a.bytes().map(|c| c.to_ascii_lowercase()).cmp(b.bytes().map(|c| c.to_ascii_lowercase()))
 }
 
-/// Namespace, then Lua name (case-insensitive first).
 pub fn sort_groups(groups: &mut [Group]) {
     groups.sort_by(|a, b| {
         let (a, b) = (&a.native, &b.native);
@@ -372,7 +338,6 @@ pub fn sort_groups(groups: &mut [Group]) {
     });
 }
 
-/// Each primary followed by its aliases: copies of it under the alias name.
 pub fn flatten(groups: Vec<Group>) -> Vec<Native> {
     let mut out = Vec::with_capacity(groups.iter().map(|g| 1 + g.aliases.len()).sum());
     for g in groups {
@@ -405,7 +370,6 @@ pub fn flatten(groups: Vec<Group>) -> Vec<Native> {
     out
 }
 
-/// The number of functions of `groups` (primaries and aliases).
 pub fn functions(groups: &[Group]) -> usize {
     groups.iter().map(|g| 1 + g.aliases.len()).sum()
 }
@@ -415,7 +379,6 @@ mod tests {
     use super::*;
     use crate::natives::parse::parse_json;
 
-    /// Excerpt of natives.json (real entries, descriptions shortened).
     pub const GTA_JSON: &str = r#"{
       "MISC": {
         "0xC906A7DAB05C8D2B": {
@@ -489,7 +452,6 @@ mod tests {
       }
     }"#;
 
-    /// Excerpt of natives_cfx.json.
     pub const CFX_JSON: &str = r#"{
       "CFX": {
         "0x5FA79B0F": {

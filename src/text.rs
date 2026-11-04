@@ -1,11 +1,7 @@
-//! Text coordinates. The IDE speaks 0-based lines and UTF-16 columns; the
-//! analysis works on UTF-8 byte offsets. [`LineIndex`] converts both ways in
-//! O(log n) per lookup, so a whole file of diagnostics stays cheap.
-
 use openidea_plugin::{Position, Range};
 
-/// Line starts of a text, for byte offset ↔ [`Position`] conversions.
 #[derive(Clone, Debug)]
+// IDE positions are 0-based lines and UTF-16 columns; the analysis works on UTF-8 byte offsets.
 pub struct LineIndex {
     starts: Vec<usize>,
     len: usize,
@@ -18,7 +14,6 @@ impl LineIndex {
         Self { starts, len: text.len() }
     }
 
-    /// 0-based line of byte `at`.
     pub fn line_of(&self, at: usize) -> usize {
         match self.starts.binary_search(&at.min(self.len)) {
             Ok(line) => line,
@@ -30,7 +25,6 @@ impl LineIndex {
         self.starts.get(line).copied().unwrap_or(self.len)
     }
 
-    /// Byte offset just past the line's last character (before its `\n`).
     pub fn line_end(&self, text: &str, line: usize) -> usize {
         let end = self.starts.get(line + 1).map_or(self.len, |s| s - 1);
         if end > 0 && text.as_bytes().get(end - 1) == Some(&b'\r') { end - 1 } else { end }
@@ -52,7 +46,6 @@ impl LineIndex {
         Range::new(self.position(text, start), self.position(text, end))
     }
 
-    /// Byte offset of `pos`, clamped to its line (and to the text).
     pub fn offset(&self, text: &str, pos: Position) -> usize {
         let line = pos.line as usize;
         if line >= self.starts.len() {
@@ -78,8 +71,6 @@ pub fn floor_char_boundary(text: &str, mut at: usize) -> usize {
     at
 }
 
-/// Levenshtein distance (ASCII case-insensitive), capped: anything above
-/// `max` returns `max + 1` early.
 pub fn edit_distance(a: &str, b: &str, max: usize) -> usize {
     let a: Vec<char> = a.chars().map(|c| c.to_ascii_lowercase()).collect();
     let b: Vec<char> = b.chars().map(|c| c.to_ascii_lowercase()).collect();
@@ -104,7 +95,6 @@ pub fn edit_distance(a: &str, b: &str, max: usize) -> usize {
     prev[b.len()]
 }
 
-/// Escapes text for HTML.
 pub fn html_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 8);
     for c in s.chars() {
@@ -120,17 +110,14 @@ pub fn html_escape(s: &str) -> String {
     out
 }
 
-/// Normalises a path to forward slashes (the IDE gives native paths).
 pub fn slash(path: &str) -> String {
     path.replace('\\', "/")
 }
 
-/// Directory part of a slash path (`a/b/c.lua` → `a/b`).
 pub fn parent(path: &str) -> &str {
     path.rfind('/').map_or("", |i| &path[..i])
 }
 
-/// File name of a slash path.
 pub fn file_name(path: &str) -> &str {
     path.rfind('/').map_or(path, |i| &path[i + 1..])
 }

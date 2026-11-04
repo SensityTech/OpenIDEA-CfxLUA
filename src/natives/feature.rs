@@ -1,7 +1,3 @@
-//! Natives in Lua scripts: completion (with each native's documentation, the
-//! IDE has no hover for plugins), the client / server side check, and the
-//! update commands.
-
 use super::convert::cmp_ignore_case;
 use super::model::Native;
 use super::parse::longest_backtick_run;
@@ -17,17 +13,10 @@ use openidea_plugin::providers::{CompletionItem, CompletionKind};
 use std::collections::HashSet;
 use std::fmt::Write;
 
-/// Most completion items returned. The IDE asks once, at the first letter of
-/// a word, then filters that list as the user types: every native sharing a
-/// first letter must fit (the largest group, `S…` in GTA V, has 1716).
 const MAX_ITEMS: usize = 2000;
-/// Items carrying the Markdown documentation (about 600 bytes each), best
-/// ranked first: the payload of a first letter stays a few hundred KiB.
 const MAX_DOCUMENTED: usize = 500;
-/// Longest query matched by camel humps (the matching backtracks).
 const MAX_HUMPS: usize = 48;
 
-/// A plain call of a native the script's side cannot use.
 pub const WRONG_SIDE: &str = "CfxNativeWrongSide";
 
 #[derive(Default)]
@@ -90,12 +79,10 @@ fn resource_games<'a>(cx: &Ctx<'a>) -> Option<&'a [Game]> {
     cx.doc.resource.as_deref().and_then(|dir| cx.ws.resource(dir)).and_then(|r| r.games.as_deref())
 }
 
-/// `N_0x…`: hidden from completion unless asked for (it still resolves).
 fn is_unnamed(n: &Native) -> bool {
     n.lua_name.starts_with("N_0x")
 }
 
-/// Whether byte `at` is inside a string or hash literal.
 fn in_string(src: &Source, at: usize) -> bool {
     let i = src.all.partition_point(|t| t.start < at);
     let Some(t) = i.checked_sub(1).map(|i| src.all[i]) else { return false };
@@ -107,8 +94,6 @@ fn in_string(src: &Source, at: usize) -> bool {
     at < t.end || (at == t.end && open)
 }
 
-/// Start of the identifier typed before `at`, where a native may be written:
-/// not in a comment or a string, not a field or method name, not a new name.
 fn word_start(src: &Source, at: usize) -> Option<usize> {
     let text = src.text.as_str();
     if at > text.len() || !text.is_char_boundary(at) {
@@ -144,7 +129,6 @@ enum Match {
     CamelHump,
 }
 
-/// How `name` matches the lower-case `query` (`compact`: without `_`).
 fn match_name(name: &str, query: &str, compact: &[u8]) -> Option<Match> {
     let (n, q) = (name.as_bytes(), query.as_bytes());
     if n.len() >= q.len() && n[..q.len()].eq_ignore_ascii_case(q) {
@@ -157,7 +141,6 @@ fn match_name(name: &str, query: &str, compact: &[u8]) -> Option<Match> {
     camel_humps(&words(name), compact, 0, 0, true).then_some(Match::CamelHump)
 }
 
-/// The words of a Lua name: `GetGroundZFor_3dCoord` → `Get`, `Ground`, `ZFor`, `3d`, `Coord`.
 fn words(name: &str) -> Vec<&str> {
     let b = name.as_bytes();
     let mut out = Vec::new();
@@ -189,8 +172,6 @@ fn words(name: &str) -> Vec<&str> {
     out
 }
 
-/// `ggz` → `GetGroundZFor_3dCoord`: each part of the query starts a word, in
-/// order; the first word is anchored, later ones may be skipped.
 fn camel_humps(words: &[&str], q: &[u8], qi: usize, wi: usize, anchored: bool) -> bool {
     if qi == q.len() {
         return true;
@@ -213,7 +194,6 @@ fn camel_humps(words: &[&str], q: &[u8], qi: usize, wi: usize, anchored: bool) -
     false
 }
 
-/// Label: the Lua name; detail: the rest of the typed signature.
 fn item(n: &Native, rank: usize, documented: bool) -> CompletionItem {
     let signature = n.typed_signature();
     let mut item = CompletionItem::new(&n.lua_name, CompletionKind::Function);
@@ -227,7 +207,6 @@ fn one_line(text: &str) -> String {
     text.split_ascii_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// A parameter or return line: `` `name: type` — `NativeType` – description (note) ``.
 fn entry(out: &mut String, name: &str, lua: &str, native: &str, description: Option<&str>, note: Option<&str>) {
     let _ = write!(out, "- `{name}: {lua}` — `{native}`");
     if let Some(d) = description.map(one_line).filter(|d| !d.is_empty()) {
@@ -239,10 +218,6 @@ fn entry(out: &mut String, name: &str, lua: &str, native: &str, description: Opt
     out.push('\n');
 }
 
-/// The documentation of a native, in Markdown: signature, deprecation,
-/// description, example, parameters and returns, then the details
-/// (namespace, side, game, hash, native name, RPC, aliases, NativeDB name) and
-/// the online documentation.
 pub fn markdown(n: &Native) -> String {
     let mut s = String::with_capacity(512 + n.description.len() + n.lua_example.as_ref().map_or(0, String::len));
     let _ = write!(s, "```lua\nfunction {}\n```\n", n.typed_signature());
@@ -301,10 +276,7 @@ pub fn markdown(n: &Native) -> String {
     s
 }
 
-/// Names the file declares: functions, locals, parameters, loop variables and
-/// global assignments (a script may define its own `GetPlayers`).
 fn declared_names(src: &Source) -> HashSet<&str> {
-    /// `a, b <const>, c` from token `j`.
     fn names<'a>(src: &'a Source, mut j: usize, out: &mut HashSet<&'a str>) {
         while src.is_name(j) {
             out.insert(src.tok_text(j));
@@ -340,8 +312,6 @@ fn declared_names(src: &Source) -> HashSet<&str> {
     out
 }
 
-/// `CfxNativeWrongSide`: a plain call of a native of the other side only
-/// (a server native in a client script, a client native in a server script).
 fn wrong_side(cx: &Ctx) -> Vec<Problem> {
     let doc = cx.doc;
     if !cx.settings.enabled() || doc.kind != FileKind::Lua || !doc.is_lua() {
@@ -673,7 +643,6 @@ mod tests {
         assert!(problems(&fx, "res/server/main.lua").is_empty(), "a shared native, whatever the switches");
     }
 
-    /// The largest first-letter list of the real catalogs, within the editing budget.
     #[test]
     fn real_catalog_completion() {
         let mut all = crate::natives::tests::bundled(NativeSet::Gta5).to_vec();

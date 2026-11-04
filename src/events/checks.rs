@@ -1,7 +1,3 @@
-//! Checks of the event calls of a file whose key is known statically (a
-//! computed key is never reported), against the events of the whole project,
-//! and of the `---@cfx.event` annotations.
-
 use super::ast::{self, Ast, ExprKind, StmtKind};
 use super::db::Db;
 use super::flow::{doc_block, event_tag};
@@ -13,7 +9,6 @@ use crate::lua::Source;
 use crate::lua::lexer::Tok;
 use openidea_plugin::Severity;
 
-/// From the first to the last key literal written at the call, else the callee's last name.
 fn key_range(site: &Site) -> (usize, usize) {
     let mut lits = site.occurrences.iter().flatten();
     match lits.next() {
@@ -34,7 +29,6 @@ fn problem(code: &'static str, severity: Severity, (start, end): (usize, usize),
     Problem::new(code, severity, start, end, message)
 }
 
-/// The five checks of the sites of the document.
 pub fn sites(cx: &Ctx, db: &Db) -> Vec<Problem> {
     let report_ignored = cx.settings.bool(keys::REPORT_IGNORED_VALUES, true);
     let sites: Vec<&Site> = db.sites_in(&cx.doc.path).collect();
@@ -56,7 +50,6 @@ pub fn sites(cx: &Ctx, db: &Db) -> Vec<Problem> {
     out
 }
 
-/// A trigger whose event has no handler in the project (in a namespace the project handles), or none on its target side.
 fn no_handler(db: &Db, site: &Site) -> Option<Problem> {
     let key = &site.key;
     if key.is_builtin() || db.may_be_handled_dynamically(key, false) {
@@ -81,7 +74,6 @@ fn no_handler(db: &Db, site: &Site) -> Option<Problem> {
     Some(problem("CfxEventNoHandler", Severity::Info, key_range(site), message))
 }
 
-/// `AddEventHandler` for an event triggered from the other side but never registered for the network in its resource.
 fn not_safe_for_net(cx: &Ctx, db: &Db, site: &Site) -> Option<Problem> {
     if !site.function.is_standard() || site.net {
         return None;
@@ -119,7 +111,6 @@ fn not_safe_for_net(cx: &Ctx, db: &Db, site: &Site) -> Option<Problem> {
     Some(p)
 }
 
-/// An event function called from a script of the wrong side (once per call and function).
 fn wrong_side(sites: &[&Site], site: &Site) -> Option<Problem> {
     let required = site.function.required_side?;
     let side = site.side();
@@ -139,7 +130,6 @@ fn wrong_side(sites: &[&Site], site: &Site) -> Option<Problem> {
     Some(problem("CfxEventWrongSide", Severity::Warning, callee_range(site), message))
 }
 
-/// A trigger sending a number of values none of the handlers it reaches takes.
 fn argument_count(cx: &Ctx, db: &Db, site: &Site, report_ignored: bool) -> Option<Problem> {
     let sent = site.payload_arity?;
     let handlers = db.handlers_reached_by(site);
@@ -157,7 +147,6 @@ fn argument_count(cx: &Ctx, db: &Db, site: &Site, report_ignored: bool) -> Optio
     Some(problem("CfxEventArgumentCount", Severity::Info, key_range(site), message))
 }
 
-/// A second handler of the same event in the same resource and side.
 fn duplicate_handler(cx: &Ctx, db: &Db, site: &Site) -> Option<Problem> {
     site.info.resource.as_ref()?;
     let key = &site.key;
@@ -182,8 +171,6 @@ fn duplicate_handler(cx: &Ctx, db: &Db, site: &Site) -> Option<Problem> {
     Some(problem("CfxEventDuplicateHandler", Severity::Info, key_range(site), message))
 }
 
-/// The function documented by the `---` block holding comment `src.all[comment]`: a function
-/// statement, or the first closure of the assignment, `local` or table field the block precedes.
 fn documented_function(src: &Source, tree: &Ast, comment: usize) -> Option<u32> {
     // the last comment of the block holding `comment`
     let mut last = comment;
@@ -227,7 +214,6 @@ fn documented_function(src: &Source, tree: &Ast, comment: usize) -> Option<u32> 
     None
 }
 
-/// Mistakes in `---@cfx.event` annotations.
 pub fn annotations(cx: &Ctx) -> Vec<Problem> {
     let src = &cx.doc.src;
     let mut out = Vec::new();

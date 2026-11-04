@@ -1,8 +1,3 @@
-//! Editor features on event keys: completion of event names and key
-//! components, go to definition (handler ↔ trigger), gutter markers, and the
-//! documentation of keys and built-in events (shown with completion items:
-//! the IDE has no hover).
-
 use super::ast::{self, ExprKind};
 use super::db::Db;
 use super::flow::{Analysis, Arg, FileFacts};
@@ -19,28 +14,22 @@ use std::rc::Rc;
 
 const MAX_LOCATIONS: usize = 10;
 
-/// A string argument being completed that is a component of an event key.
 struct Slot {
     function: Rc<EventFn>,
     role: Role,
     component: usize,
     logical: bool,
-    /// Number of key components, `None` for an alias function declaring keys of any size.
     arity: Option<usize>,
-    /// Literal text a helper adds around the argument (`'shop:' .. name`).
     prefix: String,
     suffix: String,
-    /// The components before this one written as literals.
     fixed: HashMap<usize, String>,
 }
 
 impl Slot {
-    /// Network names (the built-in events among them) fit.
     fn accepts_network_names(&self) -> bool {
         !self.logical && self.prefix.is_empty() && self.suffix.is_empty()
     }
 
-    /// Where the handlers of the call run, for the built-in events (`None`: the caller's side).
     fn target(&self) -> Option<Side> {
         let dirs = if self.role == Role::Trigger { self.function.directions } else { Dirs::NONE };
         match dirs {
@@ -51,7 +40,6 @@ impl Slot {
     }
 }
 
-/// The text of a key component when every piece of it is known at the call.
 fn value_of(component: &[Seg], args: &[Arg]) -> Option<String> {
     let mut out = String::new();
     for seg in component {
@@ -130,7 +118,6 @@ fn slot(function: Rc<EventFn>, args: &[Arg], index: usize) -> Option<Slot> {
     None
 }
 
-/// The values `slot` can take in the project, with the keys they complete.
 fn values(db: &Db, slot: &Slot) -> BTreeMap<String, Vec<EventKey>> {
     let mut out: BTreeMap<String, Vec<EventKey>> = BTreeMap::new();
     for key in db.keys() {
@@ -162,7 +149,6 @@ fn values(db: &Db, slot: &Slot) -> BTreeMap<String, Vec<EventKey>> {
     out
 }
 
-/// Where the events of a completed value are handled.
 fn handled_text(db: &Db, keys: &[EventKey]) -> String {
     let handlers: Vec<&Site> = keys.iter().flat_map(|k| db.handlers(k)).collect();
     if handlers.is_empty() {
@@ -174,7 +160,6 @@ fn handled_text(db: &Db, keys: &[EventKey]) -> String {
     if sides.is_empty() { "handled".into() } else { format!("handled on {}", sides.join(", ")) }
 }
 
-/// Where the handlers of a plain call to a runtime function run (`None`: the caller's side).
 fn standard_target(name: &str) -> Option<Option<Side>> {
     match name {
         "AddEventHandler" | "RegisterNetEvent" | "TriggerEvent" => Some(None),
@@ -184,7 +169,6 @@ fn standard_target(name: &str) -> Option<Option<Side>> {
     }
 }
 
-/// The games of the project: the setting, else the manifests' (both when none declares one).
 fn project_games(cx: &Ctx) -> Vec<Game> {
     match cx.settings.string(crate::settings::keys::GAME, "auto").as_str() {
         "fivem" => vec![Game::Gta5],
@@ -197,7 +181,6 @@ fn project_games(cx: &Ctx) -> Vec<Game> {
     }
 }
 
-/// Built-in events relevant for a call whose handlers run on `target`, in a script of `side`.
 fn builtin_relevant(e: &BuiltinEvent, target: Option<Side>, side: Side, games: &[Game]) -> bool {
     let side_ok = match target {
         Some(t) => e.side() == t || e.side() == Side::Shared,
@@ -206,7 +189,6 @@ fn builtin_relevant(e: &BuiltinEvent, target: Option<Side>, side: Side, games: &
     side_ok && !e.is_pattern() && e.game().is_none_or(|g| games.contains(&g))
 }
 
-/// The documentation of a built-in event (Markdown).
 pub fn builtin_doc(e: &BuiltinEvent) -> String {
     let mut out = format!("event **{}**{}\n\n", md(&e.name), md(&e.params_text()));
     if !e.description.trim().is_empty() {
@@ -260,7 +242,6 @@ fn project_item(label: &str, detail: String, replace: Range, documentation: Opti
     item
 }
 
-/// Event names and key components in the string argument at `at`.
 pub fn completion(cx: &Ctx, db: Option<&Db>, files: &BTreeMap<String, FileFacts>, at: usize) -> Vec<CompletionItem> {
     let src = &cx.doc.src;
     let Some(i) = src.tok_at(at) else { return Vec::new() };
@@ -359,7 +340,6 @@ pub fn completion(cx: &Ctx, db: Option<&Db>, files: &BTreeMap<String, FileFacts>
     items
 }
 
-/// The sites a site leads to: handlers of a trigger, triggers of a handler (any side when none is reachable), both for the others.
 fn targets_of<'a>(db: &'a Db, site: &Site) -> Vec<&'a Site> {
     let found = match site.role {
         Role::Trigger => {
@@ -379,7 +359,6 @@ fn targets_of<'a>(db: &'a Db, site: &Site) -> Vec<&'a Site> {
     distinct(found)
 }
 
-/// Sites distinct by call.
 fn distinct(sites: Vec<&Site>) -> Vec<&Site> {
     let mut seen: HashSet<(&str, u32)> = HashSet::new();
     sites.into_iter().filter(|s| seen.insert((&s.file, s.call_offset))).collect()
@@ -389,7 +368,6 @@ fn anchor_location(site: &Site) -> Location {
     Location { path: site.file.to_string(), range: site.anchor().range }
 }
 
-/// The site whose key literal is at `at` (or right before it).
 fn site_at_caret<'a>(cx: &Ctx, db: &'a Db, at: usize) -> Option<(&'a Site, usize)> {
     let src = &cx.doc.src;
     let i = src.tok_at(at)?;
@@ -400,13 +378,11 @@ fn site_at_caret<'a>(cx: &Ctx, db: &'a Db, at: usize) -> Option<(&'a Site, usize
     db.site_at(&cx.doc.path, tok.start as u32)
 }
 
-/// Go to definition on a key literal: from a trigger to its handlers, from a handler to its triggers.
 pub fn definition(cx: &Ctx, db: &Db, at: usize) -> Vec<Location> {
     let Some((site, _)) = site_at_caret(cx, db, at) else { return Vec::new() };
     targets_of(db, site).into_iter().map(anchor_location).collect()
 }
 
-/// `standard_res/client.lua:12 (Client)`.
 fn located(cx: &Ctx, site: &Site) -> String {
     let loc = location(cx.ws, &site.file, site.line);
     match side_text(site.side()) {
@@ -415,7 +391,6 @@ fn located(cx: &Ctx, site: &Site) -> String {
     }
 }
 
-/// Gutter markers: the handlers a trigger reaches, the triggers reaching a handler.
 pub fn line_markers(cx: &Ctx, db: &Db) -> Vec<LineMarker> {
     let mut out: Vec<LineMarker> = Vec::new();
     for site in db.sites_in(&cx.doc.path) {
@@ -484,7 +459,6 @@ fn sides(sites: &[&Site]) -> Option<String> {
     (!s.is_empty()).then(|| s.join(", "))
 }
 
-/// The documentation of a project event key (Markdown).
 pub fn key_doc(cx: &Ctx, db: &Db, key: &EventKey) -> String {
     let mut seen: HashSet<(&str, u32, &EventKey)> = HashSet::new();
     let sites: Vec<&Site> =

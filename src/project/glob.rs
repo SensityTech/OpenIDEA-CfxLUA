@@ -1,16 +1,8 @@
-//! FXServer's file globs (`client/*.lua`, `**/cl_*.lua`), as `MatchFiles`
-//! reads them in `fxmanifest.lua`: `*` stays in one segment, `**` at the
-//! start of a segment crosses directories, `@other/…` never matches here.
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Part {
-    /// `**/` at a segment start: any number of whole directories (or none).
     AnyDirs,
-    /// `**` not followed by `/`: anything, slashes included.
     AnyDeep,
-    /// `*`: anything but `/`.
     Any,
-    /// `?`: one character but `/`.
     One,
     Lit(char),
 }
@@ -22,7 +14,6 @@ pub struct Glob {
 }
 
 impl Glob {
-    /// `None` for patterns that match nothing in this resource (blank, `@resource/…`).
     pub fn new(pattern: &str, case_sensitive: bool) -> Option<Self> {
         let mut g = pattern.trim().replace('\\', "/");
         if g.is_empty() || g.starts_with('@') {
@@ -60,7 +51,6 @@ impl Glob {
         Some(Self { parts, case_sensitive })
     }
 
-    /// Whether the resource-relative path `rel` (forward slashes) matches.
     pub fn matches(&self, rel: &str) -> bool {
         let s: Vec<char> = if self.case_sensitive {
             rel.chars().collect()
@@ -70,7 +60,6 @@ impl Glob {
         matches_at(&self.parts, &s)
     }
 
-    /// The literal directory prefix before the first wildcard (`client/` for `client/*.lua`).
     pub fn literal_prefix(&self) -> String {
         let mut out = String::new();
         for p in &self.parts {

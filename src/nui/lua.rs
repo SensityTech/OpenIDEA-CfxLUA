@@ -1,10 +1,3 @@
-//! Facts of a Lua client script about the NUI bridge: callbacks registered
-//! (`RegisterNUICallback('close')`, `AddEventHandler('__cfx_nui:close')`),
-//! messages sent (`SendNUIMessage({ action = 'open' })`), wrappers forwarding
-//! a parameter as the name, and callbacks registered with computed names.
-//! Calls of the wrappers are read on demand ([`calls`]) when the bridge
-//! resolves them.
-
 use super::bridge::At;
 use super::web::NUI_EVENT_PREFIX;
 use crate::lua::lexer::Tok;
@@ -16,15 +9,11 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 
 pub const CALLBACK_FUNCTIONS: &[&str] =
     &["RegisterNUICallback", "RegisterNuiCallback", "RegisterRawNUICallback", "RegisterRawNuiCallback"];
-/// `RegisterNuiCallbackType(name)`, completed by `AddEventHandler('__cfx_nui:name', …)`.
 pub const TYPE_FUNCTIONS: &[&str] = &["RegisterNuiCallbackType"];
-/// Functions sending a message to a page, with the index of the message argument.
 pub const MESSAGE_FUNCTIONS: &[(&str, usize)] = &[("SendNUIMessage", 0), ("SendNuiMessage", 0), ("SendDuiMessage", 1)];
-/// Calls building an object of a class: `Zone.new(…)`, `Zone:create(…)`.
 const CONSTRUCTORS: &[&str] = &["new", "create", "New", "Create"];
 const MAX_ARGS: usize = 16;
 
-/// What a Lua wrapper forwards.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum LuaKind {
     Callback,
@@ -33,40 +22,31 @@ pub enum LuaKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum FnKind {
-    /// `function Name()`, `Name = function()`.
     Global,
-    /// `function A.b()`, `A.b = function()`, `A = { b = function() end }`.
     Field,
-    /// `function A:b()`.
     Method,
-    /// `local function f()`, `local f = function()` at the top level.
     Local,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NamedFn {
-    /// `Name`, `A.b`, `A:b`.
     pub path: String,
     pub kind: FnKind,
 }
 
 impl NamedFn {
-    /// The class of a method (`Player` for `Player:notify`).
     pub fn class(&self) -> Option<&str> {
         (self.kind == FnKind::Method).then(|| self.path.rsplit_once(':').map_or("", |(c, _)| c))
     }
 }
 
-/// A name written in a Lua string.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LuaName {
     pub name: String,
-    /// Start of the string literal (or of the callee, for a constant passed to a wrapper).
     pub literal: usize,
     pub at: At,
 }
 
-/// A named function forwarding its parameter `param` as a callback name or as message field `field`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LuaWrapper {
     pub kind: LuaKind,
@@ -78,39 +58,27 @@ pub struct LuaWrapper {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Facts {
     pub callbacks: Vec<LuaName>,
-    /// Message names with the key naming them.
     pub messages: Vec<(String, LuaName)>,
     pub wrappers: Vec<LuaWrapper>,
-    /// A callback is registered with a name computed at runtime.
     pub dynamic: bool,
-    /// Hashes of the last names of the callees ([`name_hash`]), sorted: the files a wrapper may be called from.
     pub call_names: Vec<u64>,
 }
 
-/// What an argument of a call is.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Arg {
-    /// A string literal.
     Str(LuaName),
-    /// A local always holding this string (`local NAME = 'close'`).
     Const(String),
-    /// Exactly the parameter `n` of the named function the call is written in.
     Param(usize),
     Other,
 }
 
-/// A call of a function by path, for the resolution of wrappers.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LuaCall {
-    /// `Name`, `a.b`, `a:b` (`?:b` for a method of an expression).
     pub callee: String,
     pub colon: bool,
-    /// The last name of the callee.
     pub at: At,
     pub args: Vec<Arg>,
-    /// The named function the call is written in.
     pub function: Option<NamedFn>,
-    /// The class of a local receiver built by `X.new()` / `setmetatable({}, X)`.
     pub receiver_class: Option<String>,
 }
 
@@ -120,7 +88,6 @@ impl LuaCall {
     }
 }
 
-/// Text after the last `.` or `:` of a path.
 pub fn simple_name(path: &str) -> &str {
     path.rsplit([':', '.']).next().unwrap_or(path)
 }
@@ -131,19 +98,16 @@ pub fn name_hash(name: &str) -> u64 {
     h.finish()
 }
 
-/// The parsed structure of a Lua file the NUI features read.
 pub struct Analysis<'a> {
     pub src: &'a Source,
     pub tree: Tree,
     pub scopes: Scopes,
     pub chains: Vec<Chain>,
     pub calls: Vec<Call>,
-    /// The written arguments of each call.
     args: Vec<Vec<Span>>,
     named: HashMap<usize, NamedFn>,
 }
 
-/// Tokens `[from, to)` split at top-level `,` / `;` (`seps`), past brackets and function bodies.
 pub fn split(src: &Source, tree: &Tree, from: usize, to: usize) -> Vec<Span> {
     split_at(src, tree, from, to, &[","])
 }
@@ -197,12 +161,10 @@ impl<'a> Analysis<'a> {
         a
     }
 
-    /// The plain name a call invokes (`SendNUIMessage`), `None` for a field or a method.
     pub fn plain_callee(&self, call: &Call) -> Option<&str> {
         (call.seg == 0).then(|| self.chains[call.chain].head.as_str())
     }
 
-    /// The written arguments of call `i` (`f()` has none).
     pub fn args(&self, i: usize) -> &[Span] {
         &self.args[i]
     }
@@ -265,7 +227,6 @@ impl<'a> Analysis<'a> {
         out
     }
 
-    /// `T = { b = function() end }`: the functions of the fields of a table assigned to `path`.
     fn table_functions(&self, path: &str, (a, b): Span, out: &mut HashMap<usize, NamedFn>) {
         if !self.src.is_op(a, "{") || self.src.pair[a] != Some(b - 1) {
             return;
@@ -280,14 +241,12 @@ impl<'a> Analysis<'a> {
         }
     }
 
-    /// The function written exactly as span `s` (`function(…) … end`).
     pub fn closure(&self, s: Span) -> Option<usize> {
         let (a, b) = unparen(self.src, s);
         let f = self.tree.func_at(a)?;
         (self.src.is_kw(a, "function") && self.tree.funcs[f].next == b).then_some(f)
     }
 
-    /// The named function code token `tok` is written in (anonymous closures skipped outward).
     pub fn enclosing_named(&self, tok: usize) -> Option<&NamedFn> {
         let mut f = self.tree.owner(tok);
         while let Some(i) = f {
@@ -310,8 +269,6 @@ impl<'a> Analysis<'a> {
         None
     }
 
-    /// The parameter index when `s` (read at token `at`) is exactly a parameter of the named function it is
-    /// written in, never reassigned (`tostring(p)` passes through).
     pub fn param_of(&self, s: Span, at: usize) -> Option<usize> {
         let (a, b) = unparen(self.src, s);
         if self.src.is_name(a)
@@ -329,7 +286,6 @@ impl<'a> Analysis<'a> {
         (d.kind == DeclKind::Param && d.func == Some(named) && !d.assigned).then_some(d.index)
     }
 
-    /// The string a local always holds: `local NAME = 'close'`, never reassigned.
     fn constant(&self, s: Span) -> Option<String> {
         let (a, b) = unparen(self.src, s);
         if b != a + 1 || !self.src.is_name(a) {
@@ -340,7 +296,6 @@ impl<'a> Analysis<'a> {
         (ib == ia + 1).then(|| string_value(self.src, ia).map(|(v, _)| v)).flatten()
     }
 
-    /// The table of a message argument: written there, encoded with `json.encode`, or held by a local.
     pub fn message_table(&self, s: Span, depth: usize) -> Option<usize> {
         let src = self.src;
         let (a, b) = unparen(src, s);
@@ -373,7 +328,6 @@ impl<'a> Analysis<'a> {
         self.constant(s).map_or(Arg::Other, Arg::Const)
     }
 
-    /// The class of the local receiver of a method call (`local z = Zone.new()`, `setmetatable({}, Zone)`).
     fn receiver_class(&self, chain: &Chain, seg: usize) -> Option<String> {
         let src = self.src;
         if seg != 1 || !matches!(chain.segs.first(), Some(Seg::Method { .. })) {
@@ -396,7 +350,6 @@ impl<'a> Analysis<'a> {
     }
 }
 
-/// Inside the parentheses wrapping `s` entirely.
 pub fn unparen(src: &Source, (mut a, mut b): Span) -> Span {
     while b > a + 1 && src.is_op(a, "(") && src.pair[a] == Some(b - 1) {
         a += 1;
@@ -405,7 +358,6 @@ pub fn unparen(src: &Source, (mut a, mut b): Span) -> Span {
     (a, b)
 }
 
-/// `json.encode(` at token `a`.
 fn is_json_encode(src: &Source, a: usize) -> bool {
     src.is_name(a)
         && src.tok_text(a) == "json"
@@ -414,7 +366,6 @@ fn is_json_encode(src: &Source, a: usize) -> bool {
         && src.is_op(a + 3, "(")
 }
 
-/// `a`, `a.b.c` of span `s`.
 fn path_of(src: &Source, (a, b): Span) -> Option<String> {
     if !src.is_name(a) {
         return None;
@@ -432,7 +383,6 @@ fn path_of(src: &Source, (a, b): Span) -> Option<String> {
     Some(path)
 }
 
-/// The fields of the table constructor at `open`, as token spans (separated by `,` or `;`).
 pub fn table_fields(src: &Source, tree: &Tree, open: usize) -> Vec<Span> {
     match src.pair[open] {
         Some(close) => split_at(src, tree, open + 1, close, &[",", ";"]),
@@ -440,7 +390,6 @@ pub fn table_fields(src: &Source, tree: &Tree, open: usize) -> Vec<Span> {
     }
 }
 
-/// The key of a table field: `key = v`, `['key'] = v`, with the span of the value.
 pub fn field_key(src: &Source, (a, b): Span) -> Option<(String, Span)> {
     if src.is_name(a) && src.is_op(a + 1, "=") {
         return Some((src.tok_text(a).to_owned(), (a + 2, b)));
@@ -451,7 +400,6 @@ pub fn field_key(src: &Source, (a, b): Span) -> Option<(String, Span)> {
     None
 }
 
-/// The value of string token `tok` with Lua's escapes decoded, and whether it is written as is.
 pub fn string_value(src: &Source, tok: usize) -> Option<(String, bool)> {
     let t = src.toks.get(tok).filter(|t| t.is_string())?;
     let (s, e) = t.content_range(&src.text);
@@ -525,12 +473,10 @@ pub fn string_value(src: &Source, tok: usize) -> Option<(String, bool)> {
     Some((String::from_utf8_lossy(&out).into_owned(), false))
 }
 
-/// The name a string token holds, placed in the file.
 fn lua_name(src: &Source, tok: usize) -> Option<LuaName> {
     lua_name_skip(src, tok, 0)
 }
 
-/// [`lua_name`] of a string whose first `skip` bytes are a prefix (`__cfx_nui:`).
 fn lua_name_skip(src: &Source, tok: usize, skip: usize) -> Option<LuaName> {
     let (value, exact) = string_value(src, tok)?;
     let name = value.get(skip..)?.to_owned();
@@ -541,7 +487,6 @@ fn lua_name_skip(src: &Source, tok: usize, skip: usize) -> Option<LuaName> {
 }
 
 impl Facts {
-    /// The facts of a Lua file; a file naming no NUI function only records its calls.
     pub fn read(src: &Source) -> Self {
         let t = &src.text;
         if ["NUI", "Nui", "DuiMessage", NUI_EVENT_PREFIX].iter().any(|n| t.contains(n)) {
@@ -625,7 +570,6 @@ impl Facts {
     }
 }
 
-/// The path of the callee of call segment `seg` of `chain`, and whether it is a method call.
 fn callee_path(chain: &Chain, seg: usize) -> Option<(String, bool)> {
     let segs = &chain.segs[..seg.min(chain.segs.len())];
     let mut path = chain.head.clone();
@@ -647,7 +591,6 @@ fn callee_path(chain: &Chain, seg: usize) -> Option<(String, bool)> {
     Some((path, false))
 }
 
-/// Every call of the file with arguments, for the resolution of wrappers.
 pub fn calls(an: &Analysis) -> Vec<LuaCall> {
     let src = an.src;
     let mut out = Vec::new();
@@ -671,18 +614,13 @@ pub fn calls(an: &Analysis) -> Vec<LuaCall> {
     out
 }
 
-/// What a Lua string at the caret names.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Slot {
-    /// A message name: the page's listeners are offered.
     Message,
-    /// A callback name: the page's calls are offered.
     Callback,
-    /// Argument `arg` of a call of `path`: a wrapper's, if it is one.
     Wrapper { path: String, colon: bool, arg: usize },
 }
 
-/// The slot of string token `k`, `keys` being the message keys.
 pub fn slot(an: &Analysis, k: usize, keys: &[String]) -> Option<Slot> {
     let src = an.src;
     // `{ action = '|' }` / `{ ['action'] = '|' }` in a message table.
@@ -716,7 +654,6 @@ pub fn slot(an: &Analysis, k: usize, keys: &[String]) -> Option<Slot> {
     None
 }
 
-/// The `{` of the table whose field list token `p` is in (`p` is `{`, `,` or `;`).
 fn enclosing_brace(src: &Source, p: usize) -> Option<usize> {
     if src.is_op(p, "{") {
         return Some(p);
@@ -737,8 +674,6 @@ fn enclosing_brace(src: &Source, p: usize) -> Option<usize> {
     None
 }
 
-/// Whether the table at `open` is the message of a `SendNUIMessage` call: its first argument at the
-/// message index, or `json.encode(table)` at the message index.
 fn is_message(an: &Analysis, open: usize) -> bool {
     let src = an.src;
     let Some(close) = src.pair[open] else { return false };

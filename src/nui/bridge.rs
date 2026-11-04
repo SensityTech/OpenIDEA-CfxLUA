@@ -1,9 +1,3 @@
-//! The NUI bridge of a project: callbacks registered and called, messages
-//! sent and handled, matched by name within a resource (a file outside every
-//! resource matches every resource). Built from the per-file facts of
-//! [`super::lua`] and [`super::web`]; wrappers (Lua and JavaScript) are
-//! resolved here, across files.
-
 use super::lua::{self, Arg, FnKind, LuaCall, LuaKind, simple_name};
 use super::web;
 use crate::lua::Source;
@@ -13,16 +7,12 @@ use openidea_plugin::Range;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 
-/// Where a name is written.
 #[derive(Clone, Debug, PartialEq)]
 pub struct At {
     pub start: usize,
     pub len: usize,
-    /// The name is written as is at `start`.
     pub exact: bool,
-    /// End of the literal holding the name.
     pub end: usize,
-    /// For the IDE: the name, or the start of its literal when not exact.
     pub range: Range,
 }
 
@@ -32,7 +22,6 @@ impl At {
         Self { start, len, exact, end, range }
     }
 
-    /// The range a problem marks: the name when exact, else its whole literal.
     pub fn marked(&self) -> (usize, usize) {
         if self.exact { (self.start, self.start + self.len) } else { (self.start, self.end.max(self.start)) }
     }
@@ -40,9 +29,7 @@ impl At {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Channel {
-    /// The page calls a Lua callback: `fetch('https://res/close')` → `RegisterNUICallback('close')`.
     Callback,
-    /// Lua sends a message to the page: `SendNUIMessage({ action = 'open' })` → `case 'open':`.
     Message,
 }
 
@@ -62,7 +49,6 @@ impl Role {
         }
     }
 
-    /// The role the other side of the bridge plays.
     pub fn opposite(self) -> Self {
         match self {
             Self::Registration => Self::Fetch,
@@ -82,14 +68,12 @@ impl Role {
     }
 }
 
-/// What a JavaScript wrapper forwards: a callback name (`fetchNui`) or a message name (`useNuiEvent`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum WrapKind {
     Fetch,
     Listen,
 }
 
-/// A place naming a callback or a message.
 #[derive(Clone, Debug)]
 pub struct Site {
     pub file: Rc<str>,
@@ -97,18 +81,14 @@ pub struct Site {
     pub name: String,
     pub lua: bool,
     pub at: At,
-    /// Lua: start of the string literal holding the name (or of the wrapper's name for a constant); web: the name's start.
     pub literal: usize,
-    /// The resource directory, `None` outside every resource.
     pub resource: Option<Rc<str>>,
 }
 
-/// Same resource, or one of them outside every resource.
 pub fn compatible(a: Option<&str>, b: Option<&str>) -> bool {
     a.is_none() || b.is_none() || a == b
 }
 
-/// A Lua wrapper of a file.
 #[derive(Clone, Debug)]
 struct LuaWrapper {
     file: Rc<str>,
@@ -124,7 +104,6 @@ impl LuaWrapper {
         (self.fkind == FnKind::Method).then(|| self.path.rsplit_once(':').map_or("", |(c, _)| c))
     }
 
-    /// Whether `call` (in `file`) invokes this wrapper.
     fn called_by(&self, call: &LuaCall, file: &str) -> bool {
         match self.fkind {
             FnKind::Global | FnKind::Field => !call.colon && call.callee == self.path,
@@ -141,7 +120,6 @@ impl LuaWrapper {
     }
 }
 
-/// A JavaScript wrapper, from the code (`file`) or from the settings.
 #[derive(Clone, Debug)]
 struct JsWrapper {
     kind: WrapKind,
@@ -151,7 +129,6 @@ struct JsWrapper {
     file: Option<Rc<str>>,
 }
 
-/// What resolving a web call needs of a file.
 struct Info {
     module: bool,
     imports: Vec<(String, String)>,
@@ -164,7 +141,6 @@ impl Info {
     }
 }
 
-/// Resolves the calls of web files to the wrappers, through imports.
 struct Resolver {
     wrappers: Vec<JsWrapper>,
     infos: HashMap<Rc<str>, Info>,
@@ -183,7 +159,6 @@ impl Resolver {
         self.infos.get(file).and_then(|i| i.resource.as_deref())
     }
 
-    /// The kind of argument `arg` of a call `receiver.callee(…)` in `file`.
     fn wrapper_for(&self, file: &str, callee: &str, receiver: Option<&str>, arg: usize) -> Option<WrapKind> {
         let name = match self.import(file, callee) {
             Some(i) if receiver.is_none() && i != "default" && i != "*" => i,
@@ -209,7 +184,6 @@ impl Resolver {
         }
     }
 
-    /// The local names wrappers are called by: their names and the aliases they are imported as.
     fn callee_names(&self) -> HashSet<String> {
         let mut names: HashSet<String> = self.wrappers.iter().map(|w| w.name.clone()).collect();
         let aliases: Vec<String> = self
@@ -224,7 +198,6 @@ impl Resolver {
     }
 }
 
-/// The settings the bridge depends on.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Keys {
     pub messages: Vec<String>,
@@ -238,19 +211,15 @@ impl Keys {
     }
 }
 
-/// What the bridge is built from.
 pub struct Input<'a> {
     pub ws: &'a Workspace,
     pub keys: &'a Keys,
     pub lua: &'a BTreeMap<String, lua::Facts>,
     pub web: &'a BTreeMap<String, web::Facts>,
-    /// The resource directory of a file.
     pub resource_of: &'a mut dyn FnMut(&str) -> Option<String>,
-    /// The calls of a Lua file (read on demand: only files calling a wrapper are).
     pub calls_of: &'a mut dyn FnMut(&str) -> Rc<[LuaCall]>,
 }
 
-/// Lua wrappers resolved (wrappers of wrappers included) at most.
 const MAX_WRAPPERS: usize = 200;
 const MAX_FORWARD_ROUNDS: usize = 6;
 
@@ -258,7 +227,6 @@ pub struct Bridge {
     pub sites: Vec<Site>,
     by_file: HashMap<Rc<str>, Vec<usize>>,
     by_name: HashMap<(Channel, String), Vec<usize>>,
-    /// Resources registering callbacks with names computed at runtime.
     dynamic: Vec<Option<Rc<str>>>,
     resolver: Resolver,
     lua_wrappers: Vec<LuaWrapper>,
@@ -286,17 +254,14 @@ impl Bridge {
         self.by_file.get(file).into_iter().flatten().map(|&i| &self.sites[i])
     }
 
-    /// The Lua site of the string literal starting at `literal`.
     pub fn lua_site_at(&self, file: &str, literal: usize) -> Option<&Site> {
         self.sites_in(file).find(|s| s.lua && s.literal == literal)
     }
 
-    /// The web site whose name contains `offset` (or ends right before it).
     pub fn web_site_at(&self, file: &str, offset: usize) -> Option<&Site> {
         self.sites_in(file).find(|s| !s.lua && s.at.start <= offset && offset <= s.at.start + s.at.len)
     }
 
-    /// The sites of `name` in `channel` that can be in the same bridge as `resource`.
     pub fn sites(&self, channel: Channel, name: &str, resource: Option<&str>) -> impl Iterator<Item = &Site> + '_ {
         let resource = resource.map(str::to_owned);
         self.by_name
@@ -307,7 +272,6 @@ impl Bridge {
             .filter(move |s| compatible(s.resource.as_deref(), resource.as_deref()))
     }
 
-    /// The other side of `site` (distinct by place): the calls of a registration, the listeners of a message, and back.
     pub fn counterparts(&self, site: &Site) -> Vec<&Site> {
         let mut seen = HashSet::new();
         self.sites(site.role.channel(), &site.name, site.resource.as_deref())
@@ -315,17 +279,14 @@ impl Bridge {
             .collect()
     }
 
-    /// Whether callbacks of `resource` may be registered with a name the plugin can't know.
     pub fn registers_dynamically(&self, resource: Option<&str>) -> bool {
         self.dynamic.iter().any(|d| compatible(d.as_deref(), resource))
     }
 
-    /// Whether something registers callbacks for `resource`: without any, the page's calls are not checked.
     pub fn has_registrations(&self, resource: Option<&str>) -> bool {
         self.sites.iter().any(|s| s.role == Role::Registration && compatible(s.resource.as_deref(), resource))
     }
 
-    /// The names of `role` usable from `resource`, with their sites, by name.
     pub fn names(&self, role: Role, resource: Option<&str>) -> BTreeMap<&str, Vec<&Site>> {
         let mut out: BTreeMap<&str, Vec<&Site>> = BTreeMap::new();
         for s in self.sites.iter().filter(|s| s.role == role && compatible(s.resource.as_deref(), resource)) {
@@ -334,12 +295,10 @@ impl Bridge {
         out
     }
 
-    /// What argument `arg` of a call `receiver.callee(…)` of web file `file` names.
     pub fn web_wrapper_for(&self, file: &str, callee: &str, receiver: Option<&str>, arg: usize) -> Option<WrapKind> {
         self.resolver.wrapper_for(file, callee, receiver, arg)
     }
 
-    /// What argument `arg` of a call of the Lua function `path` (in `file`) names.
     pub fn lua_wrapper_for(&self, file: &str, path: &str, colon: bool, arg: usize) -> Option<LuaKind> {
         self.lua_wrappers
             .iter()
@@ -426,7 +385,6 @@ impl Builder<'_> {
         wrappers
     }
 
-    /// Sites of the calls of the Lua wrappers; wrappers of wrappers are added.
     fn resolve_lua_wrappers(&mut self, wrappers: &mut Vec<LuaWrapper>) {
         let input_lua = self.input.lua;
         let mut known: HashSet<(String, usize, LuaKind)> =
@@ -572,7 +530,6 @@ impl Builder<'_> {
         resolver
     }
 
-    /// A callback URL: in its file's resource, or in the resource named by its host.
     fn url_site(&mut self, file: &Rc<str>, u: &web::Url) {
         let own = self.resource(file);
         let resource = match &u.host {

@@ -1,9 +1,3 @@
-//! Events: handlers and triggers across the project, built-in events, navigation, gutter, completion and checks.
-//!
-//! Each Lua file is reduced to [`flow::FileFacts`] when indexed; the project's
-//! [`db::Db`] (helpers, sites, aliases) is rebuilt from them after a batch,
-//! and the providers only look it up.
-
 pub mod ast;
 pub mod checks;
 pub mod db;
@@ -25,15 +19,10 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
-/// Settings keys.
 pub mod keys {
-    /// Detect event helpers from the parameter flow (bool, default true).
     pub const DETECT_HELPERS: &str = "events.detectHelpers";
-    /// Helpers declared by hand, one per line: `Path annotation-text` (string, default empty).
     pub const HELPERS: &str = "events.helpers";
-    /// Functions declaring aliases (`RegisterEventAlias('wire', 'Type', 'Name')`), comma separated.
     pub const ALIAS_FUNCTIONS: &str = "events.aliasFunctions";
-    /// The argument-count check also reports handlers ignoring values (bool, default true).
     pub const REPORT_IGNORED_VALUES: &str = "events.reportIgnoredValues";
 }
 
@@ -53,25 +42,20 @@ impl Config {
     }
 }
 
-/// The facts and database of one project.
 #[derive(Default)]
 struct Project {
     files: BTreeMap<String, FileFacts>,
-    /// Facts (or a manifest) changed since the database was built.
     dirty: bool,
     db: Option<Rc<Db>>,
-    /// The settings the database was built with.
     config: Config,
 }
 
 #[derive(Default)]
 pub struct EventsFeature {
-    /// By project root.
     projects: RefCell<HashMap<String, Project>>,
 }
 
 impl EventsFeature {
-    /// The database of the request's project, rebuilt when the settings changed; `None` until the project is scanned.
     fn db(&self, cx: &Ctx) -> Option<Rc<Db>> {
         if !cx.ws.scanned {
             return None;
@@ -166,7 +150,6 @@ impl Feature for EventsFeature {
     }
 }
 
-/// Path for display: from the resource folder (`my_resource/server/main.lua`), else from the project root.
 pub fn display_path(ws: &Workspace, path: &str) -> String {
     if let Some(r) = ws.resource_of(path)
         && let Some(rel) = r.relative(path)
@@ -179,12 +162,10 @@ pub fn display_path(ws: &Workspace, path: &str) -> String {
     crate::text::file_name(path).to_owned()
 }
 
-/// `my_resource/server/main.lua:12` (`line` 0-based).
 pub fn location(ws: &Workspace, path: &str, line: u32) -> String {
     format!("{}:{}", display_path(ws, path), line + 1)
 }
 
-/// Escapes Markdown punctuation in plain text.
 pub fn md(text: &str) -> String {
     let mut out = String::with_capacity(text.len() + 4);
     for c in text.chars() {
@@ -196,7 +177,6 @@ pub fn md(text: &str) -> String {
     out
 }
 
-/// `1 value` / `{n} values` / `no value` style counts.
 pub fn count(n: usize, one: &str, many: &str, zero: Option<&str>) -> String {
     match (n, zero) {
         (0, Some(z)) => z.to_owned(),

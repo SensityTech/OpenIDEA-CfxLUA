@@ -1,13 +1,3 @@
-//! Per-file event facts: the named functions of a file (helper candidates)
-//! and its calls, each argument described relative to the parameters of the
-//! named function the call is written in.
-//!
-//! Values are followed through a flow-insensitive analysis of that function
-//! (locals assigned in branches or loops, concatenations, immediately invoked
-//! closures, local functions, `table.insert`): a parameter flows into an
-//! argument when the argument is computed from it. Nothing outside the file is
-//! used, so the facts are indexed per file.
-
 use super::ast::{Ast, DeclKind, ExprKind, Key, NONE, StmtKind, raw_string};
 use super::model::{FnKind, Seg, Sources, Span, VARARG, is_standard_name, simple_name};
 use crate::lua::Source;
@@ -21,7 +11,6 @@ const MAX_ARGS: usize = 16;
 const MAX_ITERATIONS: usize = 8;
 const MAX_DEPTH: u32 = 12;
 
-/// Runtime and library functions that never carry events.
 const SKIPPED_CALLEES: &[&str] = &[
     "print",
     "tostring",
@@ -72,13 +61,11 @@ const SKIPPED_CALLEES: &[&str] = &[
     "quat",
 ];
 
-/// Library tables whose functions never carry events.
 const SKIPPED_NAMESPACES: &[&str] =
     &["string", "table", "math", "json", "msgpack", "os", "io", "debug", "utf8", "coroutine", "Citizen", "promise"];
 
 const UNPACK: &[&str] = &["table.unpack", "unpack"];
 
-/// Functions returning exactly one value: as last argument they don't expand.
 const SINGLE_RESULT: &[&str] = &[
     "tonumber",
     "tostring",
@@ -117,75 +104,46 @@ const SINGLE_RESULT: &[&str] = &[
     "GetEntityHeading",
 ];
 
-/// Calls building an object of a class: `Zone.new(…)`, `Zone:new(…)`.
 const CONSTRUCTORS: &[&str] = &["new", "create", "New", "Create"];
 
-/// The doc tag declaring an event helper.
 pub const TAG: &str = "cfx.event";
 
-/// A named function that may be an event helper.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FunctionInfo {
-    /// `MyHelper.AddEventHandler`, `Player:TriggerEvent`, `TriggerServerEvent`.
     pub path: String,
     pub kind: FnKind,
-    /// Parameter names, `self` excluded.
     pub params: Vec<String>,
     pub vararg: bool,
-    /// Start of the name: identity and navigation.
     pub offset: u32,
-    /// Text after `---@cfx.event`.
     pub annotation: Option<String>,
 }
 
 impl FunctionInfo {
-    /// `Player` for `Player:TriggerEvent`.
     pub fn class_name(&self) -> Option<&str> {
         if self.kind == FnKind::Method { self.path.rsplit_once(':').map(|(c, _)| c) } else { None }
     }
 }
 
-/// A closure argument calling a parameter of the enclosing function (`function(...) callback(actor, ...) end`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CallbackCall {
     pub param: usize,
     pub closure_params: usize,
     pub closure_vararg: bool,
-    /// For each argument of the callback call, the closure inputs it is computed from
-    /// (closure parameter indices, [`VARARG`] for the closure's `...`).
     pub inputs: Vec<Sources>,
 }
 
-/// A call argument, relative to the enclosing named function (or to the file at the top level).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Arg {
-    /// A string known statically: written here (`lit`), or a constant from elsewhere.
-    Str {
-        value: String,
-        lit: Option<Span>,
-    },
-    /// Concatenation of literals and parameters, with at least one parameter.
+    Str { value: String, lit: Option<Span> },
     Template(Vec<Seg>),
-    /// Computed from these parameters through calls, loops, branches…
     Tainted(Sources),
-    Closure {
-        params: usize,
-        vararg: bool,
-        callback: Option<CallbackCall>,
-    },
-    /// The name of a function declared in the file.
-    FunctionRef {
-        params: usize,
-        vararg: bool,
-    },
-    /// `...`, `table.unpack(t)`, `unpack(t)` as last argument.
+    Closure { params: usize, vararg: bool, callback: Option<CallbackCall> },
+    FunctionRef { params: usize, vararg: bool },
     Spread(Sources),
-    /// Anything else; the literal start of a concatenation (`'shop:' .. name`).
     Dynamic(String),
 }
 
 impl Arg {
-    /// The parameter of a template made of exactly one parameter.
     pub fn single_param(&self) -> Option<usize> {
         match self {
             Arg::Template(segs) => match segs.as_slice() {
@@ -197,27 +155,18 @@ impl Arg {
     }
 }
 
-/// A call of a file.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CallRecord {
-    /// `AddEventHandler`, `MyHelper.AddEventHandler`, `player:TriggerEvent` (`?` for a receiver that is not a path).
     pub callee: String,
     pub colon: bool,
-    /// Called through a local saved before a redefinition (`local _TriggerServerEvent = TriggerServerEvent`).
     pub original: bool,
-    /// Start of the call expression and its 0-based line.
     pub offset: u32,
     pub line: u32,
-    /// The last name of the callee.
     pub callee_span: Span,
     pub args: Vec<Arg>,
-    /// The last argument is a call that may expand to several values.
     pub last_arg_multi: bool,
-    /// The enclosing named function (index in [`FileFacts::functions`]).
     pub function: Option<u32>,
-    /// The callee's first name is a local or a parameter (`local H = MyHelper; H.Trigger()`).
     pub local_receiver: bool,
-    /// Colon call on a local built by a constructor (`local zone = Zone.new()`): the class.
     pub receiver_class: Option<String>,
 }
 
@@ -226,19 +175,15 @@ impl CallRecord {
         simple_name(&self.callee)
     }
 
-    /// `player` in `player:TriggerEvent`.
     pub fn receiver(&self) -> Option<&str> {
         if self.colon { self.callee.rsplit_once(':').map(|(r, _)| r) } else { None }
     }
 }
 
-/// What the event analysis keeps of a file.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FileFacts {
     pub functions: Vec<FunctionInfo>,
-    /// The calls that may concern events, in document order.
     pub calls: Vec<CallRecord>,
-    /// Call indices by callee simple name.
     pub by_name: HashMap<String, Vec<u32>>,
 }
 
@@ -289,7 +234,6 @@ fn segs_of(v: V) -> Vec<Seg> {
     }
 }
 
-/// Merges adjacent literals.
 pub fn merge_literals(segs: Vec<Seg>) -> Vec<Seg> {
     let mut out: Vec<Seg> = Vec::with_capacity(segs.len());
     for seg in segs {
@@ -316,7 +260,6 @@ fn concat(left: V, right: V) -> V {
     }
 }
 
-/// What an evaluation reads: the file, and the file environment (absent when evaluating in it).
 #[derive(Clone, Copy)]
 struct Ev<'a> {
     src: &'a Source,
@@ -324,7 +267,6 @@ struct Ev<'a> {
     file: Option<&'a Env>,
 }
 
-/// The values the locals of a function (or of the file) may hold, as parameters of the root.
 struct Env {
     root: u32,
     params: HashMap<u32, usize>,
@@ -341,7 +283,6 @@ fn value_at(ast: &Ast, values: &[u32], i: usize) -> Option<u32> {
     })
 }
 
-/// The local holding the table of `t.x = v` / `t[k] = v`.
 fn root_decl(ast: &Ast, e: u32) -> u32 {
     let e = ast.unparen(e);
     match ast.kind(e) {
@@ -388,7 +329,6 @@ impl Env {
         self.defs.contains_key(&decl)
     }
 
-    /// The only value assigned to `decl` here, when assigned once and not mutated.
     fn single_def(&self, decl: u32) -> Option<u32> {
         if self.impure.contains(&decl) {
             return None;
@@ -469,7 +409,6 @@ impl Env {
         }
     }
 
-    /// The function a call invokes when declared in the file: a closure in parentheses or a local function.
     fn called_function(&self, ev: &Ev, call: u32) -> Option<u32> {
         let ast = ev.ast;
         let ExprKind::Call(callee, _) = ast.kind(call) else { return None };
@@ -572,7 +511,6 @@ impl Env {
         }
     }
 
-    /// The string a local declared anywhere in the file always holds (this is the file env).
     fn constant(&self, ev: &Ev, decl: u32, depth: u32) -> V {
         let Some(value) = self.single_def(decl) else { return V::None };
         match self.eval(&Ev { file: None, ..*ev }, Some(value), depth + 1) {
@@ -613,7 +551,6 @@ impl Env {
     }
 }
 
-/// The first value of each `return` of function `f` (not of the functions nested in it).
 fn return_values(ast: &Ast, f: u32) -> impl Iterator<Item = u32> + '_ {
     let (s0, s1) = ast.func(f).stmts;
     (s0..s1).filter_map(move |s| {
@@ -625,7 +562,6 @@ fn return_values(ast: &Ast, f: u32) -> impl Iterator<Item = u32> + '_ {
     })
 }
 
-/// Calls inside expression ids `[lo, hi)` in pre-order (an outer call before the calls of its arguments).
 fn calls_in(ast: &Ast, lo: u32, hi: u32) -> Vec<u32> {
     let mut calls: Vec<u32> = (lo..hi).filter(|&e| matches!(ast.kind(e), ExprKind::Call(..))).collect();
     calls.sort_by_key(|&e| (ast.expr(e).first, Reverse(ast.expr(e).last)));
@@ -635,7 +571,6 @@ fn calls_in(ast: &Ast, lo: u32, hi: u32) -> Vec<u32> {
 // ---------------------------------------------------------------------------------------------
 // doc comments
 
-/// The `---` comment lines directly above token `tok` (indices in `src.all`), in order.
 pub fn doc_block(src: &Source, tok: usize) -> Vec<usize> {
     let Some(t) = src.toks.get(tok) else { return Vec::new() };
     let mut j = src.all.partition_point(|a| a.start < t.start);
@@ -658,7 +593,6 @@ pub fn doc_block(src: &Source, tok: usize) -> Vec<usize> {
     out
 }
 
-/// A `---@cfx.event` tag in comment `src.all[i]`: start of `cfx.event`, end of the text, text after the tag.
 pub fn event_tag(src: &Source, i: usize) -> Option<(usize, usize, String)> {
     let c = src.all.get(i)?;
     let text = c.text(&src.text);
@@ -673,7 +607,6 @@ pub fn event_tag(src: &Source, i: usize) -> Option<(usize, usize, String)> {
     Some((start, c.start + text.trim_end().len(), rest[name_len..].trim().to_owned()))
 }
 
-/// The text of the first `@cfx.event` tag documenting the element starting at token `tok`.
 pub fn annotation(src: &Source, tok: usize) -> Option<String> {
     doc_block(src, tok).into_iter().find_map(|i| event_tag(src, i)).map(|(_, _, text)| text)
 }
@@ -690,18 +623,14 @@ struct Callee {
     receiver_class: Option<String>,
 }
 
-/// The flow analysis of a file: named functions, and what a call's arguments are.
 pub struct Analysis<'a> {
     src: &'a Source,
     ast: &'a Ast,
     file_env: Env,
-    /// Function id → index in `functions` for named functions.
     named: Vec<Option<u32>>,
-    /// Index in `functions` → function id.
     named_func: Vec<u32>,
     functions: Vec<FunctionInfo>,
     envs: RefCell<HashMap<u32, Rc<Env>>>,
-    /// `function Name()` statements defining a name once.
     globals: HashMap<&'a str, u32>,
 }
 
@@ -731,7 +660,6 @@ impl<'a> Analysis<'a> {
         a
     }
 
-    /// Every call that may concern events (index filter), document order.
     pub fn facts(&self) -> FileFacts {
         let calls: Vec<CallRecord> = calls_in(self.ast, 0, self.ast.exprs.len() as u32)
             .into_iter()
@@ -782,7 +710,6 @@ impl<'a> Analysis<'a> {
         }
     }
 
-    /// The named functions of the file (B.4.1).
     fn collect_named(&mut self) {
         let (ast, src) = (self.ast, self.src);
         let top = |f: u32| ast.func(f).parent == NONE;
@@ -858,7 +785,6 @@ impl<'a> Analysis<'a> {
         }
     }
 
-    /// The innermost named function enclosing function `f` (index in the functions).
     fn enclosing_named(&self, mut f: u32) -> Option<u32> {
         while f != NONE {
             if let Some(i) = self.named[f as usize] {
@@ -879,14 +805,12 @@ impl<'a> Analysis<'a> {
         env
     }
 
-    /// `local _TriggerServerEvent = TriggerServerEvent`: the runtime function saved in `decl`.
     fn saved_runtime_function(&self, decl: u32) -> Option<String> {
         let value = self.ast.unparen(self.file_env.single_def(decl)?);
         let name = self.ast.global(self.src, value)?;
         is_standard_name(name).then(|| name.to_owned())
     }
 
-    /// The class of the object a local receiver holds: `local zone = Zone.new()`, `setmetatable({}, Player)`.
     fn receiver_class(&self, receiver: u32) -> Option<String> {
         let (ast, src) = (self.ast, self.src);
         let decl = ast.decl_of(ast.unparen(receiver));
@@ -905,7 +829,6 @@ impl<'a> Analysis<'a> {
         ast.global(src, ast.unparen(*owner)).map(str::to_owned)
     }
 
-    /// The first name of `a.b.c` is a local or a parameter.
     fn local_root(&self, mut e: u32) -> bool {
         loop {
             match self.ast.kind(e) {
@@ -951,7 +874,6 @@ impl<'a> Analysis<'a> {
         }
     }
 
-    /// The record of call expression `call`; with `filter`, `None` for calls that never concern events.
     pub fn record(&self, call: u32, filter: bool) -> Option<CallRecord> {
         let (ast, src) = (self.ast, self.src);
         let ExprKind::Call(callee_expr, arg_exprs) = ast.kind(call) else { return None };
@@ -1028,7 +950,6 @@ impl<'a> Analysis<'a> {
         }
     }
 
-    /// A function passed by name: a local function, a local closure, or a global function of the file.
     fn function_ref(&self, name: u32) -> Option<Arg> {
         let ast = self.ast;
         let decl = ast.decl_of(name);
@@ -1048,7 +969,6 @@ impl<'a> Analysis<'a> {
         Some(Arg::FunctionRef { params: func.params.len(), vararg: func.vararg })
     }
 
-    /// The literal start of a concatenation computed at runtime: `shop:` for `'shop:' .. name`.
     fn literal_prefix(&self, e: u32, env: &Env) -> String {
         fn flatten(ast: &Ast, e: u32, out: &mut Vec<u32>) {
             let e = ast.unparen(e);
@@ -1076,7 +996,6 @@ impl<'a> Analysis<'a> {
         prefix
     }
 
-    /// The first call of a parameter of named function `function` inside `closure`, with the inputs of each argument.
     fn callback_of(&self, closure: u32, function: u32) -> Option<CallbackCall> {
         let ast = self.ast;
         let fenv = self.env_of(function);
@@ -1109,7 +1028,6 @@ fn is_relevant(args: &[Arg], in_function: bool, path: &str) -> bool {
         })
 }
 
-/// The facts of a Lua file.
 pub fn facts(src: &Source) -> FileFacts {
     let ast = super::ast::parse(src);
     Analysis::new(src, &ast).facts()

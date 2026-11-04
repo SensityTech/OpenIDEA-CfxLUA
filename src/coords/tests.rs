@@ -1,5 +1,3 @@
-//! Acceptance tests of the coordinates toolbox.
-
 use super::*;
 use crate::natives::{Native, Param};
 use crate::project::Side;
@@ -83,7 +81,6 @@ impl Run {
     }
 }
 
-/// `text` with the caret inside, after the intention `title`.
 fn converted(text: &str, title: &str) -> String {
     run(&format!("local c = {text}")).apply(title).trim_start_matches("local c = ").to_owned()
 }
@@ -278,7 +275,6 @@ fn manifests_are_not_checked() {
     assert!(r.feature.problems(&r.fx.cx(&doc)).is_empty());
 }
 
-/// Runs the convert command on `text` with the selection `[from, to)` (byte offsets of ASCII text on one line).
 fn command(text: &str, from: &str, to: &str, arg: Option<&str>) -> (CommandResult, String) {
     let mock = openidea_plugin::mock::MockHost::install();
     let fx = Fixture::new(&[("res/fxmanifest.lua", FIVEM), (CLIENT, text)]).with_natives(catalog());

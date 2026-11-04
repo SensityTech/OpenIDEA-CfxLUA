@@ -1,13 +1,9 @@
-//! The text edits of the manifest quick fixes, as `(start, end, new text)`
-//! byte edits of the manifest text.
-
 use super::view::{Decl, View};
 use crate::lua::Source;
 use crate::project::Value;
 
 pub type Edit = (usize, usize, String);
 
-/// Adds `line` after the last statement named one of `after`, else before the first statement, else at the end.
 pub fn add_directive(src: &Source, view: &View, line: &str, after: &[&str]) -> Edit {
     let text = &src.text;
     if let Some(anchor) = view.decls.iter().rev().find(|d| d.statement && after.contains(&d.name())) {
@@ -21,7 +17,6 @@ pub fn add_directive(src: &Source, view: &View, line: &str, after: &[&str]) -> E
     (text.len(), text.len(), format!("{sep}{line}\n"))
 }
 
-/// Removes a directive, with its line when nothing else is on it.
 pub fn remove_statement(text: &str, d: &Decl) -> Edit {
     let (start, end) = (d.entry.start, d.entry.end);
     let line_start = text[..start].rfind('\n').map_or(0, |i| i + 1);
@@ -38,7 +33,6 @@ pub fn replace_statement(d: &Decl, line: &str) -> Edit {
     (d.entry.start, d.entry.end, line.to_owned())
 }
 
-/// Replaces a string literal with `value`, in the literal's quotes.
 pub fn replace_value(text: &str, v: &Value, value: &str) -> Edit {
     let q = if text[v.start..].starts_with('"') { '"' } else { '\'' };
     (v.start, v.end, format!("{q}{value}{q}"))
@@ -48,7 +42,6 @@ pub fn rename(d: &Decl, name: &str) -> Edit {
     (d.entry.name_start, d.entry.name_end, name.to_owned())
 }
 
-/// Applies byte edits (non-overlapping) to `text`.
 pub fn apply(text: &str, edits: &[Edit]) -> String {
     let mut sorted: Vec<&Edit> = edits.iter().collect();
     sorted.sort_by_key(|e| std::cmp::Reverse(e.0));
@@ -59,7 +52,6 @@ pub fn apply(text: &str, edits: &[Edit]) -> String {
     out
 }
 
-/// The single edit turning `old` into `new` (common prefix and suffix kept), `None` when equal.
 pub fn minimal(old: &str, new: &str) -> Option<Edit> {
     if old == new {
         return None;

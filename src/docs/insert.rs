@@ -1,11 +1,7 @@
-//! The insert actions: the text of the original's live templates with every
-//! placeholder at its default, put at the caret of the window's active editor.
-
 use super::data::{BuiltinEvent, Directive, SyntaxFeature};
 use crate::natives::Native;
 use openidea_plugin::{Error, Invocation, TextEdit};
 
-/// `local retval, groundZ = GetGroundZFor_3dCoord(x, y, z, ignoreWater)` (varargs left out).
 pub fn native_call(n: &Native) -> String {
     let args: Vec<&str> = n.lua_params().filter(|p| !p.is_vararg()).map(|p| p.name.as_str()).collect();
     let call = format!("{}({})", n.lua_name, args.join(", "));
@@ -16,15 +12,12 @@ pub fn native_call(n: &Native) -> String {
     format!("local {} = {call}", returns.join(", "))
 }
 
-/// `AddEventHandler('name', function(params)` + an indented empty line + `end)`,
-/// later lines indented like the caret's line; `RegisterNetEvent` for the network variant.
 pub fn handler(e: &BuiltinEvent, network: bool, indent: &str) -> String {
     let function = if network { "RegisterNetEvent" } else { "AddEventHandler" };
     let params: Vec<&str> = e.params.iter().map(|p| p.name.as_str()).collect();
     format!("{function}('{}', function({})\n{indent}    \n{indent}end)", e.name, params.join(", "))
 }
 
-/// The directive's example, else `name {\n}` (lists) / `name ''`.
 pub fn directive(d: &Directive) -> String {
     if !d.example.trim().is_empty() {
         d.example.clone()
@@ -39,9 +32,6 @@ pub fn example(f: &SyntaxFeature) -> String {
     format!("{}\n", f.example)
 }
 
-/// Replaces the selection (or inserts at the caret) of the window's active
-/// editor with `text(indentation of the caret's line)`, retrying once if the
-/// document changed meanwhile. The file name on success, else what to tell the user.
 pub fn at_caret(inv: &Invocation, text: impl Fn(&str) -> String) -> Result<String, String> {
     let editor =
         inv.editor().ok_or_else(|| "Open a file in the editor first: the text is inserted at its caret.".to_owned())?;

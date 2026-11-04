@@ -1,11 +1,3 @@
-//! CfxLua syntax checks: what the Cfx.re runtime accepts or silently misreads.
-//!
-//! The IDE's Lua tooling (tree-sitter, lua-language-server) does not know
-//! CfxLua, so the plugin's own lexer and [`tree`] are the source of truth:
-//! compound assignment to `<const>` / `<close>` locals, `<close>` in an `in`
-//! unpacking, `^=` (XOR), `i--` (a comment), and the operators of other
-//! languages people type (`++`, `!=`, `!x`, `&&`, `||`, `//=`, `%=`, `..=`).
-
 pub mod scope;
 pub mod tree;
 
@@ -30,7 +22,6 @@ impl Feature for SyntaxFeature {
     }
 }
 
-/// Every syntax problem of a Lua source, in source order.
 pub fn check(src: &Source) -> Vec<Problem> {
     let tree = Tree::new(src);
     let scopes = Scopes::new(src, &tree);
@@ -64,7 +55,6 @@ pub fn check(src: &Source) -> Vec<Problem> {
     out
 }
 
-/// Source text of token span `s`.
 fn text_of(src: &Source, (a, b): Span) -> &str {
     let (s, e) = src.span(a, b);
     &src.text[s..e]
@@ -135,7 +125,6 @@ fn compound(src: &Source, scopes: &Scopes, s: &Stmt, target: Span, op: usize, va
     }
 }
 
-/// Whether an expression has operators at its top level (it needs parentheses as an operand).
 fn needs_parens(src: &Source, (a, b): Span) -> bool {
     let mut i = a;
     while i < b {
@@ -157,13 +146,11 @@ fn needs_parens(src: &Source, (a, b): Span) -> bool {
     false
 }
 
-/// Index of the code token starting at byte `start`.
 fn code_index(src: &Source, start: usize) -> Option<usize> {
     let i = src.toks.partition_point(|t| t.start < start);
     (src.toks.get(i)?.start == start).then_some(i)
 }
 
-/// `i--`, `t.n--`, `t[1]--`: a line comment right after a variable.
 fn decrements(src: &Source, scopes: &Scopes, stmts: &[&Stmt], out: &mut Vec<Problem>) {
     for (ai, c) in src.all.iter().enumerate() {
         if c.kind != Tok::LineComment || ai == 0 {
@@ -224,7 +211,6 @@ fn decrements(src: &Source, scopes: &Scopes, stmts: &[&Stmt], out: &mut Vec<Prob
     }
 }
 
-/// `i++` and `++i`.
 fn increments(src: &Source, stmts: &[&Stmt], out: &mut Vec<Problem>) {
     for (k, t) in src.toks.iter().enumerate() {
         if !t.is_op(&src.text, "++") {
@@ -265,7 +251,6 @@ fn increments(src: &Source, stmts: &[&Stmt], out: &mut Vec<Problem>) {
     }
 }
 
-/// `!=`, `!x`, `&&`, `||`.
 fn operators(src: &Source, out: &mut Vec<Problem>) {
     let mut k = 0;
     while k < src.toks.len() {
@@ -312,13 +297,11 @@ mod tests {
     use crate::lua::lexer::tokenize;
     use crate::testing::Fixture;
 
-    /// `text of the range: message` of each problem.
     fn problems(text: &str) -> Vec<String> {
         let src = Source::new(text);
         check(&src).iter().map(|p| format!("{}: {}", &text[p.start..p.end], p.message)).collect()
     }
 
-    /// The text after applying the fix titled `title`.
     fn fixed(text: &str, title: &str) -> String {
         let src = Source::new(text);
         let problems = check(&src);

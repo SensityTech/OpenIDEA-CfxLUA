@@ -1,28 +1,19 @@
-//! Coordinate expressions of the source — `vector3(…)`, `{x = …, y = …, z = …}`,
-//! `{1.0, 2.0, 3.0}` — and the number helpers of the conversions.
-
 use crate::lua::Source;
 use crate::perf::ast::{Ast, ExprKind, FieldKey, Node, StatKind};
 use crate::perf::classify::lua_number;
 
-/// How a coordinate is written.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Form {
-    /// `vector3(x, y, z)`, `vec4(x, y, z, w)`, `vector(x, y, z)`.
     Vector,
-    /// `{x = 1.0, y = 2.0, z = 3.0}`, with an optional `w`, `h` or `heading` field.
     Keyed,
-    /// `{1.0, 2.0, 3.0}`: number literals only.
     Array,
 }
 
-/// A coordinate expression and its components in x, y, z (, heading) order.
 #[derive(Clone, Debug)]
 pub struct Coord {
     pub expr: usize,
     pub form: Form,
     pub components: Vec<usize>,
-    /// The constructor called, for vectors.
     pub constructor: Option<String>,
 }
 
@@ -31,18 +22,15 @@ impl Coord {
         self.components.iter().map(|&c| ast.text(src, Node::Expr(c))).collect()
     }
 
-    /// The number literal (sign included) of each component, `None` for computed ones.
     pub fn number_texts(&self, ast: &Ast, src: &Source) -> Vec<Option<String>> {
         self.components.iter().map(|&c| ast.number_text(src, c)).collect()
     }
 
-    /// The value of every component, `None` when one is computed.
     pub fn values(&self, ast: &Ast, src: &Source) -> Option<Vec<f64>> {
         self.number_texts(ast, src).into_iter().map(|t| parse_number(&t?)).collect()
     }
 }
 
-/// `e` as a coordinate expression.
 pub fn analyze(ast: &Ast, src: &Source, e: usize) -> Option<Coord> {
     match &ast.exprs[e].kind {
         ExprKind::Call { callee, method: None, args } => {
@@ -101,7 +89,6 @@ pub fn analyze(ast: &Ast, src: &Source, e: usize) -> Option<Coord> {
     }
 }
 
-/// The name of a table field: `name = …` or `["name"] = …`.
 fn field_name(ast: &Ast, src: &Source, key: &FieldKey) -> Option<String> {
     match key {
         FieldKey::Named(n) => Some(n.clone()),
@@ -112,7 +99,6 @@ fn field_name(ast: &Ast, src: &Source, key: &FieldKey) -> Option<String> {
     }
 }
 
-/// The innermost coordinate expression around byte `at` (or just before it), up to the enclosing statement.
 pub fn find_at(ast: &Ast, src: &Source, at: usize) -> Option<Coord> {
     nodes_at(ast, src, at).into_iter().find_map(|start| {
         let mut n = Some(start);
@@ -132,7 +118,6 @@ pub fn find_at(ast: &Ast, src: &Source, at: usize) -> Option<Coord> {
     })
 }
 
-/// The nodes holding byte `at` and byte `at - 1` (a caret right after `)` or `}`).
 pub fn nodes_at(ast: &Ast, src: &Source, at: usize) -> Vec<Node> {
     let mut out = Vec::new();
     for a in [Some(at), at.checked_sub(1)].into_iter().flatten() {
@@ -159,7 +144,6 @@ pub fn nodes_at(ast: &Ast, src: &Source, at: usize) -> Vec<Node> {
     out
 }
 
-/// The name `e` is stored under: its table key, or the local / variable / field it is assigned to.
 pub fn name_context(ast: &Ast, src: &Source, e: usize) -> Option<String> {
     match ast.parent(Node::Expr(e))? {
         Node::Expr(t) => match &ast.exprs[t].kind {
@@ -186,7 +170,6 @@ pub fn name_context(ast: &Ast, src: &Source, e: usize) -> Option<String> {
     }
 }
 
-/// Value of a (negated) Lua number literal text.
 pub fn parse_number(text: &str) -> Option<f64> {
     match text.strip_prefix('-') {
         Some(body) => lua_number(body).map(|v| -v),
@@ -194,7 +177,6 @@ pub fn parse_number(text: &str) -> Option<f64> {
     }
 }
 
-/// Decimals of a decimal literal (`-1.234` has 3); `None` for exponents and hexadecimal numbers.
 pub fn decimals(text: &str) -> Option<usize> {
     if text.contains(['e', 'E', 'x', 'X']) {
         return None;
@@ -202,7 +184,6 @@ pub fn decimals(text: &str) -> Option<usize> {
     Some(text.find('.').map_or(0, |d| text.len() - d - 1))
 }
 
-/// A decimal literal rounded half up to `decimals`, keeping one decimal: `12.3456` → `12.35`, `7.96` → `8.0`.
 pub fn round(text: &str, decimals: usize) -> String {
     let (negative, body) = match text.strip_prefix('-') {
         Some(b) => (true, b),
@@ -238,7 +219,6 @@ pub fn round(text: &str, decimals: usize) -> String {
     if frac.is_empty() { format!("{sign}{int}.0") } else { format!("{sign}{int}.{frac}") }
 }
 
-/// The JSON spelling of a decimal Lua literal (plain notation, `0.0` for zero); `None` for hexadecimal numbers.
 pub fn json_number(text: &str) -> Option<String> {
     if text.contains(['x', 'X']) {
         return None;
@@ -277,7 +257,6 @@ pub fn json_number(text: &str) -> Option<String> {
     Some(if f.is_empty() { format!("{sign}{i}") } else { format!("{sign}{i}.{f}") })
 }
 
-/// The constructor holding `size` components in the family of `original` (`vec3` → `vec4`).
 pub fn constructor_for(original: Option<&str>, size: usize) -> String {
     match original {
         Some("vec3" | "vec4") => format!("vec{size}"),
@@ -286,7 +265,6 @@ pub fn constructor_for(original: Option<&str>, size: usize) -> String {
     }
 }
 
-/// Whether parameters `i`, `i + 1`, `i + 2` are x, y and z of a point: their names only differ by the axis letter.
 pub fn is_xyz_at(names: &[String], i: usize) -> bool {
     let (Some(a), Some(b), Some(c)) = (names.get(i), names.get(i + 1), names.get(i + 2)) else { return false };
     let (a, b, c) = (a.as_bytes(), b.as_bytes(), c.as_bytes());
@@ -298,7 +276,6 @@ pub fn is_xyz_at(names: &[String], i: usize) -> bool {
     a[k].eq_ignore_ascii_case(&b'x') && b[k].eq_ignore_ascii_case(&b'y') && c[k].eq_ignore_ascii_case(&b'z')
 }
 
-/// Whether a parameter named `name` takes a heading.
 pub fn is_heading_name(name: Option<&String>) -> bool {
     name.is_some_and(|n| ["heading", "h", "w", "yaw"].contains(&n.to_ascii_lowercase().as_str()))
 }

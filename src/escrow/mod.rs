@@ -1,13 +1,3 @@
-//! Asset Escrow: which files are encrypted, checks, the pre-upload report.
-//!
-//! In a resource that uses escrow (it declares `escrow_ignore` or holds a
-//! `.fxap` key; every resource with `escrow.assumeEscrow`): a hint at the top
-//! of each Lua file says whether escrow encrypts it (the Project view badges
-//! of the original are not possible), the manifest reports the configuration
-//! and translation files escrow would encrypt and the scripts it cannot
-//! protect, and Lua files report the files they load at runtime that escrow
-//! would encrypt. Files escrow already encrypted (`FXAP…`) get a notice only.
-
 mod check;
 mod edits;
 mod rules;
@@ -24,11 +14,8 @@ use rules::{Load, Status};
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-/// Settings keys.
 pub mod keys {
-    /// Show whether escrow encrypts each Lua file (a hint at the top of the file).
     pub const SHOW_STATUS: &str = "escrow.showStatus";
-    /// Treat every resource as escrowed.
     pub const ASSUME_ESCROW: &str = "escrow.assumeEscrow";
 }
 
@@ -43,22 +30,18 @@ const SCRIPT_DIRECTIVES: [&str; 6] =
 
 #[derive(Default)]
 pub struct EscrowFeature {
-    /// The runtime loads of each Lua file that has some (for the manifest's "add every pattern" action).
     loads: RefCell<HashMap<String, Vec<Load>>>,
 }
 
-/// `Add 'x' to escrow_ignore`.
 fn add_title(pattern: &str) -> String {
     format!("Add '{pattern}' to escrow_ignore")
 }
 
-/// The resource `cx`'s document belongs to, when escrow applies to it.
 fn escrow_resource<'a>(cx: &Ctx<'a>) -> Option<&'a Resource> {
     let res = cx.ws.resource_of(&cx.doc.path)?;
     (cx.settings.bool(keys::ASSUME_ESCROW, false) || rules::uses_escrow(cx.ws, res)).then_some(res)
 }
 
-/// Whether `path` is the manifest FXServer reads in its folder (not a `__resource.lua` beside an `fxmanifest.lua`).
 fn is_main_manifest(ws: &Workspace, path: &str) -> bool {
     !file_name(path).eq_ignore_ascii_case("__resource.lua") || !ws.exists(&format!("{}/fxmanifest.lua", parent(path)))
 }
@@ -131,8 +114,6 @@ impl Feature for EscrowFeature {
 }
 
 impl EscrowFeature {
-    /// The patterns the pre-upload check would add: encrypted configuration and
-    /// translation files, then encrypted files loaded at runtime (distinct, in that order).
     fn patterns(&self, ws: &Workspace, res: &Resource) -> Vec<String> {
         let files = rules::files_of(ws, res);
         let mut out: Vec<String> = rules::editable_groups(&files).into_iter().map(|(p, _)| p).collect();
@@ -150,7 +131,6 @@ impl EscrowFeature {
     }
 }
 
-/// Configuration and translation files escrow would encrypt, one problem per `escrow_ignore` pattern to add.
 fn editable_files(cx: &Ctx, res: &Resource, view: &View, out: &mut Vec<Problem>) {
     let text = cx.doc.text();
     let files = rules::files_of(cx.ws, res);
@@ -189,7 +169,6 @@ fn editable_files(cx: &Ctx, res: &Resource, view: &View, out: &mut Vec<Problem>)
     }
 }
 
-/// JavaScript and C# scripts, which escrow ships as they are.
 fn unprotected_scripts(view: &View, out: &mut Vec<Problem>) {
     for v in view.decls.iter().filter(|d| SCRIPT_DIRECTIVES.contains(&d.name())).flat_map(|d| d.values()) {
         if v.text.starts_with('@') {
@@ -204,7 +183,6 @@ fn unprotected_scripts(view: &View, out: &mut Vec<Problem>) {
     }
 }
 
-/// Files of the resource the document loads at runtime that escrow would encrypt.
 fn loaded_files(cx: &Ctx, res: &Resource, out: &mut Vec<Problem>) {
     let manifest_path = res.manifest_path();
     let manifest = cx.ws.text(&manifest_path);
@@ -237,7 +215,6 @@ mod tests {
     use crate::testing::Fixture;
     use serde_json::Value;
 
-    /// Problems of `rel` (code, severity, message, highlighted text).
     fn problems(fx: &Fixture, rel: &str) -> Vec<(&'static str, Severity, String, String)> {
         let doc = fx.doc(rel);
         let feature = EscrowFeature::default();

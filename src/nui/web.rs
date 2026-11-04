@@ -1,14 +1,7 @@
-//! Facts of a web file (JavaScript, TypeScript, JSX, Vue, Svelte, HTML
-//! scripts) about the NUI bridge, read from its tokens: callback URLs, calls
-//! with constant names, wrappers (`fetchNui`, `useNuiEvent`), message
-//! listeners, JS client script registrations, imports. They depend on the
-//! file only; wrappers and imports are resolved project-wide by the bridge.
-
 use super::bridge::{At, WrapKind};
 use super::js::{Kind, Tok, tokenize};
 use crate::lua::Source;
 
-/// `https://${GetParentResourceName()}/close`; `host`: the resource named, `None` for the page's own.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Url {
     pub name: String,
@@ -16,7 +9,6 @@ pub struct Url {
     pub host: Option<String>,
 }
 
-/// `fetchNui('close')`, `api.post('close')`; `receiver`: `?` for an expression, `None` for a plain call.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Call {
     pub callee: String,
@@ -26,9 +18,6 @@ pub struct Call {
     pub at: At,
 }
 
-/// A function forwarding its parameter `param` as a callback name (it builds
-/// the URL from it) or a message name (its listener compares the message to
-/// it, through `field`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Wrapper {
     pub kind: WrapKind,
@@ -38,7 +27,6 @@ pub struct Wrapper {
     pub field: Option<String>,
 }
 
-/// Function `name` passes its parameter `param` as argument `arg` of a call.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Forward {
     pub name: String,
@@ -49,7 +37,6 @@ pub struct Forward {
     pub arg: usize,
 }
 
-/// `case 'open':`, `event.data.action === 'open'`; `field` is the compared field.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Listen {
     pub field: String,
@@ -57,7 +44,6 @@ pub struct Listen {
     pub at: At,
 }
 
-/// `RegisterNuiCallbackType('close')` in a JavaScript client script.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Registration {
     pub name: String,
@@ -72,11 +58,8 @@ pub struct Facts {
     pub forwards: Vec<Forward>,
     pub listens: Vec<Listen>,
     pub registrations: Vec<Registration>,
-    /// The file uses `import` / `export`.
     pub module: bool,
-    /// Local binding → imported name (`default`, `*` for a namespace), later ones overriding.
     pub imports: Vec<(String, String)>,
-    /// Callbacks registered with names computed at runtime.
     pub dynamic: usize,
 }
 
@@ -89,7 +72,6 @@ fn set_import(imports: &mut Vec<(String, String)>, local: String, imported: Stri
 
 const MARKUP: &[&str] = &["vue", "svelte", "html", "htm"];
 
-/// Runtime functions registering a NUI callback from a JavaScript client script.
 const REGISTER_FUNCTIONS: &[&str] =
     &["RegisterNuiCallbackType", "RegisterNUICallback", "RegisterNuiCallback", "RegisterRawNuiCallback"];
 pub const NUI_EVENT_PREFIX: &str = "__cfx_nui:";
@@ -113,7 +95,6 @@ const TYPE_PUNCTUATION: &[&str] =
     &[",", ".", "[", "]", "{", "}", "(", ")", ":", ";", "|", "&", "?", "=>", "=", "...", "<", ">", "?."];
 const DECLARATIONS: &[&str] = &["const", "let", "var"];
 
-/// Identifiers that are not names.
 const KEYWORDS: &[&str] = &[
     "if",
     "for",
@@ -157,7 +138,6 @@ const KEYWORDS: &[&str] = &[
     "debugger",
 ];
 
-/// The script ranges of a file with extension `ext`: the whole text, or its `<script>` blocks.
 pub fn script_ranges(text: &str, ext: &str) -> Vec<(usize, usize)> {
     if !MARKUP.contains(&ext.to_ascii_lowercase().as_str()) {
         return vec![(0, text.len())];
@@ -180,7 +160,6 @@ pub fn script_ranges(text: &str, ext: &str) -> Vec<(usize, usize)> {
     out
 }
 
-/// End of the next `<script\b[^>]*>` from `from` (lowercase text).
 fn script_open(lower: &str, mut from: usize) -> Option<usize> {
     loop {
         let at = from + lower.get(from..)?.find("<script")?;
@@ -193,7 +172,6 @@ fn script_open(lower: &str, mut from: usize) -> Option<usize> {
     }
 }
 
-/// Start and end of the next `</script\s*>` from `from` (lowercase text).
 fn script_close(lower: &str, mut from: usize) -> Option<(usize, usize)> {
     loop {
         let at = from + lower.get(from..)?.find("</script")?;
@@ -208,7 +186,6 @@ fn script_close(lower: &str, mut from: usize) -> Option<(usize, usize)> {
     }
 }
 
-/// Whether a file looks generated (a minified bundle): it would duplicate the sources.
 pub fn is_generated(file_name: &str, text: &str) -> bool {
     if file_name.to_ascii_lowercase().ends_with(".min.js") || text.len() > 3_000_000 {
         return true;
@@ -218,7 +195,6 @@ pub fn is_generated(file_name: &str, text: &str) -> bool {
     long && text.len() / lines > 200
 }
 
-/// The facts of a web file with extension `ext`.
 pub fn scan(src: &Source, ext: &str) -> Facts {
     let mut facts = Facts::default();
     for (from, to) in script_ranges(&src.text, ext) {
@@ -239,26 +215,19 @@ pub fn scan(src: &Source, ext: &str) -> Facts {
     facts
 }
 
-/// A function of the analysed script.
 #[derive(Clone, Debug)]
 struct JsFn {
     name: Option<String>,
     container: Option<String>,
-    /// `None` for a destructured parameter.
     params: Vec<Option<String>>,
-    /// First token (its `async`, `function` or parameters).
     head: usize,
     body_start: usize,
-    /// Inclusive.
     body_end: usize,
 }
 
-/// A piece of a string computed from literals and values.
 #[derive(Clone, Debug)]
 enum Piece {
-    /// Its text and the offset of its first character, when written as is.
     Lit(String, Option<usize>),
-    /// `GetParentResourceName()`.
     Resource,
     Param(usize, usize),
     Dynamic,
@@ -268,7 +237,6 @@ struct Analysis<'a> {
     text: &'a str,
     t: &'a [Tok],
     pair: Vec<Option<usize>>,
-    /// Innermost `{` enclosing each token.
     brace: Vec<Option<usize>>,
     fns: Vec<JsFn>,
 }
@@ -293,7 +261,6 @@ impl<'a> Analysis<'a> {
         self.t.get(i).is_some_and(|t| t.is_punct(self.text, p))
     }
 
-    /// `punct` at `i - d` (false before the start).
     fn punct_back(&self, i: usize, d: usize, p: &str) -> bool {
         i >= d && self.punct(i - d, p)
     }
@@ -423,7 +390,6 @@ impl<'a> Analysis<'a> {
         self.fns.push(JsFn { name, container, params, head, body_start, body_end });
     }
 
-    /// `name(params) {` in a class body or an object literal.
     fn method(&mut self, i: usize) {
         if i > 0 {
             let prev = &self.t[i - 1];
@@ -483,7 +449,6 @@ impl<'a> Analysis<'a> {
             || self.ident(p, "default")
     }
 
-    /// The class name (empty for an anonymous class) when the `{` at `open` is a class body.
     fn class_before(&self, open: usize) -> Option<String> {
         let mut q = open;
         while q > 0 && q > open.saturating_sub(MAX_TYPE_TOKENS - 1) {
@@ -501,7 +466,6 @@ impl<'a> Analysis<'a> {
         None
     }
 
-    /// Name of the class or object literal opened at `open`.
     fn owner_of(&self, open: usize) -> Option<String> {
         if let Some(c) = self.class_before(open) {
             return (!c.is_empty()).then_some(c);
@@ -516,7 +480,6 @@ impl<'a> Analysis<'a> {
         None
     }
 
-    /// The name a function expression starting at `head` gets: `const f = …`, `obj.f = …`, `{ f: … }`.
     fn name_from_context(&self, head: usize) -> Option<(Option<String>, Option<String>)> {
         let p = head.checked_sub(1)?;
         if self.punct(p, "=") {
@@ -531,7 +494,6 @@ impl<'a> Analysis<'a> {
         None
     }
 
-    /// `name =`, `obj.name =`, `const name: Type =` before the `=` at `eq`.
     fn name_before_assign(&self, eq: usize) -> Option<(Option<String>, Option<String>)> {
         let k = eq.checked_sub(1)?;
         if self.is_name(k) {
@@ -562,7 +524,6 @@ impl<'a> Analysis<'a> {
         None
     }
 
-    /// Parameter names between `from` and `close` (exclusive), `None` for a destructured one; `this` is not one.
     fn params(&self, from: usize, close: usize) -> Vec<Option<String>> {
         let mut out = Vec::new();
         let mut i = from;
@@ -599,7 +560,6 @@ impl<'a> Analysis<'a> {
         out
     }
 
-    /// Index after the `<…>` starting at `open`, `None` when it is not a type argument list.
     fn skip_generics(&self, open: usize) -> Option<usize> {
         let mut depth = 0usize;
         let mut i = open;
@@ -625,7 +585,6 @@ impl<'a> Analysis<'a> {
         None
     }
 
-    /// The `<` opening the type parameters closed by the `>` at `close`.
     fn generics_start(&self, close: usize) -> Option<usize> {
         let mut depth = 0usize;
         let low = close.checked_sub(MAX_TYPE_TOKENS);
@@ -653,7 +612,6 @@ impl<'a> Analysis<'a> {
         }
     }
 
-    /// The `{` ending a return type annotation starting at `from`.
     fn skip_type_to_brace(&self, from: usize) -> Option<usize> {
         let mut i = from;
         let mut angle = 0isize;
@@ -674,8 +632,6 @@ impl<'a> Analysis<'a> {
         None
     }
 
-    /// End (exclusive) of the expression starting at `start`: a `,` or `;` at its level or a
-    /// closing bracket; with `asi`, also a line starting a new statement.
     fn expression_end(&self, start: usize, asi: bool) -> usize {
         let n = self.t.len();
         let mut i = start;
@@ -702,7 +658,6 @@ impl<'a> Analysis<'a> {
         n
     }
 
-    /// Functions whose body contains token `p`, innermost first.
     fn enclosing(&self, p: usize) -> Vec<usize> {
         let mut out: Vec<usize> =
             (0..self.fns.len()).filter(|&f| (self.fns[f].body_start..=self.fns[f].body_end).contains(&p)).collect();
@@ -710,14 +665,12 @@ impl<'a> Analysis<'a> {
         out
     }
 
-    /// The parameter `name` of a function enclosing token `p`: (function, index).
     fn param_ref(&self, name: &str, p: usize) -> Option<(usize, usize)> {
         self.enclosing(p)
             .into_iter()
             .find_map(|f| self.fns[f].params.iter().position(|q| q.as_deref() == Some(name)).map(|i| (f, i)))
     }
 
-    /// The initializer of `const|let|var name = …` declared before `p`.
     fn initializer(&self, name: &str, p: usize) -> Option<(usize, usize)> {
         let stop = p.saturating_sub(MAX_LOOKBACK);
         for q in (stop..p.min(self.t.len())).rev() {
@@ -765,7 +718,6 @@ impl<'a> Analysis<'a> {
         out
     }
 
-    /// The pieces of the expression `tokens`, read at token `p`.
     fn evaluate(&self, tokens: &[Tok], p: usize, depth: usize) -> Vec<Piece> {
         if tokens.is_empty() || depth > MAX_DEPTH {
             return vec![Piece::Dynamic];
@@ -807,7 +759,6 @@ impl<'a> Analysis<'a> {
         }
     }
 
-    /// Last token of the operand of a `+` concatenation starting at `i`.
     fn operand_end(&self, i: usize) -> usize {
         let mut j = i;
         if self.tok(j).is_some_and(|t| matches!(t.kind, Kind::Str | Kind::Template)) {
@@ -909,7 +860,6 @@ impl<'a> Analysis<'a> {
         f
     }
 
-    /// The receiver of a call whose callee is token `i`.
     fn receiver(&self, i: usize) -> Option<String> {
         if !self.is_member(i) {
             return None;
@@ -918,7 +868,6 @@ impl<'a> Analysis<'a> {
         Some(r.map_or_else(|| "?".to_owned(), |t| t.text(self.text).to_owned()))
     }
 
-    /// The `(` of the call whose callee is the name at token `i` (`name(`, `name<T>(`, `name?.(`).
     fn call_open(&self, i: usize) -> Option<usize> {
         if !self.is_name(i) {
             return None;
@@ -943,7 +892,6 @@ impl<'a> Analysis<'a> {
         Some(open)
     }
 
-    /// `foo(…) {` and `foo(…): T {` on one line: a method definition, not a call.
     fn is_method_definition(&self, close: usize) -> bool {
         let mut k = close + 1;
         if self.punct(k, ":") {
@@ -955,7 +903,6 @@ impl<'a> Analysis<'a> {
         self.punct(k, "{") && !self.t[k].newline
     }
 
-    /// Token ranges of the arguments of the call whose `(` is at `open`.
     fn arguments(&self, open: usize, close: usize) -> Vec<(usize, usize)> {
         let mut out = Vec::new();
         let mut start = open + 1;
@@ -980,7 +927,6 @@ impl<'a> Analysis<'a> {
         out
     }
 
-    /// The functions handling the page's `message` events: `window.onmessage = h`, `addEventListener('message', h)`.
     fn message_handlers(&self) -> Vec<usize> {
         let mut out = Vec::new();
         for i in 0..self.t.len() {
@@ -1009,7 +955,6 @@ impl<'a> Analysis<'a> {
         self.message_handlers().iter().any(|&h| (self.fns[h].body_start..=self.fns[h].body_end).contains(&k))
     }
 
-    /// The handler given at token `start`: a function written there, or a function named there.
     fn handler_at(&self, start: usize, p: usize, range: Option<(usize, usize)>) -> Option<usize> {
         if let Some(f) = self.fns.iter().position(|f| f.head == start) {
             return Some(f);
@@ -1024,7 +969,6 @@ impl<'a> Analysis<'a> {
             .min_by_key(|&f| self.fns[f].head.abs_diff(p))
     }
 
-    /// The pieces of the URL concatenation starting at token `i`.
     fn url(&self, i: usize) -> Vec<Piece> {
         let mut out = self.evaluate(std::slice::from_ref(&self.t[i]), i, 0);
         let mut j = i + 1;
@@ -1102,7 +1046,6 @@ impl<'a> Analysis<'a> {
         f.urls.push(Url { name: name.to_owned(), at, host });
     }
 
-    /// The message names compared in `handler`: `switch (e.data.action) { case 'open': }`, `data.action === 'open'`.
     fn listeners(&self, handler: usize, src: &Source, f: &mut Facts) {
         let h = &self.fns[handler];
         for q in h.body_start..=h.body_end.min(self.t.len().saturating_sub(1)) {
@@ -1146,7 +1089,6 @@ impl<'a> Analysis<'a> {
         }
     }
 
-    /// The field ending the member chain whose last token is `k`: `action` in `event.data.action`.
     fn field_before(&self, k: usize) -> Option<String> {
         let tk = self.tok(k).filter(|t| t.kind == Kind::Ident)?;
         let member = self.is_member(k);
@@ -1162,7 +1104,6 @@ impl<'a> Analysis<'a> {
         (member || !KEYWORDS.contains(&text)).then(|| text.to_owned())
     }
 
-    /// The field ending the member chain starting at `k`.
     fn field_after(&self, k: usize) -> Option<String> {
         if !self.is_name(k) && !self.ident(k, "this") {
             return None;
@@ -1180,7 +1121,6 @@ impl<'a> Analysis<'a> {
         Some(self.txt(j).to_owned())
     }
 
-    /// `other === name`: the parameter `k` after the comparison `q`.
     fn hook_param(&self, k: usize, q: usize, handler: usize) -> Option<Wrapper> {
         if !self.is_name(k) || [".", "?.", "(", "["].iter().any(|p| self.punct(k + 1, p)) {
             return None;
@@ -1188,7 +1128,6 @@ impl<'a> Analysis<'a> {
         self.hook(self.txt(k), q, handler, self.compared_field_before(q - 1, q))
     }
 
-    /// `name === other`: the parameter `k` before the comparison `q`.
     fn hook_param_before(&self, k: usize, q: usize, handler: usize) -> Option<Wrapper> {
         if !self.is_name(k) || self.is_member(k) {
             return None;
@@ -1211,7 +1150,6 @@ impl<'a> Analysis<'a> {
         })
     }
 
-    /// The field the operand ending at `k` reads: `action` for `e.data.action`, or for a local holding it.
     fn compared_field_before(&self, k: usize, q: usize) -> Option<String> {
         let tk = self.tok(k).filter(|t| t.kind == Kind::Ident)?;
         if self.is_member(k) {
@@ -1231,8 +1169,6 @@ impl<'a> Analysis<'a> {
         self.field_after(k)
     }
 
-    /// The field a local `name` declared before `p` holds: `const { action: kind } = e.data`,
-    /// `const { action } = e.data`, `const kind = e.data.action` give `action`.
     fn local_field(&self, name: &str, p: usize) -> Option<String> {
         let stop = p.saturating_sub(MAX_LOOKBACK);
         for q in (stop..p.min(self.t.len())).rev() {
@@ -1347,7 +1283,6 @@ fn listen(field: String, value: &Tok, src: &Source, f: &mut Facts) {
     f.listens.push(Listen { field, name: name.to_owned(), at: At::new(src, start, name.len(), plain, value.end) });
 }
 
-/// `pair` of each bracket token and the innermost `{` enclosing each token.
 fn brackets(text: &str, t: &[Tok]) -> (Vec<Option<usize>>, Vec<Option<usize>>) {
     let mut pair = vec![None; t.len()];
     let mut brace = vec![None; t.len()];
@@ -1415,7 +1350,6 @@ fn starts_url(tk: &Tok) -> bool {
     })
 }
 
-/// Length of a leading `http://` / `https://` (any case).
 fn scheme(s: &str) -> Option<usize> {
     let l = s.get(..8).unwrap_or(s).to_ascii_lowercase();
     if l.starts_with("https://") {
@@ -1431,8 +1365,6 @@ fn host_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_' || c == '-'
 }
 
-/// `https?://(\x01|[A-Za-z0-9_-]+)/([^/?#]*)([?#].*)?` matched on the whole of `s`: the host and the
-/// byte range of the name.
 fn match_url(s: &str) -> Option<(String, (usize, usize))> {
     let h = scheme(s)?;
     let rest = &s[h..];
@@ -1452,18 +1384,13 @@ fn match_url(s: &str) -> Option<(String, (usize, usize))> {
     Some((rest[..host_len].to_owned(), (from, to)))
 }
 
-/// A place of a web file naming a callback or a message, found from its text.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Slot {
-    /// The name of a callback URL; `host`: the resource it names, `None` for `${GetParentResourceName()}`.
     Url { host: Option<String> },
-    /// A message name compared by a listener.
     Message,
-    /// Argument `arg` of `receiver.callee(…)`.
     Argument { callee: String, receiver: Option<String>, arg: usize },
 }
 
-/// The slot at byte `offset` of a web file and the start of the typed prefix.
 pub fn slot_at(text: &str, ext: &str, offset: usize, keys: &[String]) -> Option<(Slot, usize)> {
     let (from, to) = script_ranges(text, ext).into_iter().find(|(a, b)| *a <= offset && offset <= *b)?;
     let tokens = tokenize(text, from, to);
@@ -1522,7 +1449,6 @@ fn content_end(text: &str, t: &Tok) -> usize {
     if closed { t.end - 1 } else { t.end }
 }
 
-/// The field a `switch` compares, for a `case` value at `k`.
 fn switch_field(text: &str, tokens: &[Tok], pair: &[Option<usize>], k: usize) -> Option<String> {
     for s in (0..k).rev() {
         if !tokens[s].is_ident(text, "switch") || !tokens.get(s + 1).is_some_and(|t| t.is_punct(text, "(")) {
@@ -1541,7 +1467,6 @@ fn switch_field(text: &str, tokens: &[Tok], pair: &[Option<usize>], k: usize) ->
     None
 }
 
-/// The call token `k` is an argument of.
 fn argument(text: &str, tokens: &[Tok], k: usize) -> Option<Slot> {
     let mut depth = 0usize;
     let mut commas = 0;

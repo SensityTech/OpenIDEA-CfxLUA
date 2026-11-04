@@ -1,7 +1,3 @@
-//! The bundled documentation content (`data/docs`): guides, built-in events,
-//! manifest directives and CfxLua syntax features. Parsed once, on first use;
-//! a malformed file gives an empty list (and a log line), never a failure.
-
 use crate::project::{Game, Side};
 use serde::Deserialize;
 use std::sync::OnceLock;
@@ -19,7 +15,6 @@ pub struct Guide {
     pub summary: String,
     #[serde(default)]
     pub keywords: Vec<String>,
-    /// The Markdown text (LF line endings).
     #[serde(skip)]
     pub markdown: String,
 }
@@ -55,22 +50,18 @@ pub struct BuiltinEvent {
 }
 
 impl BuiltinEvent {
-    /// Where the event is raised (`shared` when unknown).
     pub fn side(&self) -> Side {
         Side::parse(&self.side_raw).unwrap_or(Side::Shared)
     }
 
-    /// `None`: every game.
     pub fn game(&self) -> Option<Game> {
         Game::from_manifest(&self.game_raw)
     }
 
-    /// `(resourceName)`, `()`.
     pub fn params_text(&self) -> String {
         format!("({})", self.params.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", "))
     }
 
-    /// Pattern entries (`__cfx_nui:*`) are documentation only.
     pub fn is_pattern(&self) -> bool {
         self.name.contains('*')
     }
@@ -100,7 +91,6 @@ fn string() -> String {
 }
 
 impl Directive {
-    /// `glob list`, `enum`, `path|url`.
     pub fn value_type_text(&self) -> String {
         if self.plural { format!("{} list", self.value_type) } else { self.value_type.clone() }
     }
@@ -121,7 +111,6 @@ pub struct SyntaxFeature {
     pub pitfalls: Vec<String>,
 }
 
-/// Guide Markdown files, by file name.
 const GUIDE_FILES: &[(&str, &str)] = &[
     ("cfxlua-std-extensions.md", include_str!("../../data/docs/guides/cfxlua-std-extensions.md")),
     ("cfxlua-syntax.md", include_str!("../../data/docs/guides/cfxlua-syntax.md")),
@@ -154,7 +143,6 @@ fn parse_list<T: for<'de> Deserialize<'de>>(what: &str, json: &str) -> Vec<T> {
     }
 }
 
-/// The guides, in index order (display order, grouped by category).
 pub fn guides() -> &'static [Guide] {
     static GUIDES: OnceLock<Vec<Guide>> = OnceLock::new();
     GUIDES.get_or_init(|| {
@@ -181,7 +169,6 @@ pub fn guide(id: &str) -> Option<&'static Guide> {
     guides().iter().find(|g| g.id == id)
 }
 
-/// Built-in events (`onResourceStart`, `playerConnecting`…), catalog order.
 pub fn events() -> &'static [BuiltinEvent] {
     static EVENTS: OnceLock<Vec<BuiltinEvent>> = OnceLock::new();
     EVENTS.get_or_init(|| parse_list("events/catalog.json", include_str!("../../data/docs/events/catalog.json")))
@@ -191,7 +178,6 @@ pub fn event(name: &str) -> Option<&'static BuiltinEvent> {
     events().iter().find(|e| e.name == name)
 }
 
-/// Manifest directives, documentation order.
 pub fn directives() -> &'static [Directive] {
     static DIRECTIVES: OnceLock<Vec<Directive>> = OnceLock::new();
     DIRECTIVES.get_or_init(|| {
@@ -203,7 +189,6 @@ pub fn directive(name: &str) -> Option<&'static Directive> {
     directives().iter().find(|d| d.name == name)
 }
 
-/// CfxLua syntax features.
 pub fn syntax_features() -> &'static [SyntaxFeature] {
     static FEATURES: OnceLock<Vec<SyntaxFeature>> = OnceLock::new();
     FEATURES.get_or_init(|| parse_list("syntax/features.json", include_str!("../../data/docs/syntax/features.json")))

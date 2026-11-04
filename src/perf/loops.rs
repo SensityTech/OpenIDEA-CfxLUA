@@ -1,9 +1,3 @@
-//! What a `while` / `repeat` loop does per iteration: how often it runs
-//! (its cost class), whether an iteration can finish without waiting,
-//! whether it only polls state, and which blocks only run near a position.
-//! Function definitions inside a loop are ignored: their code does not run
-//! on each iteration.
-
 use super::ast::{Ast, ExprKind, Node, StatKind};
 use super::classify::{CallInfo, Perf, WaitValue};
 use super::spec::{Work, Yield};
@@ -11,22 +5,17 @@ use std::cell::OnceCell;
 use std::collections::HashSet;
 use std::rc::Rc;
 
-/// How often a loop runs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Cost {
     PerFrame,
-    /// Every frame or slower depending on the state (`Wait(sleep)`).
     Adaptive,
     Throttled,
-    /// Resumes when something happens (`Citizen.Await`).
     EventDriven,
 }
 
-/// A loop waiting one frame per iteration whose work never needs a frame.
 pub struct Polling {
     pub wait: Rc<CallInfo>,
     pub wait_stat: usize,
-    /// The per-frame work only runs inside [`LoopFacts::near_blocks`].
     pub near_only: bool,
 }
 
@@ -42,7 +31,6 @@ pub struct LoopFacts<'p, 'a> {
     near: OnceCell<Vec<usize>>,
 }
 
-/// Whether statement `s` is a `while` or `repeat` loop.
 pub fn is_wait_loop(ast: &Ast, n: Node) -> bool {
     matches!(n, Node::Stat(s) if matches!(ast.stats[s].kind, StatKind::While { .. } | StatKind::Repeat { .. }))
 }
@@ -65,7 +53,6 @@ fn falsy(ast: &Ast, e: usize) -> bool {
     }
 }
 
-/// Condition and body of a `while` / `repeat` loop.
 pub fn loop_parts(ast: &Ast, s: usize) -> Option<(usize, usize, bool)> {
     match ast.stats[s].kind {
         StatKind::While { cond, body } => Some((cond, body, truthy(ast, cond))),
@@ -74,7 +61,6 @@ pub fn loop_parts(ast: &Ast, s: usize) -> Option<(usize, usize, bool)> {
     }
 }
 
-/// Endless loops, and loops on a flag (`while active do`, `repeat … until stopped`).
 pub fn is_long_running(ast: &Ast, s: usize) -> bool {
     let Some((cond, _, endless)) = loop_parts(ast, s) else { return false };
     if endless {
@@ -88,7 +74,6 @@ pub fn is_long_running(ast: &Ast, s: usize) -> bool {
         && ast.calls(Node::Expr(e), &|_| false).is_empty()
 }
 
-/// The loop a `break` leaves.
 fn loop_of(ast: &Ast, brk: usize) -> Option<usize> {
     let mut n = ast.parent(Node::Stat(brk));
     while let Some(x) = n {
@@ -108,7 +93,6 @@ fn loop_of(ast: &Ast, brk: usize) -> Option<usize> {
     None
 }
 
-/// Whether something under `root` leaves loop `lp`: its `break`, a `return` or a `goto`.
 pub fn has_exit_in(ast: &Ast, root: Node, lp: usize) -> bool {
     let mut found = false;
     ast.walk(root, &|_| false, &mut |n| {
@@ -125,7 +109,6 @@ pub fn has_exit_in(ast: &Ast, root: Node, lp: usize) -> bool {
 
 const DISTANCE_NATIVES: &[&str] = &["GetDistanceBetweenCoords", "Vdist", "Vdist2"];
 
-/// `#(a - b)`, a distance native, or a local initialised with one.
 fn is_distance(ast: &Ast, e: usize, depth: usize) -> bool {
     let e = ast.unwrap(e);
     match &ast.exprs[e].kind {
@@ -138,7 +121,6 @@ fn is_distance(ast: &Ast, e: usize, depth: usize) -> bool {
     }
 }
 
-/// `d < r`, `r > d` (also inside an `and`): true only near something.
 fn is_near(ast: &Ast, e: usize, depth: usize) -> bool {
     let e = ast.unwrap(e);
     match &ast.exprs[e].kind {
@@ -150,7 +132,6 @@ fn is_near(ast: &Ast, e: usize, depth: usize) -> bool {
     }
 }
 
-/// `d > r`, `r < d`: true only far from something.
 fn is_far(ast: &Ast, e: usize) -> bool {
     match &ast.exprs[ast.unwrap(e)].kind {
         ExprKind::Binary { op: ">" | ">=", lhs, .. } => is_distance(ast, *lhs, 0),
@@ -159,7 +140,6 @@ fn is_far(ast: &Ast, e: usize) -> bool {
     }
 }
 
-/// Names assigned under `root` (`x = …`, `x += …`), function definitions excluded.
 pub fn assigned_names(ast: &Ast, root: Node) -> HashSet<String> {
     let mut out = HashSet::new();
     ast.walk(root, &|_| false, &mut |n| {
@@ -174,7 +154,6 @@ pub fn assigned_names(ast: &Ast, root: Node) -> HashSet<String> {
     out
 }
 
-/// Names read under `root` (`a`, the `a` of `a.b`).
 pub fn read_names(ast: &Ast, root: Node) -> HashSet<String> {
     let mut out = HashSet::new();
     ast.walk(root, &|_| false, &mut |n| {
@@ -222,14 +201,12 @@ impl<'p, 'a> LoopFacts<'p, 'a> {
         has_exit_in(self.ast(), Node::Block(self.body), self.stat)
     }
 
-    /// Calls of the condition and body in evaluation order, nested loops included.
     pub fn calls(&self) -> &[Rc<CallInfo>] {
         self.calls.get_or_init(|| {
             self.ast().calls(Node::Stat(self.stat), &|_| false).into_iter().map(|c| self.p.info(c)).collect()
         })
     }
 
-    /// Calls of the condition and body, nested `while` / `repeat` loops excluded.
     pub fn own_calls(&self) -> &[Rc<CallInfo>] {
         self.own_calls.get_or_init(|| {
             let ast = self.ast();
@@ -238,7 +215,6 @@ impl<'p, 'a> LoopFacts<'p, 'a> {
         })
     }
 
-    /// Blocks of the body that only run near a position, outermost first.
     pub fn near_blocks(&self) -> &[usize] {
         self.near.get_or_init(|| {
             let mut out = Vec::new();
@@ -275,7 +251,6 @@ impl<'p, 'a> LoopFacts<'p, 'a> {
         self.near_blocks().iter().any(|&b| self.ast().is_ancestor(Node::Block(b), n, false))
     }
 
-    /// How often the loop runs; `None` when it never waits (or only through unknown code).
     pub fn cost(&self) -> Option<Cost> {
         let own = self.own_calls();
         let waits: Vec<&WaitValue> =
@@ -294,12 +269,10 @@ impl<'p, 'a> LoopFacts<'p, 'a> {
         })
     }
 
-    /// No call of the loop can wait (ignoring unknown code).
     pub fn never_yields(&self) -> bool {
         self.calls().iter().all(|c| c.yields() == Yield::None)
     }
 
-    /// An iteration can complete without calling anything that waits.
     pub fn can_spin(&self) -> bool {
         self.flow_block(self.body).falls
     }
@@ -394,7 +367,6 @@ impl<'p, 'a> LoopFacts<'p, 'a> {
         }
     }
 
-    /// `for i = a, b do` with number literals and a positive or missing step.
     fn runs_at_least_once(&self, exprs: &[usize]) -> bool {
         let ast = self.ast();
         if exprs.len() < 2 {
@@ -415,9 +387,6 @@ impl<'p, 'a> LoopFacts<'p, 'a> {
         step > 0.0 && values[0] <= values[1]
     }
 
-    /// A long-running loop whose only wait is a `Wait(0)` statement of its body
-    /// and whose work never needs a frame (or only near a position).
-    /// `declared`: functions the user declared as plain polling.
     pub fn polling(&self, declared: &[String]) -> Option<Polling> {
         if !self.long_running || self.has_exit() {
             return None;

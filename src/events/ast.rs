@@ -1,20 +1,9 @@
-//! A small, error-tolerant Lua parser over the tokens of a [`Source`]: the
-//! expressions, statements and functions the state bag and event analyses
-//! walk, every name resolved lexically to its declaration (locals, local
-//! functions, parameters, loop variables) or left global.
-//!
-//! Nodes live in arenas indexed by `u32`. The nodes of a function body are
-//! allocated while it is parsed, so each function owns a contiguous range of
-//! expressions and statements. A bracket bounds what is parsed inside it, so a
-//! closure missing its `end` stops at the `)` of the call it is passed to.
-
 use crate::lua::Source;
 use crate::lua::lexer::Tok;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-/// No node: a global name, the file as enclosing function.
 pub const NONE: u32 = u32::MAX;
 
 const UNARY_PRIORITY: u8 = 12;
@@ -23,23 +12,18 @@ const UNARY_PRIORITY: u8 = 12;
 pub enum BinOp {
     Or,
     And,
-    /// `== ~= < <= > >=`
     Compare,
     BOr,
     BXor,
     BAnd,
-    /// `<< >>`
     Shift,
     Concat,
-    /// `+ -`
     Additive,
-    /// `* / // %`
     Multiplicative,
     Pow,
 }
 
 impl BinOp {
-    /// Left and right priorities (Lua 5.4).
     fn priority(self) -> (u8, u8) {
         match self {
             Self::Or => (1, 1),
@@ -65,23 +49,16 @@ pub enum UnOp {
     BNot,
 }
 
-/// The suffix of an index expression.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Key {
-    /// `.name` / `?.name` (the name token; `None` while typing `a.`).
     Field(Option<u32>),
-    /// `:name` / `?:name`, the callee of a method call.
     Method(Option<u32>),
-    /// `[expr]` / `?[expr]`.
     Bracket(Option<u32>),
 }
 
-/// A field of a table constructor.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Field {
-    /// `name = value`: the name token.
     pub name: Option<u32>,
-    /// `[key] = value`: the key expression.
     pub key: Option<u32>,
     pub value: u32,
     pub first: u32,
@@ -94,11 +71,8 @@ pub enum ExprKind {
     False,
     Vararg,
     Number,
-    /// `'…'`, `"…"`, `[[…]]`.
     Str,
-    /// `` `name` ``.
     Hash,
-    /// A name and its declaration ([`NONE`]: a global).
     Name(u32),
     Func(u32),
     Table(Vec<Field>),
@@ -106,63 +80,29 @@ pub enum ExprKind {
     Unary(UnOp, u32),
     Binary(BinOp, u32, u32),
     Index(u32, Key),
-    /// Callee and arguments; a method call's callee is an [`Key::Method`] index.
     Call(u32, Vec<u32>),
-    /// Missing or unreadable code (`()`).
     Error,
 }
 
 #[derive(Clone, Debug)]
 pub struct Expr {
     pub kind: ExprKind,
-    /// First and last tokens (indices in `Source::toks`).
     pub first: u32,
     pub last: u32,
-    /// Innermost enclosing function, [`NONE`] at the top level.
     pub func: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StmtKind {
-    /// `local a, b = x, y` / `local a, b in src`.
-    Local {
-        names: Vec<u32>,
-        values: Vec<u32>,
-        unpack: Option<u32>,
-    },
-    LocalFunction {
-        decl: u32,
-        func: u32,
-    },
-    /// `function a.b:c()`: the name (a name or an index chain).
-    Function {
-        target: Option<u32>,
-        func: u32,
-    },
-    /// `a, t.b = x, y` / `a, t.b in src`.
-    Assign {
-        targets: Vec<u32>,
-        values: Vec<u32>,
-        unpack: Option<u32>,
-    },
-    /// `x += 1`: the operator token.
-    Compound {
-        target: u32,
-        op: u32,
-        value: Option<u32>,
-    },
-    /// A call (or an incomplete expression).
+    Local { names: Vec<u32>, values: Vec<u32>, unpack: Option<u32> },
+    LocalFunction { decl: u32, func: u32 },
+    Function { target: Option<u32>, func: u32 },
+    Assign { targets: Vec<u32>, values: Vec<u32>, unpack: Option<u32> },
+    Compound { target: u32, op: u32, value: Option<u32> },
     Expr(u32),
     Return(Vec<u32>),
-    NumFor {
-        var: u32,
-        exprs: Vec<u32>,
-    },
-    GenFor {
-        vars: Vec<u32>,
-        exprs: Vec<u32>,
-    },
-    /// Blocks and jumps: what they contain is in the arenas.
+    NumFor { var: u32, exprs: Vec<u32> },
+    GenFor { vars: Vec<u32>, exprs: Vec<u32> },
     Other,
 }
 
@@ -176,34 +116,25 @@ pub struct Stmt {
 
 #[derive(Clone, Debug)]
 pub struct Func {
-    /// The `function` keyword and the `end` (or the last token read).
     pub first: u32,
     pub last: u32,
-    /// Named parameters (`self` is implicit and never declared).
     pub params: Vec<u32>,
     pub vararg: bool,
-    /// Enclosing function, [`NONE`] at the top level.
     pub parent: u32,
-    /// Ids of the expressions and statements of the body: `[start, end)`.
     pub exprs: (u32, u32),
     pub stmts: (u32, u32),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DeclKind {
-    /// A `local` name and its initializer at the same position (no multi-value expansion).
-    Local {
-        init: Option<u32>,
-    },
+    Local { init: Option<u32> },
     LocalFunction(u32),
-    /// Function and position.
     Param(u32, u32),
     ForVar,
 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct Decl {
-    /// The name token.
     pub tok: u32,
     pub kind: DeclKind,
 }
@@ -253,7 +184,6 @@ impl Ast {
         &self.decls[id as usize]
     }
 
-    /// The expression inside any parentheses.
     pub fn unparen(&self, mut id: u32) -> u32 {
         while let ExprKind::Paren(inner) = self.kind(id) {
             id = *inner;
@@ -261,12 +191,10 @@ impl Ast {
         id
     }
 
-    /// The text of a name expression.
     pub fn name<'s>(&self, src: &'s Source, id: u32) -> Option<&'s str> {
         matches!(self.kind(id), ExprKind::Name(_)).then(|| src.tok_text(self.expr(id).first as usize))
     }
 
-    /// The declaration of a name expression ([`NONE`] for a global or another expression).
     pub fn decl_of(&self, id: u32) -> u32 {
         match self.kind(id) {
             ExprKind::Name(d) => *d,
@@ -274,12 +202,10 @@ impl Ast {
         }
     }
 
-    /// A global name: its text.
     pub fn global<'s>(&self, src: &'s Source, id: u32) -> Option<&'s str> {
         (self.decl_of(id) == NONE).then(|| self.name(src, id)).flatten()
     }
 
-    /// `a`, `a.b.c` (dots only); `None` for anything else.
     pub fn path(&self, src: &Source, id: u32) -> Option<String> {
         match self.kind(id) {
             ExprKind::Name(_) => Some(src.tok_text(self.expr(id).first as usize).to_owned()),
@@ -293,18 +219,15 @@ impl Ast {
         }
     }
 
-    /// Byte span of an expression.
     pub fn span(&self, src: &Source, id: u32) -> (usize, usize) {
         let e = self.expr(id);
         (src.toks[e.first as usize].start, src.toks[e.last as usize].end)
     }
 
-    /// Byte start of an expression.
     pub fn start(&self, src: &Source, id: u32) -> usize {
         src.toks[self.expr(id).first as usize].start
     }
 
-    /// Whether function `inner` is `outer` or nested in it ([`NONE`]: the file holds everything).
     pub fn within(&self, inner: u32, outer: u32) -> bool {
         let mut f = inner;
         loop {
@@ -318,7 +241,6 @@ impl Ast {
         }
     }
 
-    /// Literal expressions (`nil`, booleans, numbers, strings, hashes, `...`).
     pub fn is_literal(&self, id: u32) -> bool {
         matches!(
             self.kind(id),
@@ -332,7 +254,6 @@ impl Ast {
         )
     }
 
-    /// The raw content of a string literal (escapes kept, as written).
     pub fn string(&self, src: &Source, id: u32) -> Option<String> {
         if *self.kind(id) != ExprKind::Str {
             return None;
@@ -341,13 +262,11 @@ impl Ast {
     }
 }
 
-/// The raw content of string token `tok`: the text between its delimiters.
 pub fn raw_string(src: &Source, tok: usize) -> String {
     let (s, e) = src.toks[tok].content_range(&src.text);
     src.text[s..e].to_owned()
 }
 
-/// The parsed tree of `src`, shared by the features indexing the same text.
 pub fn parse(src: &Source) -> Rc<Ast> {
     thread_local! {
         static CACHE: RefCell<Vec<(u64, Rc<Ast>)>> = const { RefCell::new(Vec::new()) };
@@ -367,7 +286,6 @@ pub fn parse(src: &Source) -> Rc<Ast> {
     })
 }
 
-/// FNV-1a of a text, mixed with its length.
 fn fingerprint(text: &str) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325 ^ text.len() as u64;
     for b in text.bytes() {
@@ -382,12 +300,9 @@ const COMPOUND: &[&str] = &["+=", "-=", "*=", "/=", "%=", "^=", "&=", "|=", "<<=
 struct Parser<'a> {
     src: &'a Source,
     i: usize,
-    /// Parsing stops here: the closer of the innermost bracket being read.
     limit: usize,
     ast: Ast,
-    /// Declarations visible by name, innermost last.
     visible: HashMap<&'a str, Vec<u32>>,
-    /// Names declared by each open scope.
     scopes: Vec<Vec<&'a str>>,
     func: u32,
 }
@@ -483,7 +398,6 @@ impl<'a> Parser<'a> {
         self.visible.get(name).and_then(|v| v.last()).copied().unwrap_or(NONE)
     }
 
-    /// Runs `f` with the parse bounded by the closer `close` of the bracket just read, then resumes after it.
     fn within<T>(&mut self, close: Option<usize>, f: impl FnOnce(&mut Self) -> T) -> T {
         let saved = self.limit;
         let close = close.filter(|&c| c >= self.i && c < saved);
@@ -1043,7 +957,6 @@ mod tests {
         (src, ast)
     }
 
-    /// The declaration token text and kind of the name expression at the n-th occurrence of `name`.
     fn resolved(src: &Source, ast: &Ast, name: &str, nth: usize) -> Option<DeclKind> {
         let e = ast
             .exprs

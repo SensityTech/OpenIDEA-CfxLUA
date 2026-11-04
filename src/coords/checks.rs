@@ -1,6 +1,3 @@
-//! The coordinate inspections (world position with z = 0, coordinates
-//! outside of the map, duplicates in a Config table) and the zone hints.
-
 use super::expr::{Coord, Form, analyze, name_context, parse_number};
 use super::zones::ZoneMap;
 use crate::feature::{Ctx, Problem};
@@ -15,10 +12,8 @@ pub const OUT_OF_BOUNDS: &str = "CfxCoordsOutOfBounds";
 pub const DUPLICATE: &str = "CfxCoordsDuplicate";
 pub const ZONE: &str = "CfxCoordsZone";
 
-/// IntelliJ's weak warnings.
 const WEAK: Severity = Severity::Info;
 
-/// Names of values holding vectors other than world positions.
 const NON_POSITION_WORDS: &[&str] = &[
     "rot",
     "offset",
@@ -35,7 +30,6 @@ const NON_POSITION_WORDS: &[&str] = &[
     "speed",
 ];
 
-/// A literal world position: a vector or keyed table not stored under a name like `offset` or `color`.
 pub fn literal_position(ast: &Ast, src: &Source, e: usize) -> Option<Coord> {
     let c = analyze(ast, src, e)?;
     if c.form == Form::Array {
@@ -48,7 +42,6 @@ pub fn literal_position(ast: &Ast, src: &Source, e: usize) -> Option<Coord> {
     Some(c)
 }
 
-/// Integers between 0 and 255 alone: a colour rather than a position.
 fn is_colour_like(texts: &[Option<String>]) -> bool {
     texts.iter().all(|t| {
         t.as_ref().is_some_and(|t| {
@@ -57,12 +50,10 @@ fn is_colour_like(texts: &[Option<String>]) -> bool {
     })
 }
 
-/// `-8000`, `10000`; non-integral bounds as written by a double.
 fn format_number(v: f64) -> String {
     if v == v.round() && v.abs() < 1e15 { format!("{v:.0}") } else { v.to_string() }
 }
 
-/// The games a script runs on: its resource's (auto mode), else the project's.
 pub fn games_of(cx: &Ctx) -> Vec<Game> {
     let auto = cx.settings.string(crate::settings::keys::GAME, "auto") == "auto";
     let resource = cx.ws.resource_of(&cx.doc.path).and_then(|r| r.games.clone()).filter(|g| !g.is_empty());
@@ -72,7 +63,6 @@ pub fn games_of(cx: &Ctx) -> Vec<Game> {
     }
 }
 
-/// Approximate area of each game's world: x, y, z ranges.
 fn bounds(game: Game) -> [(f64, f64); 3] {
     match game {
         Game::Gta5 => [(-8000.0, 8000.0), (-8000.0, 10000.0), (-1000.0, 3000.0)],
@@ -138,7 +128,6 @@ pub fn problems(cx: &Ctx, ast: &Ast, config_roots: &[String], zones: Option<&Zon
     out
 }
 
-/// Same literal coordinates twice in one Config table, in the same role.
 fn duplicates(ast: &Ast, src: &Source, roots: &[String], out: &mut Vec<Problem>) {
     let is_root = |name: &str| roots.iter().any(|r| r.eq_ignore_ascii_case(name));
     let table = |e: usize| matches!(ast.exprs[e].kind, ExprKind::Table { .. }).then_some(e);
@@ -167,7 +156,6 @@ fn duplicates(ast: &Ast, src: &Source, roots: &[String], out: &mut Vec<Problem>)
     }
 }
 
-/// `Config = { A = {…}, B = {…} }` holds one scope per field; `Config.A = {…}` is one scope.
 fn config(ast: &Ast, src: &Source, table: usize, is_root: bool, out: &mut Vec<Problem>) {
     if !is_root {
         return scope(ast, src, table, out);

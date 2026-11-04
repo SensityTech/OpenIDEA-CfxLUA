@@ -1,49 +1,34 @@
-//! Coordinates read from plain text (a selection, what was pasted): a
-//! position (x, y, z) with an optional heading, written as `123.4, 56.7, 8.9`,
-//! `vector3(…)`, `new Vector3(1f, 2f, 3f)`, `{x = …}`, JSON or `x: 1.0 y: 2.0`.
-//! And the Lua text of coordinates in each form.
-
-/// How the text was written.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Format {
-    /// `123.4, 56.7, 8.9` (also `[…]`, `(…)` or space separated).
     List,
-    /// `vector3(…)`, `vec4(…)`, `Vector3(…)`, `new Vector3(1f, 2f, 3f)`.
     Vector,
-    /// `{x = 1.0, …}`, `{"x": 1.0, …}`, `x: 1.0 y: 2.0 z: 3.0`.
     Keyed,
 }
 
-/// Coordinates read from text: Lua number literals in x, y, z (, heading) order.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CoordText {
     pub components: Vec<String>,
     pub format: Format,
-    /// Already a CfxLua vector constructor, left untouched where a vector is expected.
     pub lua_vector: bool,
 }
 
 impl CoordText {
-    /// `vector3(x, y, z)` or `vector4(x, y, z, h)`.
     pub fn to_vector(&self) -> String {
         vector(if self.components.len() == 4 { "vector4" } else { "vector3" }, &self.components)
     }
 }
 
-/// Keys of the components in a keyed table, `w` for the heading.
 pub const KEYS: [&str; 4] = ["x", "y", "z", "w"];
 
 pub fn vector(constructor: &str, components: &[impl AsRef<str>]) -> String {
     format!("{constructor}({})", join(components))
 }
 
-/// `{ x = a, y = b, z = c }`
 pub fn keyed(components: &[impl AsRef<str>]) -> String {
     let fields: Vec<String> = components.iter().zip(KEYS).map(|(c, k)| format!("{k} = {}", c.as_ref())).collect();
     format!("{{ {} }}", fields.join(", "))
 }
 
-/// `{ a, b, c }`
 pub fn array(components: &[impl AsRef<str>]) -> String {
     format!("{{ {} }}", join(components))
 }
@@ -52,10 +37,8 @@ pub fn join(components: &[impl AsRef<str>]) -> String {
     components.iter().map(AsRef::as_ref).collect::<Vec<_>>().join(", ")
 }
 
-/// Longest text considered for one coordinate.
 const MAX_LENGTH: usize = 200;
 
-/// The coordinates written in `text` (surrounding blanks and a trailing `,` / `;` ignored), `None` for anything else.
 pub fn parse(text: &str) -> Option<CoordText> {
     let core = text.trim();
     let core = core.strip_suffix(',').unwrap_or(core);
@@ -66,14 +49,12 @@ pub fn parse(text: &str) -> Option<CoordText> {
     parse_vector(core).or_else(|| parse_keyed(core)).or_else(|| parse_list(core))
 }
 
-/// Lua spelling of a number of another language: no `+` sign, no `f` / `d` suffix.
 fn normalize(number: &str) -> String {
     let t = number.trim();
     let t = t.strip_prefix('+').unwrap_or(t);
     t.strip_suffix(['f', 'F', 'd', 'D']).unwrap_or(t).to_owned()
 }
 
-/// End of `[-+]?(\d+(\.\d*)?|\.\d+)([eE][-+]?\d+)?[fFdD]?` at `i`.
 fn number_end(b: &[u8], mut i: usize) -> Option<usize> {
     let digits = |b: &[u8], mut i: usize| {
         let s = i;
@@ -123,7 +104,6 @@ fn skip_ws(b: &[u8], mut i: usize) -> usize {
     i
 }
 
-/// `(N, N, N[, N])` from `i` (the `(`) to the end of the text.
 fn arguments(s: &str, mut i: usize) -> Option<Vec<&str>> {
     let b = s.as_bytes();
     if b.get(i) != Some(&b'(') {
@@ -256,7 +236,6 @@ fn parse_list(text: &str) -> Option<CoordText> {
     })
 }
 
-/// 3 or 4 numbers separated by commas (or by blanks), the whole text.
 fn list(s: &str, commas: bool) -> Option<Vec<&str>> {
     let b = s.as_bytes();
     let mut out = Vec::new();

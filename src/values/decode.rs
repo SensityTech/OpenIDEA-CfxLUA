@@ -1,16 +1,10 @@
-//! Turns the integer of a [`Site`](super::sites::Site) into names, from the
-//! bundled tables and the known hash names, and renders what the original
-//! showed as inlay hint and quick documentation.
-
 use super::sites::Kind;
 use super::tables::{self, Tables, by_id};
 use crate::project::Game;
 
-/// Where a hash name comes from, best first.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Origin {
     Project,
-    /// The bundled names of a category (`vehicle`).
     Bundled(String),
 }
 
@@ -20,24 +14,18 @@ pub struct HashName {
     pub origin: Origin,
 }
 
-/// A decoded value.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Decoded {
     pub kind: Kind,
     pub value: i64,
-    /// Short text (`INPUT_PICKUP (E / LB)`).
     pub label: String,
-    /// The value's identifier (`INPUT_PICKUP`, `adder`).
     pub name: String,
-    /// What the value is (`Control`, `Hash`).
     pub title: &'static str,
-    /// `label: value` rows.
     pub details: Vec<(String, String)>,
     pub doc_url: Option<&'static str>,
     pub hash_name: Option<HashName>,
 }
 
-/// Community names of some `TASK_PLAY_ANIM` flags.
 const ANIM_FLAG_ALIASES: &[(i64, &str)] =
     &[(1, "REPEAT"), (2, "STOP_LAST_FRAME"), (16, "UPPERBODY"), (32, "ENABLE_PLAYER_CONTROL")];
 
@@ -45,7 +33,6 @@ fn in_hash_range(value: i64) -> bool {
     (-0x8000_0000..=0xFFFF_FFFF).contains(&value)
 }
 
-/// `value` read as a `kind` of `game`; `hash_name` finds the name of a hash.
 pub fn decode(kind: Kind, value: i64, game: Game, hash_name: &dyn Fn(i32) -> Option<HashName>) -> Option<Decoded> {
     let t = Tables::get();
     let enumerated = i32::try_from(value).ok().map(i64::from);
@@ -197,7 +184,6 @@ fn hash_details(hash: i32) -> Vec<(String, String)> {
     ]
 }
 
-/// `Argument 2 (control) of IsControlJustPressed`.
 pub fn argument(index: usize, param: Option<&str>, native: &str) -> String {
     match param {
         Some(p) => format!("Argument {} ({p}) of {native}", index + 1),
@@ -206,7 +192,6 @@ pub fn argument(index: usize, param: Option<&str>, native: &str) -> String {
 }
 
 impl Decoded {
-    /// `Control 38: INPUT_PICKUP (E / LB) — Keyboard: E, Pad: LB`: the diagnostic message.
     pub fn message(&self) -> String {
         let mut out = format!("{} {}: {}", self.title, self.value, self.label);
         if !self.details.is_empty() {
@@ -217,7 +202,6 @@ impl Decoded {
         out
     }
 
-    /// The quick documentation of the original, as Markdown; `expr` is the value as written.
     pub fn markdown(&self, expr: &str, argument: Option<&str>) -> String {
         let mut out = format!("**{}** `{expr}` = **{}**\n", self.title, self.name);
         if let Some(a) = argument {
@@ -235,7 +219,6 @@ impl Decoded {
         out
     }
 
-    /// `--[[ INPUT_PICKUP ]]`
     pub fn comment(&self) -> String {
         format!("--[[ {} ]]", self.name)
     }

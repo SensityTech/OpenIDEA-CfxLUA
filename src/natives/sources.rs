@@ -1,7 +1,3 @@
-//! The four Cfx.re databases: where they are downloaded from, the snapshot
-//! bundled with the plugin (gzip, as downloaded), and which ones each natives
-//! set is built from.
-
 use super::convert::{self, Group, Overrides};
 use super::model::NativeSet;
 use super::parse::{self, FormatError, Origin, RawNative};
@@ -9,20 +5,15 @@ use flate2::read::GzDecoder;
 use std::collections::BTreeMap;
 use std::io::Read;
 
-/// Bumped when the conversion changes: updates made by an older one are dropped.
 const CONVERTER_VERSION: u32 = 1;
 
 pub const OVERRIDES: &str = include_str!("../../data/natives/overrides.json");
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Database {
-    /// docs.fivem.net: GTA V game natives.
     Gta5,
-    /// docs.fivem.net: CitizenFX natives (client / server / shared, every game).
     Cfx,
-    /// RedM runtime codegen input: the only callable RedM names and signatures.
     Rdr3,
-    /// alloc8or's RDR3 NativeDB: descriptions, joined by hash.
     Rdr3Docs,
 }
 
@@ -56,7 +47,6 @@ impl Database {
         }
     }
 
-    /// The bundled snapshot, gzip-compressed.
     fn bundled_gz(self) -> &'static [u8] {
         match self {
             Self::Gta5 => include_bytes!("../../data/natives/natives.json.gz"),
@@ -66,7 +56,6 @@ impl Database {
         }
     }
 
-    /// Fingerprint of the bundled content, read from the gzip trailer (CRC-32 and size).
     pub fn bundled_fingerprint(self) -> String {
         let gz = self.bundled_gz();
         let word = |at: usize| gz.get(at..at + 4).map_or(0, |b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
@@ -74,14 +63,12 @@ impl Database {
         format!("{:08x}:{}", word(n), word(n + 4))
     }
 
-    /// The bundled content as text.
     pub fn bundled_text(self) -> Result<String, String> {
         let mut bytes = Vec::with_capacity(4 << 20);
         GzDecoder::new(self.bundled_gz()).read_to_end(&mut bytes).map_err(|e| format!("{}: {e}", self.file_name()))?;
         Ok(decode(bytes))
     }
 
-    /// Checks that `text` is a database of this kind.
     pub fn validate(self, text: &str) -> Result<(), FormatError> {
         match self {
             Self::Gta5 => parse::parse_json(text, Origin::Gta5Json).map(drop),
@@ -92,14 +79,12 @@ impl Database {
     }
 }
 
-/// Fingerprint of downloaded content (same form as [`Database::bundled_fingerprint`]).
 pub fn fingerprint(bytes: &[u8]) -> String {
     let mut crc = flate2::Crc::new();
     crc.update(bytes);
     format!("{:08x}:{}", crc.sum(), bytes.len() as u32)
 }
 
-/// UTF-8 text of a download, without its byte order mark.
 pub fn decode(bytes: Vec<u8>) -> String {
     let text = String::from_utf8(bytes).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned());
     match text.strip_prefix('\u{feff}') {
@@ -108,7 +93,6 @@ pub fn decode(bytes: Vec<u8>) -> String {
     }
 }
 
-/// The databases a set is built from.
 pub fn databases(set: NativeSet) -> &'static [Database] {
     match set {
         NativeSet::Gta5 => &[Database::Gta5, Database::Cfx],
@@ -117,15 +101,12 @@ pub fn databases(set: NativeSet) -> &'static [Database] {
     }
 }
 
-/// Fingerprints of the content a set is built from, by database id.
 pub type Inputs = BTreeMap<String, String>;
 
-/// The inputs of `set` in the bundled snapshot.
 pub fn bundled_inputs(set: NativeSet) -> Inputs {
     databases(set).iter().map(|d| (d.id().to_owned(), d.bundled_fingerprint())).collect()
 }
 
-/// Identifies the bundled snapshot and conversion of `set`: updates are made against it.
 pub fn snapshot_id(set: NativeSet) -> String {
     let inputs: Vec<String> = bundled_inputs(set).into_iter().map(|(id, fp)| format!("{id}={fp}")).collect();
     format!("v{CONVERTER_VERSION};overrides={};{}", fingerprint(OVERRIDES.as_bytes()), inputs.join(";"))
@@ -135,7 +116,6 @@ fn json(d: Database, text: &str, origin: Origin) -> Result<Vec<RawNative<'_>>, (
     parse::parse_json(text, origin).map_err(|e| (d, e))
 }
 
-/// Converts the natives of `set` from the texts of its databases.
 pub fn groups(
     set: NativeSet,
     text: impl Fn(Database) -> Option<String>,
@@ -162,7 +142,6 @@ pub fn groups(
     }
 }
 
-/// The natives of `set` in the bundled snapshot (empty if it cannot be read: a build defect the tests catch).
 pub fn bundled_groups(set: NativeSet) -> Vec<Group> {
     groups(set, |d| d.bundled_text().ok()).unwrap_or_default()
 }

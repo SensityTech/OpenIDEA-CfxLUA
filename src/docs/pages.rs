@@ -1,12 +1,7 @@
-//! The detail pages of the tool window: native sheet, event, manifest
-//! directive, syntax feature, guide and guide category (the runtime API pages
-//! are in [`super::runtime_pages`]).
-
 use super::data::{BuiltinEvent, Directive, Guide, SyntaxFeature, guides};
 use super::html::{Table, badge, code_block, esc, markdown, markdown_inline, subhead};
 use crate::natives::Native;
 
-/// The detail of no selection.
 pub const NOTHING_SELECTED: &str = "<p class='empty'>Select an item to see its documentation.</p>";
 
 fn title(html: &str) -> String {
@@ -17,7 +12,6 @@ fn links(url: &str) -> String {
     format!("<p class='links'><a href='{}'>Online documentation</a></p>", esc(url))
 }
 
-/// The Lua type, the native (C) type below it.
 fn type_cell(lua: &str, native: &str) -> String {
     format!("<code class='id'>{}</code><br><span class='ctype' title='Native type'>{}</span>", esc(lua), esc(native))
 }
@@ -30,7 +24,6 @@ fn note(text: &str) -> String {
     format!(" <span class='grayed'>{}</span>", esc(text))
 }
 
-/// The native sheet.
 pub fn native(n: &Native) -> String {
     let name =
         if n.is_alias() { format!("<span class='deprecated'>{}</span>", esc(&n.lua_name)) } else { esc(&n.lua_name) };
@@ -119,13 +112,11 @@ pub fn native(n: &Native) -> String {
     out
 }
 
-/// `AddEventHandler('name', function(p1, p2)\nend)`.
 fn handler_code(e: &BuiltinEvent) -> String {
     let params: Vec<&str> = e.params.iter().map(|p| p.name.as_str()).collect();
     format!("AddEventHandler('{}', function({})\nend)", e.name, params.join(", "))
 }
 
-/// `All games`, `FiveM`, `RedM`.
 fn event_game(e: &BuiltinEvent) -> &'static str {
     e.game().map_or("All games", |g| g.label())
 }
@@ -225,7 +216,6 @@ pub fn guide(g: &Guide) -> String {
     format!("<p class='badges'>{}</p>{}", badge(&g.category, "accent"), markdown(&g.markdown))
 }
 
-/// A guide category: its guides with their summaries.
 pub fn category(name: &str) -> String {
     let mut out = title(&esc(name));
     for g in guides().iter().filter(|g| g.category == name) {

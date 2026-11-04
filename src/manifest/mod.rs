@@ -1,7 +1,3 @@
-//! fxmanifest.lua: completion of directives, values, paths and dependencies; navigation; checks and quick fixes.
-//!
-//! Everything here runs in manifests only (`fxmanifest.lua`, `__resource.lua`).
-
 pub mod catalog;
 mod checks;
 mod complete;
@@ -44,7 +40,6 @@ impl Feature for ManifestFeature {
     }
 }
 
-/// The files a path or glob names (directories are not opened), the manifest of a dependency.
 fn definition(cx: &Ctx, at: usize) -> Vec<Location> {
     let src = &cx.doc.src;
     let Some(i) = src.tok_at(at).filter(|&i| src.toks[i].is_string()) else { return Vec::new() };
@@ -143,7 +138,6 @@ mod tests {
         assert!(definitions("client_script<caret> 'client/main.lua'").is_empty());
     }
 
-    /// Problems of `res/<name>` (code, severity, message, highlighted text).
     fn problems(name: &str, manifest: &str) -> Vec<(&'static str, Severity, String, String)> {
         let (fx, rel) = fixture(name, manifest);
         let doc = fx.doc(&rel);
@@ -158,7 +152,6 @@ mod tests {
         problems("fxmanifest.lua", manifest).into_iter().map(|p| p.2).collect()
     }
 
-    /// The manifest after the fix titled `title` of the problem whose message starts with `message`.
     fn fixed(name: &str, manifest: &str, message: &str, title: &str) -> String {
         let (fx, rel) = fixture(name, manifest);
         let doc = fx.doc(&rel);

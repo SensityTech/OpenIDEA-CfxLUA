@@ -1,15 +1,9 @@
-//! The Runtime API pages: a part's summary and a declaration's documentation
-//! (definition, description, then Deprecated / Fields / Parameters / Returns /
-//! Overloads / See sections). Class names in types link to their class
-//! (`cfxtype:<Class>`, shown in the same pane).
-
 use super::html::{esc, markdown, markdown_inline};
 use crate::runtime::{Decl, Part, Runtime};
 
 pub const NOTHING_SELECTED: &str = "<p class='empty'>Select a declaration to see its documentation.</p>";
 pub const NO_DOCUMENTATION: &str = "<p class='empty'>No documentation</p>";
 
-/// `<div class='title'>Shared</div>` + the part's top-level declarations (at most 200).
 pub fn part(rt: &Runtime, part: Part) -> String {
     let tops = &rt.tops[part as usize];
     let mut out =
@@ -21,7 +15,6 @@ pub fn part(rt: &Runtime, part: Part) -> String {
     out
 }
 
-/// A type expression with its class names as links.
 fn type_html(rt: &Runtime, ty: &str) -> String {
     let mut out = String::new();
     let mut word = String::new();
@@ -53,7 +46,6 @@ fn desc(text: &str) -> String {
     if text.is_empty() { String::new() } else { format!(" - {}", markdown_inline(text)) }
 }
 
-/// The definition line of a declaration.
 fn definition(rt: &Runtime, d: &Decl) -> String {
     let owner = d
         .owner
@@ -85,7 +77,6 @@ fn definition(rt: &Runtime, d: &Decl) -> String {
     format!("{owner}<b>{}</b>: {}", esc(&d.name), type_html(rt, &ty))
 }
 
-/// The documentation page of a declaration.
 pub fn decl(rt: &Runtime, d: &Decl) -> String {
     let a = &d.doc;
     let mut out = format!("<div class='definition'><pre>{}</pre></div>", definition(rt, d));
@@ -136,7 +127,6 @@ pub fn decl(rt: &Runtime, d: &Decl) -> String {
     out
 }
 
-/// The page of class `name` (a `cfxtype:` link).
 pub fn class(rt: &Runtime, name: &str) -> String {
     rt.class(name).map_or_else(|| NO_DOCUMENTATION.to_owned(), |d| decl(rt, d))
 }

@@ -1,5 +1,3 @@
-//! Acceptance tests of the magic values decoder.
-
 use super::*;
 use crate::natives::{Native, NativeSet};
 use crate::settings::Settings;
@@ -30,7 +28,6 @@ fn run(text: &str) -> Run {
 }
 
 impl Run {
-    /// `literal text: message` of the hints.
     fn hints(&self) -> Vec<String> {
         let doc = self.fx.doc(CLIENT);
         self.feature
@@ -40,7 +37,6 @@ impl Run {
             .collect()
     }
 
-    /// The labels of the hints (the part after `title value: `).
     fn labels(&self) -> Vec<String> {
         self.hints()
             .into_iter()

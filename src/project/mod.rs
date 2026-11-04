@@ -1,12 +1,3 @@
-//! Resources and their scripts: which game a resource targets, and whether a
-//! Lua file runs on the client, the server or both — the "dual" view every
-//! other feature filters with (a client script is not offered server natives).
-//!
-//! Rules (same as FXServer, and the JetBrains plugin before this one):
-//! manifest listing (`client_scripts`, `server_scripts`, `shared_scripts`,
-//! globs) > file name (`client.lua`, `cl_*.lua`, …) > nearest folder name
-//! inside the resource (`client/`, `cl/`, …) > unknown.
-
 pub mod glob;
 pub mod manifest;
 
@@ -15,14 +6,12 @@ use crate::text::{file_name, parent};
 use glob::Glob;
 pub use manifest::{Entry, Value};
 
-/// Manifest file names, by priority (FXServer ignores `__resource.lua` next to an `fxmanifest.lua`).
 pub const MANIFESTS: [&str; 2] = ["fxmanifest.lua", "__resource.lua"];
 
 pub fn is_manifest_name(name: &str) -> bool {
     MANIFESTS.iter().any(|m| m.eq_ignore_ascii_case(name))
 }
 
-/// A file encrypted by Cfx Asset Escrow (binary `FXAP` header): never parsed as Lua.
 pub fn is_escrowed(text: &str) -> bool {
     text.starts_with("FXAP")
 }
@@ -31,9 +20,7 @@ pub fn is_escrowed(text: &str) -> bool {
 pub enum FileKind {
     Manifest,
     Lua,
-    /// JS / TS / Vue / Svelte / HTML: NUI pages.
     Web,
-    /// `vite.config.*` / `webpack.config.*`.
     BundlerConfig,
     Other,
 }
@@ -56,12 +43,10 @@ pub fn file_kind(path: &str) -> FileKind {
     }
 }
 
-/// Where a script runs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub enum Side {
     Client,
     Server,
-    /// Listed as shared, or as both client and server.
     Shared,
     Manifest,
     Unknown,
@@ -88,7 +73,6 @@ impl Side {
         }
     }
 
-    /// `client` / `server` / `shared` (an apiset or an event side).
     pub fn parse(s: &str) -> Option<Self> {
         match s.trim().to_ascii_lowercase().as_str() {
             "client" => Some(Self::Client),
@@ -98,7 +82,6 @@ impl Side {
         }
     }
 
-    /// Whether code of side `self` (a native's apiset, an API) is usable from a script on `script`.
     pub fn visible_from(self, script: Side) -> bool {
         match script {
             Side::Client => self != Side::Server,
@@ -133,7 +116,6 @@ impl Game {
         }
     }
 
-    /// `FiveM` / `RedM`.
     pub fn label(self) -> &'static str {
         match self {
             Self::Gta5 => "FiveM",
@@ -142,7 +124,6 @@ impl Game {
     }
 }
 
-/// `FiveM + RedM`, `none`.
 pub fn describe_games(games: &[Game]) -> String {
     if games.is_empty() {
         return "none".into();
@@ -150,26 +131,19 @@ pub fn describe_games(games: &[Game]) -> String {
     Game::ALL.iter().filter(|g| games.contains(g)).map(|g| g.label()).collect::<Vec<_>>().join(" + ")
 }
 
-/// A resource: a directory with a manifest.
 #[derive(Clone, Debug)]
 pub struct Resource {
-    /// Absolute directory, forward slashes.
     pub dir: String,
-    /// Folder name (the resource name FXServer uses).
     pub name: String,
-    /// `fxmanifest.lua` or `__resource.lua`.
     pub manifest: String,
     pub entries: Vec<Entry>,
     pub client: Vec<Glob>,
     pub server: Vec<Glob>,
     pub shared: Vec<Glob>,
-    /// `None` when the manifest declares no `game` / `games` (may be empty: `game 'common'`).
     pub games: Option<Vec<Game>>,
-    /// `escrow_ignore` patterns, when declared.
     pub escrow_ignore: Option<Vec<Glob>>,
 }
 
-/// Windows (where FiveM servers mostly run) matches paths case-insensitively.
 pub const CASE_SENSITIVE: bool = false;
 
 impl Resource {
@@ -215,12 +189,10 @@ impl Resource {
         format!("{}/{}", self.dir, self.manifest)
     }
 
-    /// Path relative to the resource directory, or `None` outside it.
     pub fn relative<'a>(&self, path: &'a str) -> Option<&'a str> {
         path.strip_prefix(self.dir.as_str())?.strip_prefix('/')
     }
 
-    /// Side the manifest gives `rel`, if it lists it.
     pub fn listed_side(&self, rel: &str) -> Option<Side> {
         let any = |g: &[Glob]| g.iter().any(|g| g.matches(rel));
         let (sh, c, s) = (any(&self.shared), any(&self.client), any(&self.server));
@@ -245,7 +217,6 @@ impl Resource {
         }
     }
 
-    /// Entries named one of `names`.
     pub fn entries_named<'a>(&'a self, names: &'a [&str]) -> impl Iterator<Item = &'a Entry> + 'a {
         self.entries.iter().filter(move |e| names.contains(&e.name.as_str()))
     }
@@ -255,7 +226,6 @@ impl Resource {
     }
 }
 
-/// Side of a file outside any resource: file name only.
 pub fn side_by_convention(path: &str) -> Side {
     if is_manifest_name(file_name(path)) {
         return Side::Manifest;
@@ -263,7 +233,6 @@ pub fn side_by_convention(path: &str) -> Side {
     guess_side(path, None)
 }
 
-/// File name conventions, then (inside `boundary`) the nearest folder name.
 pub fn guess_side(path: &str, boundary: Option<&str>) -> Side {
     let name = file_name(path).to_ascii_lowercase();
     let stem = name.rsplit_once('.').map_or(name.as_str(), |(s, _)| s);

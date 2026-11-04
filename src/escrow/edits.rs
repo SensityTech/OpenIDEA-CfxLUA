@@ -1,13 +1,8 @@
-//! Adding a pattern to `escrow_ignore`, keeping the manifest's layout: into
-//! the existing table (one line per pattern when it is written that way,
-//! trailing comments kept), around a single string, or as a new directive.
-
 use crate::lua::Source;
 use crate::manifest::edits::{apply, minimal};
 use crate::manifest::view::{Decl, View};
 use openidea_plugin::TextEdit;
 
-/// The manifest `text` with `pattern` in its `escrow_ignore` (unchanged when already listed).
 pub fn add_pattern(text: &str, pattern: &str) -> String {
     let src = Source::new(text);
     let view = View::new(&src);
@@ -69,17 +64,14 @@ pub fn add_pattern(text: &str, pattern: &str) -> String {
     format!("{text}{sep}escrow_ignore {{\n    {quoted},\n}}\n")
 }
 
-/// The manifest `text` with every pattern added.
 pub fn add_patterns(text: &str, patterns: &[String]) -> String {
     patterns.iter().fold(text.to_owned(), |t, p| add_pattern(&t, p))
 }
 
-/// The edit adding `patterns` to the manifest `text`, as a byte edit (`None` when they are all listed).
 pub fn pattern_edit(text: &str, patterns: &[String]) -> Option<(usize, usize, String)> {
     minimal(text, &add_patterns(text, patterns))
 }
 
-/// The same edit in IDE coordinates, for a manifest that is not the document of the request.
 pub fn pattern_text_edit(text: &str, patterns: &[String]) -> Option<TextEdit> {
     let (start, end, new) = pattern_edit(text, patterns)?;
     let lines = crate::text::LineIndex::new(text);

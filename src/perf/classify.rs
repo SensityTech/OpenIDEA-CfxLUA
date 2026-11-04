@@ -1,11 +1,3 @@
-//! What the calls of a document do: the runtime table, the natives catalog
-//! (or naming rules without one), and summaries of the functions the project
-//! declares — followed through local aliases (`local Wait = Citizen.Wait`).
-//!
-//! Project functions are summarised from compact per-file facts
-//! ([`FileFacts`]: the callees of each function body) kept in a
-//! [`ProjectIndex`]; the current document's facts come from its own tree.
-
 use super::ast::{Ast, DeclKind, ExprKind, Named, Node, StatKind};
 use super::spec::{self, Spam, Spec, Work, Yield};
 use crate::feature::Ctx;
@@ -16,22 +8,16 @@ use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
 use std::rc::Rc;
 
-/// The function a call designates, as far as the file itself tells.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Callee {
-    /// A global name or a global-rooted dotted path (`Wait`, `ESX.ShowHelp`).
     Path(String),
-    /// A function of the same file, by ordinal.
     Local(usize),
     Fixed(Spec),
 }
 
-/// What a file declares: the callees of each function, its global functions.
 #[derive(Clone, Debug, Default)]
 pub struct FileFacts {
-    /// By function ordinal ([`Ast::functions`]).
     pub functions: Vec<Vec<Callee>>,
-    /// Global function path → ordinal.
     pub globals: Vec<(String, usize)>,
 }
 
@@ -60,14 +46,12 @@ impl FileFacts {
     }
 }
 
-/// Functions declared on a local table (`local M = {}; function M.f() end`): (root local, path) → ordinal.
 pub type LocalPaths = HashMap<(usize, String), usize>;
 
 fn local_paths(ast: &Ast, named: &[Named]) -> LocalPaths {
     named.iter().filter_map(|n| Some(((n.root?, n.path.clone()), ast.ordinal(n.func)?))).collect()
 }
 
-/// Facts of every project file, and which files declare each global function.
 #[derive(Default)]
 pub struct ProjectIndex {
     files: HashMap<String, FileFacts>,
@@ -95,14 +79,12 @@ impl ProjectIndex {
         }
     }
 
-    /// A file (other than `except`) declaring the global function `path`, and its ordinal.
     fn function(&self, path: &str, except: &str) -> Option<(&str, usize)> {
         let file = self.by_name.get(path)?.iter().find(|f| f.as_str() != except)?;
         Some((file, self.files.get(file)?.global(path)?))
     }
 }
 
-/// The callee of `call`: its path as written (`None` when complex) and what it designates.
 pub fn callee(ast: &Ast, src: &Source, locals: &LocalPaths, call: usize) -> (Option<String>, Callee) {
     let ExprKind::Call { callee: target, method, args } = &ast.exprs[call].kind else {
         return (None, Callee::Fixed(Spec::UNKNOWN));
@@ -153,7 +135,6 @@ fn callee_expr(ast: &Ast, locals: &LocalPaths, e: usize, depth: usize) -> (Optio
     }
 }
 
-/// A local holding a function by name, never assigned again (`local Wait = Citizen.Wait`).
 fn alias(ast: &Ast, locals: &LocalPaths, decl: usize, depth: usize) -> Option<(Option<String>, Callee)> {
     let d = &ast.decls[decl];
     if depth > 3 || !matches!(d.kind, DeclKind::Local { .. }) || !d.assigned.is_empty() {
@@ -169,29 +150,22 @@ fn alias(ast: &Ast, locals: &LocalPaths, decl: usize, depth: usize) -> Option<(O
     }
 }
 
-/// The delay given to `Wait`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WaitValue {
-    /// At most [`PER_FRAME_MAX_MS`]: the next frame.
     Frame,
     Fixed(i64),
-    /// A local set to several literals (`sleep = 0` / `sleep = 1000`): the longest.
     Adaptive(i64),
     Unknown(String),
 }
 
-/// Longest `Wait` that still resumes on the next frame.
 pub const PER_FRAME_MAX_MS: i64 = 10;
 
-/// A call and what it does.
 #[derive(Clone, Debug)]
 pub struct CallInfo {
     pub call: usize,
-    /// The callee as written (`Wait`, `Citizen.Wait`), `None` when complex.
     pub path: Option<String>,
     pub spec: Spec,
     pub wait: Option<WaitValue>,
-    /// The path, else the callee text: used in messages.
     pub display: String,
 }
 
@@ -205,10 +179,8 @@ impl CallInfo {
     }
 }
 
-/// Where a file runs and which natives it sees.
 #[derive(Clone)]
 struct FileCx {
-    /// `None` for the current document.
     file: Option<String>,
     side: Side,
     sets: Vec<NativeSet>,
@@ -221,7 +193,6 @@ impl FileCx {
     }
 }
 
-/// Classification of the calls of one document, for one request.
 pub struct Perf<'a> {
     pub cx: &'a Ctx<'a>,
     pub src: &'a Source,
@@ -233,16 +204,12 @@ pub struct Perf<'a> {
     facts: FileFacts,
     locals: LocalPaths,
     infos: RefCell<HashMap<usize, Rc<CallInfo>>>,
-    /// Specs of global names, by file (`None`: the document).
     globals: RefCell<HashMap<(Option<String>, String), Spec>>,
-    /// Function summaries by (file, ordinal); `None` while being computed.
     summaries: RefCell<HashMap<FunctionKey, Option<Spec>>>,
 }
 
-/// A function of a file (`None`: the document) by ordinal.
 type FunctionKey = (Option<String>, usize);
 
-/// The natives sets a file of `side` sees.
 pub fn sets_for(cx: &Ctx, detected: &[Game], path: &str, side: Side) -> Vec<NativeSet> {
     let games = cx.ws.resource_of(path).and_then(|r| r.games.clone());
     crate::natives::visible_sets(cx.settings, detected, side, games.as_deref())
@@ -282,12 +249,10 @@ impl<'a> Perf<'a> {
         self.side != Side::Client
     }
 
-    /// The natives sets the document sees.
     pub fn sets(&self) -> &[NativeSet] {
         &self.here.sets
     }
 
-    /// What `call` does.
     pub fn info(&self, call: usize) -> Rc<CallInfo> {
         if let Some(i) = self.infos.borrow().get(&call) {
             return i.clone();
@@ -336,7 +301,6 @@ impl<'a> Perf<'a> {
         if fcx.catalog { Spec::UNKNOWN } else { fallback_spec(name, fcx.may_run_on_client()) }
     }
 
-    /// The file context and ordinal of the global function `path` (the current document first).
     fn project_function(&self, path: &str) -> Option<(FileCx, usize)> {
         if let Some(o) = self.facts.global(path) {
             return Some((self.here.clone(), o));
@@ -348,9 +312,6 @@ impl<'a> Perf<'a> {
         Some((FileCx { file: Some(file.to_owned()), side, sets, catalog }, ordinal))
     }
 
-    /// What calling function `ordinal` of `fcx`'s file does: the strongest
-    /// work of its calls, `Maybe` when one may wait, its first spam.
-    /// Recursive functions are unknown.
     fn summary(&self, fcx: &FileCx, ordinal: usize) -> Spec {
         let key = (fcx.file.clone(), ordinal);
         match self.summaries.borrow().get(&key) {
@@ -396,7 +357,6 @@ impl<'a> Perf<'a> {
         }
     }
 
-    /// Number literals `e` can hold: the literal, or every literal a local is declared and assigned with.
     fn literal_values(&self, e: usize) -> Option<Vec<i64>> {
         let ast = &self.ast;
         if let Some(v) = self.literal(e) {
@@ -448,7 +408,6 @@ fn native_spec(name: &str, native: &Native, client: bool) -> Spec {
     if query { Spec::QUERY } else { Spec::EFFECT }
 }
 
-/// Without catalog: native-looking names reading state are queries, drawing / control names are per-frame.
 fn fallback_spec(name: &str, client: bool) -> Spec {
     if !spec::looks_like_native(name) {
         return Spec::UNKNOWN;
@@ -462,7 +421,6 @@ fn fallback_spec(name: &str, client: bool) -> Spec {
     Spec::UNKNOWN
 }
 
-/// Value of a Lua number literal (decimal or hexadecimal, `0x1p4` included).
 pub fn lua_number(text: &str) -> Option<f64> {
     let t = text.trim();
     let Some(hex) = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) else {

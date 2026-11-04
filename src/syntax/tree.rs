@@ -1,35 +1,21 @@
-//! A tolerant statement parser over the code tokens of a [`Source`]: blocks,
-//! statements and functions, expressions kept as token spans. CfxLua forms
-//! are statements of their own (`x += 1`, `local a, b in src`). It never
-//! fails: a token that starts nothing is an [`Kind::Error`] statement, so the
-//! checks keep working on code being typed.
-
 use crate::lua::Source;
 use crate::lua::lexer::Tok;
 
-/// Token range `[start, end)` in `Source::toks`.
 pub type Span = (usize, usize);
 
-/// Nesting (blocks and functions) parsed as such; deeper code is skipped flat.
 const MAX_DEPTH: usize = 120;
 
-/// Compound assignment operators the lexer produces: CfxLua's nine, then the
-/// three people type that CfxLua does not have.
 pub const COMPOUND_OPS: &[&str] = &["+=", "-=", "*=", "/=", "<<=", ">>=", "&=", "|=", "^=", "//=", "%=", "..="];
 
 pub struct Tree {
-    /// The chunk.
     pub block: Block,
-    /// Every function (statements and closures), ordered by their `function` keyword.
     pub funcs: Vec<Func>,
-    /// For each code token, the innermost function containing it (index + 1, 0 at the top level).
     owner: Vec<u32>,
 }
 
 #[derive(Clone, Debug)]
 pub struct Block {
     pub stmts: Vec<Stmt>,
-    /// The token ending the block (its `end`, `else`, `until`…) or the end of the source.
     pub end: usize,
 }
 
@@ -43,84 +29,37 @@ pub struct Stmt {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LocalName {
     pub tok: usize,
-    /// `<const>` / `<close>`: the `<` and `>` tokens.
     pub attr: Option<(usize, usize)>,
 }
 
 #[derive(Clone, Debug)]
 pub enum Kind {
-    /// `local a <const>, b = …`; `unpack` for `local a, b in src`.
-    Local {
-        names: Vec<LocalName>,
-        values: Vec<Span>,
-        unpack: bool,
-    },
-    LocalFunction {
-        name: usize,
-        func: usize,
-    },
-    /// `function a.b:c()`: the tokens of the name.
-    Function {
-        name: Span,
-        func: usize,
-    },
-    /// `a, t.b = …`; `unpack` for `t.a, t.b in src`.
-    Assign {
-        targets: Vec<Span>,
-        values: Vec<Span>,
-        unpack: bool,
-    },
-    /// `target op value` (`x += 1`, and the unsupported `//=`, `%=`, `..=`).
-    Compound {
-        target: Span,
-        op: usize,
-        value: Span,
-    },
-    /// A call, or any other expression standing alone (`i` in `i++`).
+    Local { names: Vec<LocalName>, values: Vec<Span>, unpack: bool },
+    LocalFunction { name: usize, func: usize },
+    Function { name: Span, func: usize },
+    Assign { targets: Vec<Span>, values: Vec<Span>, unpack: bool },
+    Compound { target: Span, op: usize, value: Span },
     Expr(Span),
-    /// `if`/`elseif` conditions and their blocks, then the `else` block.
-    If {
-        conds: Vec<Span>,
-        blocks: Vec<Block>,
-        has_else: bool,
-    },
-    While {
-        cond: Span,
-        body: Block,
-    },
+    If { conds: Vec<Span>, blocks: Vec<Block>, has_else: bool },
+    While { cond: Span, body: Block },
     Do(Block),
-    For {
-        vars: Vec<usize>,
-        exprs: Vec<Span>,
-        body: Block,
-    },
-    Repeat {
-        body: Block,
-        cond: Span,
-    },
-    Return {
-        exprs: Vec<Span>,
-    },
+    For { vars: Vec<usize>, exprs: Vec<Span>, body: Block },
+    Repeat { body: Block, cond: Span },
+    Return { exprs: Vec<Span> },
     Break,
     Goto,
     Label,
-    /// A token that starts no statement.
     Error,
 }
 
 #[derive(Clone, Debug)]
 pub struct Func {
-    /// The `function` keyword.
     pub kw: usize,
-    /// Parameter name tokens (`...` and the implicit `self` excluded).
     pub params: Vec<usize>,
     pub vararg: bool,
-    /// The `)` of the parameters.
     pub close: Option<usize>,
     pub body: Block,
-    /// Its `end`, when closed.
     pub end: Option<usize>,
-    /// The token after the function.
     pub next: usize,
     pub parent: Option<usize>,
 }
@@ -151,17 +90,14 @@ impl Tree {
         Self { block, funcs, owner }
     }
 
-    /// The innermost function containing code token `tok`.
     pub fn owner(&self, tok: usize) -> Option<usize> {
         self.owner.get(tok).and_then(|&o| o.checked_sub(1)).map(|o| o as usize)
     }
 
-    /// The function whose `function` keyword is token `kw`.
     pub fn func_at(&self, kw: usize) -> Option<usize> {
         self.funcs.binary_search_by_key(&kw, |f| f.kw).ok()
     }
 
-    /// Every statement: the chunk's and every function body's, nested blocks included.
     pub fn statements(&self) -> Vec<&Stmt> {
         let mut out = Vec::new();
         collect(&self.block, &mut out);
@@ -182,7 +118,6 @@ fn collect<'a>(b: &'a Block, out: &mut Vec<&'a Stmt>) {
 }
 
 impl Stmt {
-    /// The blocks nested in the statement (not the bodies of functions).
     pub fn blocks(&self) -> Vec<&Block> {
         match &self.kind {
             Kind::If { blocks, .. } => blocks.iter().collect(),
@@ -228,7 +163,6 @@ impl Parser<'_> {
         self.src.is_name(i)
     }
 
-    /// Statements from `i` up to one of `terms` (other block keywords are stray: skipped as errors).
     fn block(&mut self, mut i: usize, terms: &[&str]) -> Block {
         if self.depth >= MAX_DEPTH {
             return Block { stmts: Vec::new(), end: self.skip_flat(i, terms) };
@@ -256,7 +190,6 @@ impl Parser<'_> {
         Block { stmts, end: i.min(self.n) }
     }
 
-    /// Past nested blocks without parsing them, to the first of `terms` at depth 0.
     fn skip_flat(&self, mut i: usize, terms: &[&str]) -> usize {
         let mut depth = 0usize;
         while i < self.n {
@@ -278,7 +211,6 @@ impl Parser<'_> {
         self.n
     }
 
-    /// `end` closing a block that stopped at `at`: (index after the statement).
     fn after_end(&self, at: usize) -> usize {
         if self.kw(at, "end") { at + 1 } else { at }
     }
@@ -498,7 +430,6 @@ impl Parser<'_> {
         Stmt { start: i, end: e, kind: Kind::Expr((i, e)) }
     }
 
-    /// A function from its keyword `kw`, its parameters expected at `at`.
     fn func(&mut self, kw: usize, at: usize) -> usize {
         let idx = self.funcs.len();
         self.funcs.push(Func {
@@ -541,7 +472,6 @@ impl Parser<'_> {
         idx
     }
 
-    /// A name or a parenthesised expression with its suffixes (`.x`, `:m(…)`, `[k]`, `(…)`, `'s'`, `{…}`, `?.`).
     fn suffixed(&mut self, i: usize) -> usize {
         let mut j = if self.name(i) {
             i + 1
@@ -571,7 +501,6 @@ impl Parser<'_> {
         j
     }
 
-    /// Past the bracket group opening at `open`, parsing the functions written inside.
     fn group(&mut self, open: usize) -> usize {
         let close = self.src.pair[open];
         let to = close.unwrap_or(self.n);
@@ -646,7 +575,6 @@ impl Parser<'_> {
         })
     }
 
-    /// Width of the binary operator at `i` (`&&` / `||` typed for `and` / `or` count as one).
     fn binop(&self, i: usize) -> Option<usize> {
         let t = self.src.toks.get(i)?;
         let text = t.text(&self.src.text);
@@ -667,7 +595,6 @@ impl Parser<'_> {
     }
 }
 
-/// Whether span `s` of `src` is a variable: a name, or an index (`t.n`, `t[1]`), not a call.
 pub fn is_var(src: &Source, (a, b): Span) -> bool {
     if b <= a || !src.is_name(a) {
         return false;

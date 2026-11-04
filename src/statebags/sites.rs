@@ -1,15 +1,8 @@
-//! State bags and their keys in a Lua file, recognized from the syntax and
-//! the file's local declarations only: `GlobalState`, `LocalPlayer.state`,
-//! `Player(id).state`, `Entity(handle).state` (with `?.` and parentheses),
-//! locals initialized with one of them or with a wrapper, and the state bag
-//! natives (`AddStateBagChangeHandler`, `GetStateBagValue`, …).
-
 use crate::events::ast::{Ast, BinOp, DeclKind, ExprKind, Key, NONE, StmtKind, UnOp};
 use crate::lua::Source;
 use crate::lua::lexer::Tok;
 use std::collections::HashMap;
 
-/// The key of writes whose key is computed at runtime.
 pub const DYNAMIC: &str = "\u{0}";
 
 const MAX_ALIAS_DEPTH: u32 = 4;
@@ -23,7 +16,6 @@ pub const FUNCTION: &str = "function";
 pub const NIL: &str = "nil";
 pub const ANY: &str = "any";
 
-/// Global functions building a value of a known type.
 const CONSTRUCTORS: &[(&str, &str)] = &[
     ("vector2", "vector2"),
     ("vec2", "vector2"),
@@ -39,16 +31,13 @@ const CONSTRUCTORS: &[(&str, &str)] = &[
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Kind {
-    /// `LocalPlayer.state` and `Player(id).state` share it.
     Player,
     Entity,
     Global,
-    /// Not known statically (dynamic bag name, change handler without bag filter).
     Unknown,
 }
 
 impl Kind {
-    /// `player`, `entity`, `global`, `any`.
     pub fn name(self) -> &'static str {
         match self {
             Self::Player => "player",
@@ -62,7 +51,6 @@ impl Kind {
         self == Kind::Unknown || other == Kind::Unknown || self == other
     }
 
-    /// `player state bag`, `state bag`.
     pub fn description(self) -> String {
         match self {
             Self::Unknown => "state bag".into(),
@@ -75,58 +63,41 @@ impl Kind {
 pub enum Access {
     Write,
     Read,
-    /// The key filter of `AddStateBagChangeHandler`.
     Handler,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Replication {
-    /// `:set(k, v, true)`.
     Replicated,
-    /// `:set(k, v)`, `:set(k, v, false)`.
     Local,
-    /// `bag.key = v`: replicated from a server script, local on a client.
     BySide,
     Unknown,
 }
 
-/// How the key is written.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Element {
-    /// `bag.key`.
     Ident,
-    /// A string literal and its quote (`'` for long strings).
     Str(char),
-    /// A computed key.
     Expr,
 }
 
-/// A state bag key used in the code.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Site {
-    /// `None` when computed at runtime.
     pub key: Option<String>,
     pub kind: Kind,
     pub access: Access,
-    /// The key element: the identifier, the whole string literal, or the key expression.
     pub start: usize,
     pub end: usize,
     pub element: Element,
     pub replication: Replication,
-    /// For writes, a value type hint (`integer`, `vector3`, `any`…); empty otherwise.
     pub value_type: &'static str,
 }
 
-/// Where an index expression stands in a statement.
 #[derive(Clone, Copy)]
 enum Target {
-    /// Target `pos` of an assignment statement.
     Assign(u32, usize),
-    /// `a, bag.k in src`.
     Unpack,
-    /// `bag.k += 1`: the operator token.
     Compound(u32),
-    /// Part of the name of a `function a.b()` statement.
     FunctionName,
 }
 
@@ -181,7 +152,6 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    /// The kind of state bag `e` evaluates to (through at most 4 local aliases), `None` when it is not one.
     fn bag(&self, e: u32, depth: u32) -> Option<Kind> {
         let ast = self.ast;
         let e = ast.unparen(e);
@@ -193,7 +163,6 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    /// The kind of bag of the `LocalPlayer` / `Player(…)` / `Entity(…)` wrapper `e` evaluates to.
     fn wrapper(&self, e: u32, depth: u32) -> Option<Kind> {
         let ast = self.ast;
         let e = ast.unparen(e);
@@ -209,7 +178,6 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    /// A value type hint for `e`, from its syntax.
     pub fn value_type(&self, e: Option<u32>) -> &'static str {
         let Some(e) = e else { return ANY };
         let ast = self.ast;
@@ -259,7 +227,6 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    /// [`Self::value_type`], and for a local holding the written value, the type of its initializer.
     fn written_type(&self, e: Option<u32>) -> &'static str {
         let t = self.value_type(e);
         match e {
@@ -283,7 +250,6 @@ impl<'a> Analyzer<'a> {
         (s, end, Element::Expr)
     }
 
-    /// `bag.key` / `bag['key']` / `bag[expr]` on a state bag.
     pub fn index_site(&self, e: u32) -> Option<Site> {
         let ast = self.ast;
         let ExprKind::Index(obj, key) = ast.kind(e) else { return None };
@@ -347,7 +313,6 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    /// The kind of bags a bag name names: `'global'`, `'player:' .. id`, `('entity:%d'):format(id)`.
     pub fn bag_name_kind(&self, e: Option<u32>) -> Kind {
         let Some(prefix) = e.and_then(|e| self.bag_name_prefix(e)) else { return Kind::Unknown };
         if prefix == "global" {
@@ -374,7 +339,6 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    /// A key argument: its literal value, `None` for a computed key; `Err` when no site (another literal).
     fn key_arg(&self, arg: u32) -> Result<Option<String>, ()> {
         match self.ast.string(self.src, arg) {
             Some(k) => Ok(Some(k)),
@@ -383,7 +347,6 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    /// `bag:set(…)`, `AddStateBagChangeHandler`, `GetStateBagValue`, `StateBagHasKey`, `SetStateBagValue`.
     pub fn call_site(&self, e: u32) -> Option<Site> {
         let ast = self.ast;
         let ExprKind::Call(callee, args) = ast.kind(e) else { return None };
@@ -438,7 +401,6 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    /// Every key site of the file, in document order.
     pub fn sites(&self) -> Vec<Site> {
         let mut out: Vec<Site> = (0..self.ast.exprs.len() as u32)
             .filter_map(|e| match self.ast.kind(e) {
@@ -451,7 +413,6 @@ impl<'a> Analyzer<'a> {
         out
     }
 
-    /// The bag of the field being typed at `at` (`bag.|`, `bag?.ke|`) and the start of the typed name.
     pub fn field_at(&self, at: usize) -> Option<(Kind, usize)> {
         let src = self.src;
         for (id, e) in self.ast.exprs.iter().enumerate() {
@@ -475,14 +436,12 @@ impl<'a> Analyzer<'a> {
     }
 }
 
-/// Whether a key can be written `bag.key`.
 pub fn is_identifier(key: &str) -> bool {
     let mut chars = key.chars();
     chars.next().is_some_and(|c| c.is_alphabetic() || c == '_' || c == '$')
         && chars.all(|c| c.is_alphanumeric() || c == '_' || c == '$')
 }
 
-/// Files that may hold state bags (every bag access contains it: `GlobalState`, `.state`, the natives).
 pub fn may_hold_bags(text: &str) -> bool {
     text.contains("tate")
 }
@@ -492,7 +451,6 @@ pub fn analyze(src: &Source) -> Vec<Site> {
     Analyzer::new(src, &ast).sites()
 }
 
-/// The server script of the original acceptance tests.
 #[cfg(test)]
 pub const SERVER: &str = "RegisterNetEvent('job:set', function()\n    local src = source\n    \
     Player(src).state:set('test', 1, true)\n    Player(src).state.test2 = 'x'\n    local state = Player(src).state\n    \
@@ -503,7 +461,6 @@ pub const SERVER: &str = "RegisterNetEvent('job:set', function()\n    local src 
 mod tests {
     use super::*;
 
-    /// key → `KIND ACCESS replication valueType` of every site, in document order.
     fn entries(text: &str) -> std::collections::BTreeMap<String, Vec<String>> {
         let mut out: std::collections::BTreeMap<String, Vec<String>> = Default::default();
         for s in analyze(&Source::new(text)) {

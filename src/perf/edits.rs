@@ -1,16 +1,8 @@
-//! Text-level rewrites keeping the user's formatting and comments: insert a
-//! statement first / last in a block, delete a statement with its line,
-//! guess the indentation, pick a fresh local name.
-
 use super::ast::{Ast, ExprKind, Node, StatKind};
 use crate::lua::Source;
 
-/// `(start, end, new text)` in bytes, as in [`crate::feature::Fix::edits`].
 pub type Edit = (usize, usize, String);
 
-/// Sorts `edits` and merges insertions at the same offset (and an insertion
-/// at the start of a replacement) in their order, so the IDE applies them
-/// like the original fixes did.
 pub fn normalize(mut edits: Vec<Edit>) -> Vec<Edit> {
     let mut indexed: Vec<(usize, Edit)> = edits.drain(..).enumerate().collect();
     indexed.sort_by_key(|(i, e)| (e.0, e.1 > e.0, *i));
@@ -31,7 +23,6 @@ pub fn line_start(text: &str, at: usize) -> usize {
     text[..at].rfind('\n').map_or(0, |i| i + 1)
 }
 
-/// Offset of the `\n` ending the line containing `at` (or the end of the text).
 pub fn line_end(text: &str, at: usize) -> usize {
     text[at..].find('\n').map_or(text.len(), |i| at + i)
 }
@@ -40,19 +31,16 @@ fn blank(s: &str) -> bool {
     s.chars().all(char::is_whitespace)
 }
 
-/// Whether only whitespace precedes `at` on its line.
 pub fn starts_line(text: &str, at: usize) -> bool {
     blank(&text[line_start(text, at)..at])
 }
 
-/// Leading spaces and tabs of the line containing `at`.
 pub fn indent_of(text: &str, at: usize) -> &str {
     let ls = line_start(text, at);
     let rest = &text[ls..];
     &rest[..rest.len() - rest.trim_start_matches([' ', '\t']).len()]
 }
 
-/// The block a node holds directly (a loop's body, a function's, the first branch of an `if`).
 fn body_of(ast: &Ast, n: Node) -> Option<usize> {
     match n {
         Node::Block(b) => Some(b),
@@ -69,7 +57,6 @@ fn body_of(ast: &Ast, n: Node) -> Option<usize> {
     }
 }
 
-/// One indentation level, guessed from `n` and its parents (4 spaces by default).
 pub fn indent_unit(ast: &Ast, src: &Source, n: Node) -> String {
     let text = &src.text;
     let mut x = Some(n);
@@ -94,7 +81,6 @@ pub fn indent_unit(ast: &Ast, src: &Source, n: Node) -> String {
     "    ".into()
 }
 
-/// The comment following byte `end` on its line: its span.
 pub fn trailing_comment(src: &Source, end: usize) -> Option<(usize, usize)> {
     let i = src.all.partition_point(|t| t.start < end);
     let t = src.all.get(i)?;
@@ -102,14 +88,12 @@ pub fn trailing_comment(src: &Source, end: usize) -> Option<(usize, usize)> {
     (t.is_comment() && blank(gap) && !gap.contains('\n')).then_some((t.start, t.end))
 }
 
-/// End of the statement spanning `[start, end)`, with its trailing comment when nothing else follows on the line.
 pub fn end_of_line(src: &Source, end: usize) -> usize {
     let text = &src.text;
     let with_comment = trailing_comment(src, end).map_or(end, |c| c.1);
     if blank(&text[with_comment..line_end(text, with_comment)]) { with_comment } else { end }
 }
 
-/// Removes a statement and its trailing comment: the whole line when they stand alone on it.
 pub fn delete(src: &Source, (start, end): (usize, usize)) -> Edit {
     let text = &src.text;
     let stop = end_of_line(src, end);
@@ -121,7 +105,6 @@ pub fn delete(src: &Source, (start, end): (usize, usize)) -> Edit {
     (start, end, String::new())
 }
 
-/// Inserts `line` as a new statement before the one starting at `start`.
 pub fn insert_before(src: &Source, start: usize, line: &str) -> Edit {
     let text = &src.text;
     if starts_line(text, start) {
@@ -132,7 +115,6 @@ pub fn insert_before(src: &Source, start: usize, line: &str) -> Edit {
     }
 }
 
-/// Inserts `line` first in `block` (owned by `owner`), above the comment lines right before its first statement.
 pub fn insert_first(ast: &Ast, src: &Source, owner: Node, block: usize, line: &str) -> Edit {
     let text = &src.text;
     let Some(&first) = ast.blocks[block].stats.first() else { return insert_into_empty(ast, src, owner, block, line) };
@@ -154,7 +136,6 @@ pub fn insert_first(ast: &Ast, src: &Source, owner: Node, block: usize, line: &s
     (at, at, format!("{}{line}\n", indent_of(text, start)))
 }
 
-/// Inserts `line` last in `block` (owned by `owner`), after its last statement other than `exclude`.
 pub fn insert_last(ast: &Ast, src: &Source, owner: Node, block: usize, line: &str, exclude: Option<usize>) -> Edit {
     let text = &src.text;
     let Some(&last) = ast.blocks[block].stats.iter().rev().find(|&&s| Some(s) != exclude) else {
@@ -180,7 +161,6 @@ fn insert_into_empty(ast: &Ast, src: &Source, owner: Node, block: usize, line: &
     }
 }
 
-/// `base`, `base2`, `base3`… : a name unused in statement `scope` and not a local visible there.
 pub fn fresh_name(ast: &Ast, scope: usize, base: &str) -> String {
     let mut used = std::collections::HashSet::new();
     ast.walk_all(Node::Stat(scope), &mut |n| {
@@ -198,7 +178,6 @@ pub fn fresh_name(ast: &Ast, scope: usize, base: &str) -> String {
         .unwrap_or_else(|| base.to_owned())
 }
 
-/// `Citizen.Wait` when the file only uses that spelling, else `Wait`.
 pub fn wait_function(text: &str) -> &'static str {
     let citizen = find_call(
         text,

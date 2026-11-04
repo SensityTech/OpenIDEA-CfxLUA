@@ -1,12 +1,3 @@
-//! Completion in manifests: directive names (inserted with the shape of their
-//! value) and the manifest templates at statement start; in a directive's
-//! string: its enumerated values, the files and globs of the resource (and of
-//! other resources with `@name/…`), the resources and runtime constraints of
-//! dependencies.
-//!
-//! The IDE inserts plain text: the caret ends after the inserted text and the
-//! popup does not reopen by itself.
-
 use super::catalog::{self, CONSTRAINTS, PathKind, Role};
 use super::files::{Tree, normalize};
 use super::snippets::SNIPPETS;
@@ -18,7 +9,6 @@ use crate::project::{Resource, Value};
 use crate::text::parent;
 use openidea_plugin::providers::{CompletionItem, CompletionKind};
 
-/// Glob items offered per directory, at most.
 const MAX_GLOB_EXTENSIONS: usize = 8;
 
 pub fn completion(cx: &Ctx, at: usize) -> Vec<CompletionItem> {
@@ -35,7 +25,6 @@ pub fn completion(cx: &Ctx, at: usize) -> Vec<CompletionItem> {
     directives(cx, at)
 }
 
-/// Higher priorities first, then by label.
 fn sort_text(priority: i32, label: &str) -> String {
     format!("{:03}{label}", 100 - priority)
 }
@@ -104,7 +93,6 @@ fn directives(cx: &Ctx, at: usize) -> Vec<CompletionItem> {
     out
 }
 
-/// What follows a directive name: its value, in the form it is usually written.
 fn shape(form: &str, d: &Directive, indent: &str) -> String {
     let single = match d.values.as_slice() {
         [v] if matches!(d.value_type.as_str(), "enum" | "flag") => Some(v),
@@ -125,7 +113,6 @@ fn shape(form: &str, d: &Directive, indent: &str) -> String {
     }
 }
 
-/// The directive's description, example and reference link.
 fn documentation(d: &Directive) -> String {
     let mut md = d.description.clone();
     if !d.example.is_empty() {
@@ -164,7 +151,6 @@ fn values(cx: &Ctx, tok: usize, at: usize) -> Vec<CompletionItem> {
     items
 }
 
-/// The other strings of the table `value` is in.
 fn siblings<'a>(decl: &'a Decl, value: &Value) -> Vec<&'a str> {
     if !value.in_table {
         return Vec::new();
@@ -198,7 +184,6 @@ fn value_tail(directive: &str, value: &str) -> Option<&'static str> {
     }
 }
 
-/// The resources of the project but the manifest's own, by name.
 fn other_resources<'a>(cx: &'a Ctx) -> Vec<&'a Resource> {
     let own = parent(&cx.doc.path);
     let mut out: Vec<&Resource> = cx.ws.resources().filter(|r| r.dir != own).collect();
@@ -237,7 +222,6 @@ fn plural_files(n: usize) -> String {
     if n == 1 { "1 file".into() } else { format!("{n} files") }
 }
 
-/// The folders, files and globs of the directory typed so far (`rel`), labelled `<lookup><typed dir><name>`.
 fn children(tree: &Tree, rel: &str, lookup: &str, manifest: &str, kind: PathKind) -> Vec<CompletionItem> {
     let norm = normalize(rel);
     let dir = norm.rfind('/').map_or("", |i| &norm[..=i]);
@@ -346,7 +330,6 @@ mod tests {
         ("third/fxmanifest.lua", "fx_version 'cerulean'"),
     ];
 
-    /// Labels completed in `res/fxmanifest.lua` (written with a `<caret>`).
     fn complete(manifest: &str) -> Vec<CompletionItem> {
         let mut files = RES.to_vec();
         files.push(("res/fxmanifest.lua", manifest));
@@ -359,7 +342,6 @@ mod tests {
         complete(manifest).into_iter().map(|i| i.label).collect()
     }
 
-    /// The manifest after picking `label`.
     fn pick(manifest: &str, label: &str) -> String {
         let mut files = RES.to_vec();
         files.push(("res/fxmanifest.lua", manifest));

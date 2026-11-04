@@ -1,6 +1,3 @@
-//! Acceptance tests of the performance checks, on a `res` resource with
-//! client, server and shared folders and a small natives catalog.
-
 use super::*;
 use crate::feature::Feature;
 use crate::natives::{Native, NativeSet, Return};
@@ -63,7 +60,6 @@ fn catalog() -> Vec<Native> {
     out
 }
 
-/// Removes the common indentation (like Kotlin's `trimIndent`).
 fn dedent(text: &str) -> String {
     let lines: Vec<&str> = text.trim_matches('\n').lines().collect();
     let indent =
@@ -98,7 +94,6 @@ impl Run {
         p
     }
 
-    /// `highlighted text: message` of one check.
     fn problems(&self, code: &str) -> Vec<String> {
         let doc = self.fx.doc(&self.rel);
         self.all()
@@ -108,13 +103,11 @@ impl Run {
             .collect()
     }
 
-    /// 0-based lines of the problems of one check.
     fn lines(&self, code: &str) -> Vec<usize> {
         let doc = self.fx.doc(&self.rel);
         self.all().into_iter().filter(|p| p.code == code).map(|p| doc.src.lines.line_of(p.start)).collect()
     }
 
-    /// The text after applying the fix `title` of a problem at the caret.
     fn fixed(&self, title: &str) -> String {
         let (doc, at) = self.fx.caret(&self.rel);
         let fixes: Vec<Fix> =

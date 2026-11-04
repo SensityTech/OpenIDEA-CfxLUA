@@ -1,7 +1,3 @@
-//! Which native argument means what: the roles of a native's parameters
-//! (from their names and native types in the catalog, or a curated list of
-//! common natives without catalog), and the decodable integer literals.
-
 use crate::feature::Ctx;
 use crate::lua::Source;
 use crate::natives::{Native, NativeSet};
@@ -10,24 +6,19 @@ use crate::project::Game;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-/// What an integer argument of a native means.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
-    /// Control index; RDR3 controls are hashes of the control names.
     Control,
     BlipSprite,
     BlipColour,
     MarkerType,
     HudColour,
     ExplosionType,
-    /// `TASK_PLAY_ANIM` flags: a bit mask.
     AnimFlags,
-    /// A joaat hash: a `Hash` parameter, or any large integer literal.
     Hash,
 }
 
 impl Kind {
-    /// The setting turning its hints on and off.
     pub fn setting(self) -> &'static str {
         match self {
             Kind::Control => super::keys::CONTROLS,
@@ -41,7 +32,6 @@ impl Kind {
     }
 }
 
-/// Red, green, blue (and alpha) arguments starting at `red`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Colour {
     pub red: usize,
@@ -55,7 +45,6 @@ impl Colour {
     }
 }
 
-/// Meaning of the Lua arguments of one native.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Roles {
     pub kinds: Vec<(usize, Kind)>,
@@ -72,7 +61,6 @@ impl Roles {
     }
 }
 
-/// A call of a native whose arguments can be decoded.
 pub struct ValueCall<'a> {
     pub call: usize,
     pub name: String,
@@ -82,33 +70,26 @@ pub struct ValueCall<'a> {
 }
 
 impl ValueCall<'_> {
-    /// Name of the Lua parameter at `index` in the catalog.
     pub fn param(&self, index: usize) -> Option<&str> {
         self.native?.lua_params().nth(index).map(|p| p.name.as_str())
     }
 }
 
-/// An integer literal (with its sign) and what it means.
 pub struct Site<'a> {
-    /// The literal, or `-literal`.
     pub expr: usize,
     pub value: i64,
     pub kind: Kind,
     pub game: Game,
     pub call: Option<ValueCall<'a>>,
-    /// Argument index in the call (`None` when not an argument).
     pub index: Option<usize>,
 }
 
-/// Integer literals below this magnitude are hashes only when passed to a `Hash` parameter.
 pub const MIN_FREE_HASH: i64 = 0x10000;
 
-/// What the decoder needs from the request.
 pub struct Scope<'a> {
     pub cx: &'a Ctx<'a>,
     pub ast: &'a Ast,
     pub sets: Vec<NativeSet>,
-    /// RedM when the project only targets RDR3.
     pub project_game: Game,
 }
 
@@ -126,7 +107,6 @@ impl<'a> Scope<'a> {
         &self.cx.doc.src
     }
 
-    /// The native call `call` when one of its arguments can be decoded.
     pub fn call_at(&self, call: usize) -> Option<ValueCall<'a>> {
         let ExprKind::Call { callee, method: None, .. } = self.ast.exprs[call].kind else { return None };
         let ExprKind::Name { name, decl: None } = &self.ast.exprs[callee].kind else { return None };
@@ -149,7 +129,6 @@ impl<'a> Scope<'a> {
         Some(ValueCall { call, name: name.clone(), native, roles, game })
     }
 
-    /// The decodable integer of number literal `lit`.
     pub fn site_at(&self, lit: usize) -> Option<Site<'a>> {
         let ast = self.ast;
         if !ast.is_number(lit) {
@@ -186,7 +165,6 @@ impl<'a> Scope<'a> {
     }
 }
 
-/// Value of an integer literal (`38`, `0xB779A091`), `None` for floats and malformed numbers.
 pub fn integer_value(text: &str) -> Option<i64> {
     let t = text.trim();
     if let Some(digits) = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
@@ -201,7 +179,6 @@ pub fn integer_value(text: &str) -> Option<i64> {
     t.parse().ok()
 }
 
-/// Meaning of the parameters of a catalog native, from their names and native types.
 pub fn roles_of(native: &Native) -> Roles {
     let params: Vec<_> = native.lua_params().collect();
     let lower_native = native.lua_name.to_ascii_lowercase();
@@ -273,7 +250,6 @@ pub fn roles_of(native: &Native) -> Roles {
     Roles { kinds, colours }
 }
 
-/// `^hudcolou?r(index|id)?[0-9]?$`
 fn is_hud_colour_param(name: &str) -> bool {
     let Some(rest) = name.strip_prefix("hudcolour").or_else(|| name.strip_prefix("hudcolor")) else { return false };
     let rest = rest.strip_prefix("index").or_else(|| rest.strip_prefix("id")).unwrap_or(rest);
@@ -284,14 +260,12 @@ fn trimmed(name: &str) -> String {
     name.to_ascii_lowercase().trim_end_matches(|c: char| c.is_ascii_digit()).to_owned()
 }
 
-/// `r`, `red`, `colorR`, `colourR`, `colR`, `r1`: a colour channel parameter name.
 fn channel(name: &str, letter: char, word: &str) -> bool {
     let n = trimmed(name);
     let l = letter.to_string();
     n == l || n == word || n == format!("color{l}") || n == format!("colour{l}") || n == format!("col{l}")
 }
 
-/// Curated roles of the most used GTA V natives, used without catalog entry.
 fn fallback() -> &'static HashMap<&'static str, Roles> {
     static FALLBACK: OnceLock<HashMap<&'static str, Roles>> = OnceLock::new();
     FALLBACK.get_or_init(|| {

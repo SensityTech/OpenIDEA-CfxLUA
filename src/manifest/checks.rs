@@ -1,7 +1,3 @@
-//! The manifest inspections: a missing or invalid `fx_version`, `game` and
-//! `rdr3_warning`; deprecated content; misspelled or misused directives; paths
-//! and globs matching no file of the resource.
-
 use super::catalog::{self, FX_VERSION_LINE, FX_VERSIONS, GAMES, RDR3_WARNING, Role, rdr3_warning_line};
 use super::edits::{self, Edit};
 use super::files::{Tree, checkable, is_glob, is_url, split_resource_path};
@@ -22,7 +18,6 @@ fn fix(title: impl Into<String>, (start, end, text): Edit) -> Fix {
     Fix::new(title).replace(start, end, text)
 }
 
-/// The name of the first directive named `pref`, else of the first directive, else the whole file.
 fn anchor(view: &View, len: usize, pref: Option<&str>) -> (usize, usize) {
     pref.and_then(|p| view.first_named(p))
         .or(view.decls.first())
@@ -90,7 +85,6 @@ fn fx_version(src: &crate::lua::Source, view: &View, out: &mut Vec<Problem>) {
     }
 }
 
-/// Checks the games; returns the first `'rdr3'` literal.
 fn games<'a>(src: &crate::lua::Source, view: &'a View, fx: bool, out: &mut Vec<Problem>) -> Option<&'a Value> {
     let text = &src.text;
     let decls: Vec<&Decl> = view.decls.iter().filter(|d| d.metadata_key() == "game").collect();
@@ -216,7 +210,6 @@ fn deprecated(cx: &Ctx, view: &View, fx: bool, out: &mut Vec<Problem>) {
     }
 }
 
-/// The closest directive form within 1 edit (names of up to 5 letters) or 2.
 fn suggestion(name: &str) -> Option<&'static str> {
     let max = if name.chars().count() <= 5 { 1 } else { 2 };
     let lower = name.to_lowercase();

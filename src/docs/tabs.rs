@@ -1,6 +1,3 @@
-//! The lists of the six tabs: search, filters, rows (what the page draws for
-//! each item), counts and empty texts.
-
 use super::data;
 use super::search::{self, Query};
 use crate::natives::{Native, NativeSet, Natives};
@@ -21,7 +18,6 @@ pub enum Tab {
 impl Tab {
     pub const ALL: [Tab; 6] = [Tab::Natives, Tab::Runtime, Tab::Events, Tab::Manifest, Tab::Syntax, Tab::Guides];
 
-    /// Protocol id: `natives`, `runtime`, `events`, `manifest`, `syntax`, `guides`.
     pub fn id(self) -> &'static str {
         match self {
             Self::Natives => "natives",
@@ -38,17 +34,12 @@ impl Tab {
     }
 }
 
-/// The filter combos and toggles of a tab (natives: set, namespace, side,
-/// aliases, unnamed; events: side, game). Empty strings mean "all".
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Filters {
-    /// `project`, `all`, `GTA5`, `RDR3`, `SERVER`.
     pub set: String,
     pub namespace: String,
-    /// `client`, `server`, `shared`.
     pub side: String,
-    /// `gta5`, `rdr3`.
     pub game: String,
     pub aliases: bool,
     pub unnamed: bool,
@@ -68,7 +59,6 @@ impl Default for Filters {
 }
 
 impl Filters {
-    /// The natives sets the set filter designates (`project`: `project`, or every set when empty).
     pub fn sets(&self, project: &[NativeSet]) -> Vec<NativeSet> {
         match self.set.as_str() {
             "all" => NativeSet::ALL.to_vec(),
@@ -81,13 +71,10 @@ impl Filters {
     }
 }
 
-/// One list row: a bold or plain label, then text parts with CSS classes
-/// (`muted`, `small`, `side client`…).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Row {
     pub id: String,
     pub label: String,
-    /// `fn`, `event`, `prop`, `tpl`, `help`, `class`, `var`, `method`, `field`, `local`, `part`.
     #[serde(skip_serializing_if = "str::is_empty")]
     pub icon: &'static str,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
@@ -98,10 +85,8 @@ pub struct Row {
     pub parts: Vec<(String, &'static str)>,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub tip: String,
-    /// `category` (guides, not selectable for actions), `part` (runtime).
     #[serde(skip_serializing_if = "str::is_empty")]
     pub kind: &'static str,
-    /// Runtime tree: depth, whether it has children, initially expanded.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub depth: Option<usize>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
@@ -110,7 +95,6 @@ pub struct Row {
     pub expanded: bool,
 }
 
-/// The items of a search; natives rows are built when a page of them is asked.
 pub enum Listing {
     Natives { keys: Vec<(NativeSet, String)>, multi: bool },
     Rows(Vec<Row>),
@@ -150,7 +134,6 @@ impl Listing {
         }
     }
 
-    /// The first row an initial selection may land on (not a guide category).
     pub fn first_selectable(&self) -> Option<usize> {
         match self {
             Self::Natives { .. } => (!self.is_empty()).then_some(0),
@@ -158,7 +141,6 @@ impl Listing {
         }
     }
 
-    /// Rows `offset..offset + limit`.
     pub fn rows(&self, natives: &Natives, offset: usize, limit: usize) -> Vec<Row> {
         match self {
             Self::Natives { keys, multi } => keys
@@ -173,18 +155,13 @@ impl Listing {
     }
 }
 
-/// A search's outcome.
 pub struct Results {
     pub listing: Listing,
-    /// `9 natives`; empty for the runtime tree.
     pub count: String,
-    /// What the empty list says.
     pub empty: String,
-    /// Natives: namespaces of the searched sets.
     pub namespaces: Option<Vec<String>>,
 }
 
-/// `12,345`.
 pub fn group(n: usize) -> String {
     let digits = n.to_string();
     let mut out = String::new();
@@ -201,7 +178,6 @@ fn nothing(text: &str) -> String {
     if text.trim().is_empty() { "Nothing to show".into() } else { format!("Nothing matches '{text}'") }
 }
 
-/// Lower-case search words (split on spaces and tabs).
 fn words(text: &str) -> Vec<String> {
     text.to_lowercase().split([' ', '\t']).filter(|w| !w.is_empty()).map(str::to_owned).collect()
 }
@@ -210,8 +186,6 @@ fn all_in(words: &[String], haystack: &str) -> bool {
     words.iter().all(|w| haystack.contains(w.as_str()))
 }
 
-/// The list of `tab` for search `text` and filters `f`. `project` are the
-/// natives sets of the project.
 pub fn list(tab: Tab, natives: &Natives, rt: &Runtime, project: &[NativeSet], text: &str, f: &Filters) -> Results {
     match tab {
         Tab::Natives => natives_list(natives, project, text, f),
@@ -272,7 +246,6 @@ fn side_class(side: Side) -> &'static str {
     }
 }
 
-/// `GetEntityCoords  ENTITY  Client  FiveM  0x3FEF770D40960D5A`.
 pub fn native_row(n: &Native, multi: bool) -> Row {
     let mut parts =
         vec![(format!("  {}", n.namespace), "muted"), (format!("  {}", n.side_label()), side_class(n.apiset))];
@@ -373,7 +346,6 @@ fn guide_row(g: &data::Guide) -> Row {
     Row { id: g.id.clone(), label: g.title.clone(), icon: "help", tip: g.summary.clone(), ..Row::default() }
 }
 
-/// Categories (index order) and their guides; a search lists the matching guides only.
 fn guide_rows(text: &str) -> Vec<Row> {
     let words = words(text);
     let guides = data::guides();
@@ -416,14 +388,11 @@ fn guide_rows(text: &str) -> Vec<Row> {
         .collect()
 }
 
-/// What a runtime tree id designates.
 pub enum RuntimeNode {
     Part(Part),
     Decl(usize),
 }
 
-/// The label of a tree node and the declaration whose children it shows: a
-/// variable with a single variable child is shown merged (`a.b`).
 fn compressed(rt: &Runtime, mut d: usize) -> (String, usize) {
     let mut label = rt.decl(d).label();
     loop {
@@ -449,8 +418,6 @@ fn icon(d: &Decl) -> &'static str {
     }
 }
 
-/// The runtime tree, filtered: a matching node keeps all its descendants, a
-/// node with a matching descendant is kept; parts without matches are hidden.
 pub fn runtime_rows(rt: &Runtime, text: &str) -> Vec<Row> {
     let needle = text.trim().to_lowercase();
     let mut rows = Vec::new();
@@ -479,9 +446,6 @@ pub fn runtime_rows(rt: &Runtime, text: &str) -> Vec<Row> {
     rows
 }
 
-/// A tree node: its id segment (the label, `label#2` for a second sibling
-/// with the same label), its label, its declaration and the declaration
-/// whose children it shows (see [`compressed`]).
 struct Node {
     segment: String,
     label: String,
@@ -500,8 +464,6 @@ fn siblings(rt: &Runtime, decls: &[usize]) -> Vec<Node> {
     out
 }
 
-/// Where a tree node goes: its parent's id, its depth, whether it is top-level
-/// (shows its file) and whether it starts expanded (a search expands everything).
 struct Level<'a> {
     path: &'a str,
     depth: usize,
@@ -509,7 +471,6 @@ struct Level<'a> {
     expand: bool,
 }
 
-/// Adds `node` (and its kept descendants) when it or a descendant matches `needle`.
 fn add_node(rt: &Runtime, node: Node, at: &Level, needle: &str, out: &mut Vec<Row>) -> bool {
     let id = format!("{}/{}", at.path, node.segment);
     let matches = needle.is_empty() || node.label.to_lowercase().contains(needle);
@@ -537,7 +498,6 @@ fn add_node(rt: &Runtime, node: Node, at: &Level, needle: &str, out: &mut Vec<Ro
     true
 }
 
-/// The node of tree id `Part/Name/Name`, else the first declaration labelled `id`.
 pub fn runtime_node(rt: &Runtime, id: &str) -> Option<RuntimeNode> {
     let mut segments = id.split('/');
     let first = segments.next()?;

@@ -1,11 +1,3 @@
-//! The events of a project, built from the per-file facts:
-//! 1. the event functions known upfront: the runtime API, the helpers of the
-//!    settings (and alias functions), the functions annotated `---@cfx.event`;
-//! 2. helper detection: a named function becomes a helper when its parameters
-//!    flow into the key of a call to a known event function, repeated until
-//!    nothing changes (fetching the calls of each new helper);
-//! 3. the sites: every call of an event function whose key is known statically.
-
 use super::flow::{Arg, CallRecord, CallbackCall, FileFacts, FunctionInfo, merge_literals};
 use super::model::{
     Dirs, DynamicSite, EventFn, EventKey, FileInfo, FnKind, KeySpec, Occurrence, Origin, Role, STANDARD_NAMES, Seg,
@@ -21,11 +13,9 @@ use std::rc::Rc;
 const MAX_ROUNDS: usize = 12;
 const MAX_DERIVATIONS: usize = 12;
 
-/// What the settings say about helpers.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Config {
     pub detect: bool,
-    /// `Path annotation-text` lines.
     pub helpers: Vec<String>,
     pub aliases: Vec<String>,
 }
@@ -36,10 +26,8 @@ impl Default for Config {
     }
 }
 
-/// The resources loading a file from their manifest, and the side they load it on.
 type Importers = Rc<Vec<(Rc<str>, Side)>>;
 
-/// Sides and resources of files, and the resources loading a file from their manifest.
 pub struct Scopes<'a> {
     ws: &'a Workspace,
     infos: RefCell<HashMap<String, FileInfo>>,
@@ -63,7 +51,6 @@ impl<'a> Scopes<'a> {
         info
     }
 
-    /// The resources (and sides) loading `path` with an `@resource/path` manifest entry, its own excluded.
     fn importers(&self, path: &str) -> Importers {
         if let Some(i) = self.importers.borrow().get(path) {
             return i.clone();
@@ -97,7 +84,6 @@ impl<'a> Scopes<'a> {
         out
     }
 
-    /// Whether `f` can be called from `file`.
     fn usable(&self, f: &EventFn, file: &str, info: &FileInfo) -> bool {
         if f.is_standard() {
             return true;
@@ -111,7 +97,6 @@ impl<'a> Scopes<'a> {
         compatible(f.defined_side, info.side)
     }
 
-    /// A redefinition of a runtime function applies to its resource and to the resources loading it.
     fn applies_to(&self, f: &EventFn, info: &FileInfo) -> bool {
         if !compatible(f.defined_side, info.side) {
             return false;
@@ -136,7 +121,6 @@ impl<'a> Scopes<'a> {
         same_file.or_else(same_resource).or(candidates.first()).cloned()
     }
 
-    /// The event function `record` calls, and the leading arguments to skip (dot call of a method).
     fn resolve(
         &self,
         functions: &HashMap<String, Vec<Rc<EventFn>>>,
@@ -232,10 +216,8 @@ impl<'a> Scopes<'a> {
     }
 }
 
-/// The events of a project.
 #[derive(Default)]
 pub struct Db {
-    /// The event helpers (runtime functions excluded), by path.
     pub helpers: Vec<Rc<EventFn>>,
     pub sites: Vec<Site>,
     pub dynamic: Vec<DynamicSite>,
@@ -243,12 +225,10 @@ pub struct Db {
     by_file: HashMap<Rc<str>, Vec<usize>>,
     aliases: HashMap<Rc<EventKey>, Vec<Rc<EventKey>>>,
     handled_namespaces: HashSet<String>,
-    /// Helpers by simple name, to resolve the calls being edited.
     functions: HashMap<String, Vec<Rc<EventFn>>>,
     standard: HashMap<String, Rc<EventFn>>,
 }
 
-/// Whether trigger `t` reaches handler `h`: the side its directions lead to, the caller's side for local events.
 pub fn reaches(t: &Site, h: &Site) -> bool {
     (t.directions.has(Dirs::LOCAL) && compatible(t.side(), h.side()))
         || (t.directions.has(Dirs::SERVER) && h.side() != Side::Client)
@@ -264,7 +244,6 @@ impl Db {
         self.by_key.keys().map(|k| &**k)
     }
 
-    /// `key` and the keys aliased to it.
     pub fn related(&self, key: &EventKey) -> Vec<EventKey> {
         let mut out = vec![key.clone()];
         let mut queue = VecDeque::from([key.clone()]);
@@ -283,7 +262,6 @@ impl Db {
         self.by_key.get(key).into_iter().flatten().map(|&i| &self.sites[i])
     }
 
-    /// The sites of `key` (and of its aliases), the key's first.
     pub fn sites_of(&self, key: &EventKey, aliases: bool) -> Vec<&Site> {
         let mut out: Vec<&Site> = self.sites_keyed(key).collect();
         if aliases && self.aliases.contains_key(key) {
@@ -310,12 +288,10 @@ impl Db {
         self.triggers(&handler.key).into_iter().filter(|t| reaches(t, handler)).collect()
     }
 
-    /// Namespaces of the keys handled in the project (the empty one excluded).
     pub fn is_handled_namespace(&self, ns: &str) -> bool {
         self.handled_namespaces.contains(ns)
     }
 
-    /// Whether a call with a computed key may handle `key` (or register it for the network when `net`).
     pub fn may_be_handled_dynamically(&self, key: &EventKey, net: bool) -> bool {
         !self.dynamic.is_empty()
             && self
@@ -328,13 +304,11 @@ impl Db {
         self.by_file.get(file).into_iter().flatten().map(|&i| &self.sites[i])
     }
 
-    /// The site whose key component `n` is the string literal starting at byte `start`.
     pub fn site_at(&self, file: &str, start: u32) -> Option<(&Site, usize)> {
         self.sites_in(file)
             .find_map(|s| s.occurrences.iter().position(|o| o.is_some_and(|o| o.span.start == start)).map(|n| (s, n)))
     }
 
-    /// The function a call of the code being edited invokes, with the shift of its arguments.
     pub fn resolve(
         &self,
         ws: &Workspace,
@@ -347,7 +321,6 @@ impl Db {
     }
 }
 
-/// A function of a file.
 type FnId<'a> = (&'a str, u32);
 
 #[derive(Clone, Copy)]
@@ -379,12 +352,10 @@ struct Builder<'a> {
     explicit: Vec<Rc<EventFn>>,
     explicit_ids: HashSet<FnId<'a>>,
     settings_paths: HashSet<String>,
-    /// Detected helpers in insertion order (removed ones leave a hole).
     detected: Vec<Option<(FnId<'a>, Rc<EventFn>)>>,
     detected_index: HashMap<FnId<'a>, usize>,
     functions: HashMap<String, Vec<Rc<EventFn>>>,
     fetched: HashMap<String, Rc<Vec<Ref<'a>>>>,
-    /// The keys of the sites, shared.
     keys: RefCell<HashSet<Rc<EventKey>>>,
 }
 
@@ -421,7 +392,6 @@ impl<'a> Builder<'a> {
         self.functions = functions;
     }
 
-    /// The calls of the project to a function named `name`, by file path and offset.
     fn fetch(&mut self, name: &str) -> Rc<Vec<Ref<'a>>> {
         if let Some(r) = self.fetched.get(name) {
             return r.clone();
@@ -828,8 +798,6 @@ impl<'a> Builder<'a> {
     }
 }
 
-/// The key of a helper calling an event function with `args`: the callee's key spec with its
-/// parameters replaced by what the helper passes; `None` when it does not depend on the helper's parameters.
 fn compose_key(spec: &KeySpec, args: &[Arg], function: &FunctionInfo) -> Option<KeySpec> {
     // some key argument must come from the helper's parameters
     let from_params =
@@ -887,7 +855,6 @@ fn compose_key(spec: &KeySpec, args: &[Arg], function: &FunctionInfo) -> Option<
     Some(KeySpec { logical: true, components: result })
 }
 
-/// The helper's callback parameter and the values its wrapper injects before the payload.
 fn callback_of(h: &Contribution) -> (Option<usize>, usize) {
     let Some(index) = h.target.callback else { return (None, 0) };
     match h.args.get(index) {
@@ -897,8 +864,6 @@ fn callback_of(h: &Contribution) -> (Option<usize>, usize) {
     }
 }
 
-/// Values a wrapper closure passes to the callback before the payload, the wrapper itself receiving
-/// `received` injected values: the arguments before the first one computed from the payload.
 fn injected_through(c: &CallbackCall, received: usize) -> usize {
     let mut payload: Sources = (received..c.closure_params).map(|i| i as i32).collect();
     if c.closure_vararg {
@@ -919,7 +884,6 @@ fn is_vararg_spread(a: &Arg) -> bool {
     matches!(a, Arg::Spread(s) if s.len() == 1 && s.contains(&VARARG))
 }
 
-/// First payload parameter of a trigger helper, and the number of payload values when fixed.
 fn payload_of(t: &Contribution, function: &FunctionInfo) -> (Option<usize>, Option<usize>) {
     let Some(start) = t.target.payload_start else { return (None, None) };
     let payload = &t.args[start.min(t.args.len())..];

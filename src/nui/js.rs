@@ -1,8 +1,3 @@
-//! A tolerant tokenizer of JavaScript and TypeScript (JSX included): comments
-//! are skipped; strings, template literals and regular expressions are single
-//! tokens. It never fails: broken code gives approximate tokens. Offsets are
-//! byte offsets of the analysed text; only `[from, to)` is read.
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Ident,
@@ -18,23 +13,16 @@ pub struct Tok {
     pub kind: Kind,
     pub start: usize,
     pub end: usize,
-    /// A line break separates it from the previous token.
     pub newline: bool,
-    /// Strings and templates.
     pub lit: Option<Box<Lit>>,
 }
 
 #[derive(Clone, Debug)]
 pub enum Lit {
-    /// `value`: decoded, `None` when not terminated on its line; `plain`: written without escapes.
-    Str {
-        value: Option<String>,
-        plain: bool,
-    },
+    Str { value: Option<String>, plain: bool },
     Template(Template),
 }
 
-/// A template literal: one more literal part than `${}` expressions.
 #[derive(Clone, Debug)]
 pub struct Template {
     pub quasis: Vec<Quasi>,
@@ -42,7 +30,6 @@ pub struct Template {
     pub terminated: bool,
 }
 
-/// A literal part of a template: its text (escapes decoded) and where it starts.
 #[derive(Clone, Debug)]
 pub struct Quasi {
     pub text: String,
@@ -70,7 +57,6 @@ impl Tok {
         }
     }
 
-    /// A string's decoded value (`None` when not terminated).
     pub fn value(&self) -> Option<&str> {
         match self.lit.as_deref() {
             Some(Lit::Str { value, .. }) => value.as_deref(),
@@ -78,7 +64,6 @@ impl Tok {
         }
     }
 
-    /// A string literal, or a template literal without `${}`: a constant string.
     pub fn constant(&self) -> Option<&str> {
         match self.lit.as_deref()? {
             Lit::Str { value, .. } => value.as_deref(),
@@ -89,7 +74,6 @@ impl Tok {
         }
     }
 
-    /// The [`Tok::constant`] maps character by character to the source.
     pub fn constant_is_plain(&self) -> bool {
         match self.lit.as_deref() {
             Some(Lit::Str { plain, .. }) => *plain,
@@ -98,23 +82,18 @@ impl Tok {
         }
     }
 
-    /// Offset of the first character of the constant, inside the quotes.
     pub fn content_start(&self) -> usize {
         self.start + 1
     }
 }
 
-/// Bound of the tokens of one range: generated bundles are not worth more.
 const MAX_TOKENS: usize = 400_000;
 
-/// Multi-character punctuators, longest first. `>` is never merged with a
-/// following `>`: TypeScript generics close with `>>`.
 const PUNCTUATORS: &[&str] = &[
     "...", "===", "!==", "**=", "<<=", "&&=", "||=", "??=", "=>", "==", "!=", "<=", ">=", "&&", "||", "??", "?.", "++",
     "--", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "**", "<<",
 ];
 
-/// Keywords after which `/` starts a regular expression.
 const BEFORE_EXPRESSION: &[&str] = &[
     "return",
     "typeof",
@@ -163,7 +142,6 @@ impl Lexer<'_> {
         (i < self.to).then(|| self.text.as_bytes()[i])
     }
 
-    /// Tokens to the end, or (`stop_at_brace`) to the `}` closing a template expression (consumed).
     fn lex(&mut self, stop_at_brace: bool) -> Vec<Tok> {
         let mut tokens: Vec<Tok> = Vec::new();
         let mut depth = 0usize;
@@ -290,7 +268,6 @@ impl Lexer<'_> {
         }
     }
 
-    /// Decodes the escape whose character after `\` is at `pos`; `pos` ends after it.
     fn escape(&mut self, value: &mut String) {
         let Some(e) = self.peek() else { return };
         self.pos += e.len_utf8();
@@ -335,7 +312,6 @@ impl Lexer<'_> {
         }
     }
 
-    /// Appends the character of the `digits` hexadecimal digits at `pos`.
     fn hex(&mut self, value: &mut String, digits: usize) -> bool {
         let Some(s) = self.text.get(self.pos..self.pos + digits).filter(|_| self.pos + digits <= self.to) else {
             return false;

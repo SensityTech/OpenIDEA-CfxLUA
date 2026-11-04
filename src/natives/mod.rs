@@ -1,10 +1,3 @@
-//! FiveM / RedM natives: the catalogs (bundled snapshot of the Cfx.re
-//! databases, plus the updates the user downloaded), which of them a file may
-//! use (game, client / server side, settings), and natives completion.
-//!
-//! Catalogs load lazily, one set at a time: a FiveM project never parses the
-//! RedM database.
-
 mod convert;
 pub mod feature;
 pub mod model;
@@ -22,10 +15,8 @@ use crate::settings::{Settings, keys};
 use std::cell::OnceCell;
 use std::collections::HashMap;
 
-/// One natives set, indexed by Lua name.
 pub struct Catalog {
     pub set: NativeSet,
-    /// Primaries and aliases, in a stable order (namespace, then name).
     pub natives: Vec<Native>,
     by_name: HashMap<String, usize>,
 }
@@ -49,8 +40,6 @@ impl Catalog {
     }
 }
 
-/// How catalogs are produced: the bundled snapshot (plus stored updates) in
-/// the plugin, fixed lists in tests.
 enum Source {
     Bundled,
     Fixed,
@@ -68,12 +57,10 @@ impl Default for Natives {
 }
 
 impl Natives {
-    /// The catalogs of the plugin: bundled snapshot, with the updates kept in storage.
     pub fn bundled() -> Self {
         Self { source: Source::Bundled, sets: Default::default() }
     }
 
-    /// Fixed catalogs (tests): natives are grouped by their `set`.
     pub fn from_natives(natives: Vec<Native>) -> Self {
         let this = Self { source: Source::Fixed, sets: Default::default() };
         let mut by_set: HashMap<NativeSet, Vec<Native>> = HashMap::new();
@@ -86,7 +73,6 @@ impl Natives {
         this
     }
 
-    /// The catalog of `set` (loaded on first use).
     pub fn catalog(&self, set: NativeSet) -> &Catalog {
         self.sets[set as usize].get_or_init(|| match self.source {
             Source::Bundled => Catalog::new(set, load(set)),
@@ -94,23 +80,19 @@ impl Natives {
         })
     }
 
-    /// Whether `set` is loaded (never loads it).
     pub fn is_loaded(&self, set: NativeSet) -> bool {
         self.sets[set as usize].get().is_some()
     }
 
-    /// Drops loaded catalogs (after an update): they reload on next use.
     pub fn invalidate(&mut self) {
         self.sets = Default::default();
     }
 
-    /// The first native named `lua_name` among `sets` (in that order).
     pub fn find(&self, lua_name: &str, sets: &[NativeSet]) -> Option<&Native> {
         sets.iter().find_map(|&s| self.catalog(s).get(lua_name))
     }
 }
 
-/// Loads the natives of `set` from the bundled snapshot and the stored update.
 fn load(set: NativeSet) -> Vec<Native> {
     let groups = sources::bundled_groups(set);
     let groups = match update::current_delta(set) {
@@ -120,8 +102,6 @@ fn load(set: NativeSet) -> Vec<Native> {
     convert::flatten(groups)
 }
 
-/// Games whose client natives the project uses: the `game` setting, or
-/// (auto) the games of every manifest of the project (FiveM when none says).
 pub fn project_games(settings: &Settings, detected: &[Game]) -> Vec<Game> {
     match settings.string(keys::GAME, "auto").as_str() {
         "fivem" => vec![Game::Gta5],
@@ -132,9 +112,6 @@ pub fn project_games(settings: &Settings, detected: &[Game]) -> Vec<Game> {
     }
 }
 
-/// The natives sets a script may call: client sets of the project's games
-/// (narrowed to its resource's `game` in auto mode), the server set, as the
-/// script's side and the settings allow. Manifests see none.
 pub fn visible_sets(
     settings: &Settings,
     detected: &[Game],
@@ -154,8 +131,6 @@ pub fn visible_sets(
     out
 }
 
-/// The client sets of a script's games: the project's, narrowed to its
-/// resource's `game` in auto mode (whatever the side and the switches).
 pub fn client_sets(settings: &Settings, detected: &[Game], resource_games: Option<&[Game]>) -> Vec<NativeSet> {
     let auto = settings.string(keys::GAME, "auto") == "auto";
     project_games(settings, detected)
@@ -196,7 +171,6 @@ mod tests {
         );
     }
 
-    /// The bundled catalogs, converted once for every test.
     pub fn bundled(set: NativeSet) -> &'static [Native] {
         static SETS: [std::sync::OnceLock<Vec<Native>>; 3] = [const { std::sync::OnceLock::new() }; 3];
         SETS[set as usize].get_or_init(|| load(set))
@@ -280,8 +254,6 @@ mod tests {
         assert_eq!(natives.catalog(NativeSet::Server).len(), 394);
     }
 
-    /// Building the FiveM catalog is the first completion's cost: run with
-    /// `cargo test --release --lib natives::tests::load_time -- --nocapture`.
     #[test]
     fn load_time() {
         let start = std::time::Instant::now();

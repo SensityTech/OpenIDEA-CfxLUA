@@ -1,38 +1,21 @@
-//! What the checks know about a function: how much work a call does, whether
-//! it gives the CPU back, what it floods, what it registers. The Cfx runtime
-//! and Lua standard functions are listed here; natives are classified by
-//! their names (and documentation) when no table says.
-
-/// What a call does, from the cheapest to the least known.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Work {
-    /// Lua computation without game state.
     Pure,
-    /// Reads game or runtime state.
     Query,
-    /// A one-shot effect (`TriggerEvent`-like, `print`).
     Action,
-    /// A native changing game state (it may have to be repeated).
     Effect,
-    /// Acts on the current frame only (drawing, text, HUD, controls).
     PerFrame,
-    /// Code the plugin can't see.
     Unknown,
 }
 
-/// How a call gives the CPU back.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Yield {
     None,
-    /// `Wait`: resumes after a delay.
     Wait,
-    /// `Citizen.Await`: resumes when something happens.
     Await,
-    /// Unknown code may wait.
     Maybe,
 }
 
-/// Work that floods something when it runs every frame.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Spam {
     Log,
@@ -44,7 +27,6 @@ pub enum Spam {
     Database,
 }
 
-/// Calls registering code that runs later: repeating them leaks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Registration {
     Thread,
@@ -59,11 +41,8 @@ pub struct Spec {
     pub yields: Yield,
     pub spam: Option<Spam>,
     pub registration: Option<Registration>,
-    /// Index of the callback argument of a registration.
     pub function_arg: usize,
-    /// Index of the event / command name argument of a registration.
     pub name_arg: usize,
-    /// Always raises an error.
     pub exits: bool,
 }
 
@@ -85,7 +64,6 @@ impl Spec {
     pub const ACTION: Spec = Spec::of(Work::Action);
     pub const EFFECT: Spec = Spec::of(Work::Effect);
     pub const PER_FRAME: Spec = Spec::of(Work::PerFrame);
-    /// Unknown code: it may also wait.
     pub const UNKNOWN: Spec = Spec { yields: Yield::Maybe, ..Spec::of(Work::Unknown) };
 
     const fn yielding(self, yields: Yield) -> Self {
@@ -246,7 +224,6 @@ const RUNTIME: &[(&[&str], Spec)] = &[
 
 const PURE_LIBRARIES: &[&str] = &["math", "string", "table", "utf8", "bit32"];
 
-/// Spec of the runtime function `path` (`Wait`, `Citizen.Wait`, `string.format`).
 pub fn runtime(path: &str) -> Option<Spec> {
     if let Some((_, spec)) = RUNTIME.iter().find(|(names, _)| names.contains(&path)) {
         return Some(*spec);
@@ -292,7 +269,6 @@ const PER_FRAME_PREFIXES: &[&str] = &[
 
 const PER_FRAME_PARTS: &[&str] = &["ThisFrame", "ThisUpdate", "NextFrame", "Prompt"];
 
-/// Natives that only act on the current frame, by name.
 pub fn is_per_frame_name(name: &str) -> bool {
     PER_FRAME_PREFIXES.iter().any(|p| name.starts_with(p)) || PER_FRAME_PARTS.iter().any(|p| name.contains(p))
 }
@@ -315,7 +291,6 @@ const QUERY_PREFIXES: &[&str] = &[
     "Vmag",
 ];
 
-/// Natives reading state: a query verb not followed by a lower-case letter.
 pub fn is_query_name(name: &str) -> bool {
     name == "PlayerPedId"
         || name == "PlayerId"
@@ -389,12 +364,10 @@ const TRANSIENT_WORDS: &[&str] = &[
     "Weapon",
 ];
 
-/// A state read whose value only matters on the frame it is read.
 pub fn is_transient_query_name(name: &str) -> bool {
     words(name).iter().any(|w| TRANSIENT_WORDS.contains(w))
 }
 
-/// Words of a name: split at lower/digit → upper boundaries and at `_` (`IsPedShooting` → Is, Ped, Shooting).
 pub fn words(name: &str) -> Vec<&str> {
     let bytes = name.as_bytes();
     let mut out = Vec::new();
@@ -419,12 +392,10 @@ pub fn words(name: &str) -> Vec<&str> {
     out
 }
 
-/// Native-looking name: `PascalCase`, letters, digits and `_`.
 pub fn looks_like_native(name: &str) -> bool {
     name.starts_with(|c: char| c.is_ascii_uppercase()) && name.chars().all(|c| c.is_alphanumeric() || c == '_')
 }
 
-/// Whether a native's documentation says it lasts one frame or must run every frame.
 pub fn is_per_frame_description(description: &str) -> bool {
     let text = description.to_ascii_lowercase();
     let words: Vec<(usize, &str)> = word_spans(&text);
@@ -456,7 +427,6 @@ pub fn is_per_frame_description(description: &str) -> bool {
     false
 }
 
-/// Maximal runs of word characters with their offsets.
 fn word_spans(text: &str) -> Vec<(usize, &str)> {
     let mut out = Vec::new();
     let mut start = None;
