@@ -22,6 +22,11 @@ optional = ["net:static.cfx.re", "net:raw.githubusercontent.com", "clipboard"]
 kinds = ["completion", "definition", "line-markers", "code-actions"]
 languages = ["lua"]
 
+# The NUI bridge: callbacks and messages in the pages of resources.
+[[contributes.providers]]
+kinds = ["completion", "definition", "line-markers", "code-actions"]
+languages = ["javascript", "typescript", "javascriptreact", "typescriptreact", "vue", "svelte", "html"]
+
 [[contributes.views]]
 id = "docs"
 title = "CfxLua"

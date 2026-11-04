@@ -45,6 +45,30 @@
       "description": "Once a day, download the Cfx.re native databases (static.cfx.re, GitHub) if they changed.",
       "default": true
     },
+    "nui.messageKeys": {
+      "type": "string",
+      "title": "NUI message keys",
+      "description": "Keys of a SendNUIMessage table naming the message, compared by the page (event.data.action). Comma-separated.",
+      "default": "action, type"
+    },
+    "nui.fetchFunctions": {
+      "type": "string",
+      "title": "NUI callback functions",
+      "description": "JavaScript functions taking a NUI callback name as first argument, besides the ones detected (a function building the URL from GetParentResourceName() and a parameter). Comma-separated.",
+      "default": "fetchNui"
+    },
+    "nui.listenerFunctions": {
+      "type": "string",
+      "title": "NUI message functions",
+      "description": "JavaScript functions or decorators taking a message name as first argument (useNuiEvent, @OnNuiEvent), besides the ones detected. Comma-separated.",
+      "default": "useNuiEvent"
+    },
+    "nui.devServerPort": {
+      "type": "integer",
+      "title": "NUI dev server port",
+      "description": "Used by \"Switch ui_page to the dev server\" when no vite or webpack config declares a port.",
+      "default": 5173
+    },
     "escrow.showStatus": {
       "type": "boolean",
       "title": "Show the Asset Escrow status of resource files",
