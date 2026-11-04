@@ -388,7 +388,7 @@ impl DevKit {
         if matches!(id, natives::UPDATE | natives::SCHEDULED_UPDATE) {
             self.natives_changed();
         }
-        // A .luarc.json just made from the New template is not saved yet: no event told us about it.
+        // A .luarc.json written outside the IDE, or not saved yet, sent no event.
         if id == luals::DEFINITIONS
             && let Some(i) = ws
         {

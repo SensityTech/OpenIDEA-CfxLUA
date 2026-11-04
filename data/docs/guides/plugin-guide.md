@@ -237,3 +237,4 @@ update, approve the program again.
 | RedM natives in a FiveM project | Set *Game* to *FiveM*, or add `game 'gta5'` to the resource's manifest. |
 | A new native is missing | Run **CfxLua: Update Natives**. |
 | Files created outside the IDE are not seen | Save them once in the IDE, or reload the plugin in **Settings › Plugins**. |
+| No natives in completion after deleting the generated definitions | Reload the plugin in **Settings › Plugins**: it sees deleted files when it starts. |
