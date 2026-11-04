@@ -69,8 +69,9 @@ reason in its tooltip, and file icons mark client, server and shared scripts and
 - Completion shows the signature and the full documentation of each native; old names (deprecated aliases) and
   unnamed natives are hidden unless you ask for them.
 - A server native called from a client script (or the reverse) is reported.
-- **CfxLua: Update Natives** downloads the latest databases from Cfx.re (conditional requests: nothing is downloaded
-  when nothing changed); a background check runs once a day. Offline, the bundled snapshot is used.
+- **CfxLua: Update Natives** (or the update button of the Natives tab) downloads the latest databases from Cfx.re
+  (conditional requests: nothing is downloaded when nothing changed); a background check runs once a day. Offline,
+  the bundled snapshot is used.
 
 ### Cfx runtime API
 

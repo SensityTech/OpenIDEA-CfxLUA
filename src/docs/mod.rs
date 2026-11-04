@@ -69,6 +69,7 @@ enum Request {
     Prefs {
         prefs: Value,
     },
+    UpdateNatives,
 }
 
 #[derive(Deserialize)]
@@ -97,12 +98,14 @@ impl Docs {
         Ok(View::message("The documentation is shown by the plugin's page."))
     }
 
-    pub fn handle(&self, cx: &CommandCx, view: &str, event: ViewEvent) -> Result<(), Error> {
-        let ViewEvent::Message(text) = event else { return Ok(()) };
+    /// Answers the page; returns the command the page asked for, which the caller runs, then calls [`Self::refresh`].
+    pub fn handle(&self, cx: &CommandCx, view: &str, event: ViewEvent) -> Result<Option<&'static str>, Error> {
+        let ViewEvent::Message(text) = event else { return Ok(None) };
         if view != VIEW {
-            return Ok(());
+            return Ok(None);
         }
         let reply = match serde_json::from_str::<Request>(&text) {
+            Ok(Request::UpdateNatives) => return Ok(Some(crate::natives::UPDATE)),
             Ok(request) => self.reply(cx, request),
             Err(e) => {
                 host::log(LogLevel::Debug, &format!("docs page message {text:?}: {e}"));
@@ -112,7 +115,13 @@ impl Docs {
         if let Some(reply) = reply {
             post(&reply);
         }
-        Ok(())
+        Ok(None)
+    }
+
+    pub fn refresh(&self, command: &str) {
+        if command == crate::natives::UPDATE {
+            post(&json!({ "op": "refresh", "tab": Tab::Natives.id() }));
+        }
     }
 
     fn reply(&self, cx: &CommandCx, request: Request) -> Option<Value> {
@@ -165,6 +174,7 @@ impl Docs {
                 }
                 None
             }
+            Request::UpdateNatives => None,
         }
     }
 
@@ -546,5 +556,19 @@ mod tests {
         docs.command(&cx, SHOW_DOCS, None).unwrap().unwrap();
         assert!(elsewhere.notifications()[0].body.starts_with("The documentation is in the CfxLua tool window"));
         assert_eq!(project_sets(&cx), Vec::<NativeSet>::new());
+    }
+
+    #[test]
+    fn the_page_asks_for_a_natives_update_and_is_refreshed() {
+        let env = Env::new();
+        let docs = Docs::default();
+        let inv: Invocation = env.mock.invocation();
+        let cx = CommandCx { ws: Some(&env.ws), settings: &env.settings, natives: &env.natives, doc: None, inv: &inv };
+        let request = ViewEvent::Message(json!({ "op": "updateNatives" }).to_string());
+        assert_eq!(docs.handle(&cx, VIEW, request).unwrap(), Some(crate::natives::UPDATE));
+        assert!(env.mock.view_messages().is_empty(), "the caller runs the update first");
+        docs.refresh(crate::natives::UPDATE);
+        let (_, message) = env.mock.view_messages().pop().unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&message).unwrap(), json!({ "op": "refresh", "tab": "natives" }));
     }
 }

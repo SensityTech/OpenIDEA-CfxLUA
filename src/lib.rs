@@ -414,7 +414,7 @@ impl Plugin for DevKit {
             .chain(self.features.iter().map(|f| f.as_ref()))
             .find_map(|f| f.command(&cx, id, arg))
             .unwrap_or_else(|| Err(Error::NotFound(format!("command {id}"))));
-        if matches!(id, "natives.update" | "natives.scheduled-update") {
+        if matches!(id, natives::UPDATE | natives::SCHEDULED_UPDATE) {
             // The catalogs reload with the stored update on next use.
             self.natives.invalidate();
             self.last = None;
@@ -540,7 +540,10 @@ impl Views for DevKit {
             doc: doc.as_ref(),
             inv: ctx,
         };
-        self.docs.handle(&cx, view, event)
+        let Some(command) = self.docs.handle(&cx, view, event)? else { return Ok(()) };
+        let result = self.run_command(command, ctx, None);
+        self.docs.refresh(command);
+        result.map(|_| ())
     }
 }
 

@@ -38,9 +38,9 @@ with its signature and its full documentation. Camel humps work: `ggz` finds `Ge
 (deprecated aliases) and unnamed `N_0x…` natives are hidden unless you turn them on in the settings; existing scripts
 that use them are never flagged.
 
-**Updates.** **CfxLua: Update Natives** (Tools menu, or Find Action) downloads the databases again — conditional
-requests, so nothing is downloaded when nothing changed — and a background check does it once a day
-(*Check for new natives automatically*). Offline, the bundled snapshot is used. A notification says where the natives
+**Updates.** **CfxLua: Update Natives** (Tools menu, Find Action, or the update button of the Natives tab) downloads
+the databases again — conditional requests, so nothing is downloaded when nothing changed — and a background check
+does it once a day (*Check for new natives automatically*). Offline, the bundled snapshot is used. A notification says where the natives
 came from and how many functions each set has.
 
 ## Client, server and shared files

@@ -6,6 +6,7 @@
 //   {op:"detail", tab, id}    (runtime type links: id "type:<Class>")  -> detail
 //   {op:"insert", tab, id, variant}   (call | handler | netHandler | directive | example) -> notice
 //   {op:"prefs", prefs}       (stored as is, no answer)
+//   {op:"updateNatives"}     (runs CfxLua: Update Natives) -> refresh
 // Plugin -> page:
 //   {op:"init", prefs, open?}
 //   {op:"items", tab, seq, text, filters, total, count, empty, offset, rows, selected?, detail?, namespaces?}
@@ -13,6 +14,7 @@
 //   {op:"detail", tab, id, html, copy, url?, insert}
 //   {op:"open", tab, id?, focusSearch?}
 //   {op:"notice", text, error}
+//   {op:"refresh", tab}      (search the tab again)
 // A row: {id, label, icon?, bold?, strike?, parts?: [[text, class]], tip?, kind?, depth?, children?, expanded?}.
 'use strict';
 
@@ -32,6 +34,7 @@
     copy: '<rect x="5.5" y="5.5" width="8" height="8.5" rx="1"/><path d="M3 10.5V3a1 1 0 0 1 1-1h6"/>',
     web: '<circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c2.2 2 2.2 10 0 12M8 2c-2.2 2-2.2 10 0 12"/>',
     filter: '<path d="M2 3h12l-4.5 5.5V13l-3-1.5V8.5z"/>',
+    refresh: '<path d="M13 8a5 5 0 1 1-1.46-3.54M13.5 2v3h-3"/>',
     zoomOut: '<circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14M5 7h4"/>',
     zoomIn: '<circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14M5 7h4M7 5v4"/>',
     zoomReset: '<circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14M5 6h4M5 8h4"/>',
@@ -62,6 +65,7 @@
         { icon: 'copy', title: 'Copy', menu: [['name', 'Copy Name'], ['signature', 'Copy Signature'], ['hash', 'Copy Hash'], ['nativeName', 'Copy Native Name']] },
         online, sep,
         { icon: 'filter', title: 'Filter Options', toggles: [['aliases', 'Show Deprecated Aliases'], ['unnamed', 'Show Unnamed Natives']] },
+        { icon: 'refresh', title: 'Update Natives Now', run: (t) => updateNatives(t), enabled: () => !updatingNatives },
         sep, ...zoom,
       ],
     },
@@ -107,6 +111,7 @@
 
   let prefs = { fontPercent: 100, nativesSet: 'project', showAliases: true, showUnnamed: true, splits: {}, history: {}, tab: 'natives' };
   let initialized = false;
+  let updatingNatives = false;
   let active = null;
   let menu = null;
 
@@ -789,6 +794,23 @@
   }
 
 
+  function updateNatives(t) {
+    if (updatingNatives) return;
+    updatingNatives = true;
+    updateToolbar(t);
+    notice('Updating natives…');
+    send({ op: 'updateNatives' });
+  }
+
+  function onRefresh(id) {
+    const t = TABS.find((x) => x.id === id);
+    if (!t) return;
+    if (id === 'natives') updatingNatives = false;
+    updateToolbar(t);
+    document.getElementById('notice').hidden = true;
+    if (state[t.id].started) search(t);
+  }
+
   function insert(t, variant) {
     const st = state[t.id];
     if (!st.selId || !st.detail || !st.detail.insert.includes(variant)) return;
@@ -852,6 +874,8 @@
     if (!m || typeof m !== 'object') return;
     switch (m.op) {
       case 'init':
+        // A refresh posted while the page was hidden is lost.
+        if (updatingNatives) onRefresh('natives');
         if (!initialized) {
           initialized = true;
           applyPrefs(m.prefs);
@@ -866,6 +890,7 @@
       case 'detail': onDetail(m); break;
       case 'open': open(m.tab, m.id, m.focusSearch); break;
       case 'notice': notice(m.text, { error: !!m.error }); break;
+      case 'refresh': onRefresh(m.tab); break;
       default: break;
     }
   });
