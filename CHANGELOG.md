@@ -5,6 +5,8 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-04
+
 ### Added
 
 - **CfxLua: Generate lua-language-server Definitions**: fills an empty `.lua` file with a `---@meta` library of the
@@ -60,5 +62,6 @@ First preview release.
 - **Asset Escrow**: per-file encryption status, checks and a pre-upload checklist.
 - **The CfxLua tool window**: natives browser, runtime API, events, manifest directives, syntax features and guides.
 
-[Unreleased]: https://github.com/SensityTech/OpenIDEA-CfxLUA/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/SensityTech/OpenIDEA-CfxLUA/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/SensityTech/OpenIDEA-CfxLUA/releases/tag/v0.1.1
 [0.1.0]: https://github.com/SensityTech/OpenIDEA-CfxLUA/releases/tag/v0.1.0

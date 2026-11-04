@@ -1,6 +1,6 @@
 id = "sensity.cfxlua"
 name = "OpenIDEA-CfxLUA"
-version = "0.1.0"
+version = "0.1.1"
 description = "FiveM and RedM (CfxLua) support: natives of the right game and side, client/server awareness, the Cfx runtime API, state bags, events, fxmanifest, NUI, magic values, CfxLua syntax checks, Asset Escrow and built-in documentation."
 authors = ["SensityTech"]
 homepage = "https://github.com/SensityTech/OpenIDEA-CfxLUA"
