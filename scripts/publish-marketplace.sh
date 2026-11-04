@@ -34,7 +34,8 @@ openidea-plugin pack "$work/stage" --key "$key" --publisher "$publisher" --out "
 if assets="$(gh release view "$market" --json assets --jq '.assets[].name' 2>/dev/null)"; then
   if printf '%s\n' "$assets" | grep -qx index.json; then
     gh release download "$market" --pattern index.json --dir "$work/market"
-    listed="$(jq -r --arg id "$id" '.plugins[] | select(.id == $id) | .version' "$work/market/index.json")"
+    listed="$(jq -r --arg id "$id" '.plugins[] | select(.id == $id) | .version' "$work/market/index.json" | sort -V |
+      tail -1)"
     if [ -n "$listed" ] && [ "$listed" != "$version" ] &&
       [ "$(printf '%s\n' "$listed" "$version" | sort -V | tail -1)" = "$listed" ]; then
       echo "publish-marketplace: the marketplace lists $id $listed, newer than $version" >&2
@@ -43,8 +44,8 @@ if assets="$(gh release view "$market" --json assets --jq '.assets[].name' 2>/de
   fi
 else
   gh release create "$market" --prerelease --title "Marketplace" --notes "Not a version: the signed packages and \
-the index of the OpenIDEA-CfxLUA marketplace. In OpenIDEA, **Settings › Plugins › Available**, set the marketplace \
-index URL to \`$index_url\`. Versions and their notes are in the other releases."
+the index of the OpenIDEA-CfxLUA marketplace. In OpenIDEA, **Settings › Plugins**, gear menu › **Plugin \
+Repository…**, set the marketplace index URL to \`$index_url\`. Versions and their notes are in the other releases."
 fi
 
 openidea-plugin index "$work/market" --publisher "$publisher" --name "$publisher_name" --key "$key" \
