@@ -50,12 +50,14 @@ pub fn find<'a>(doc: &Doc, at: usize, natives: &'a Natives, sets: &[NativeSet]) 
         Tok::Str { .. } => {
             let calls = src.calls(&src.chains());
             let first_arg = |c: &crate::lua::Call| c.args.first().and_then(|a| src.string_arg(*a));
-            let call = calls.iter().find(|c| EVENT_FUNCTIONS.contains(&c.callee.as_str()) && first_arg(c) == Some(i))?;
+            let call =
+                calls.iter().find(|c| EVENT_FUNCTIONS.contains(&c.callee.as_str()) && first_arg(c) == Some(i))?;
             let event = data::event(&src.string_at(src.string_arg(call.args[0])?)?)?;
             (!event.is_pattern()).then_some(Target::Event(event))
         }
         Tok::Name => {
-            let member = i > 0 && matches!(src.tok_text(i - 1), "." | ":" | "?." | "?:") || i > 0 && src.is_kw(i - 1, "function");
+            let member = i > 0 && matches!(src.tok_text(i - 1), "." | ":" | "?." | "?:")
+                || i > 0 && src.is_kw(i - 1, "function");
             if member {
                 return None;
             }
@@ -144,7 +146,7 @@ pub fn first_sentence(md: &str) -> String {
 
 /// The page to open (tab, item id) and the notification (title, body) of a target.
 pub fn summary(t: &Target) -> (Tab, String, String, String) {
-    let footer = "See the Sensity tool window.";
+    let footer = "See the CfxLua tool window.";
     let lines = |head: String, md: &str| {
         let sentence = first_sentence(md);
         let mut out = head;
@@ -158,14 +160,24 @@ pub fn summary(t: &Target) -> (Tab, String, String, String) {
     };
     match t {
         Target::Native(n) => (Tab::Natives, n.key(), n.lua_name.clone(), lines(n.typed_signature(), &n.description)),
-        Target::Event(e) => (Tab::Events, e.name.clone(), e.name.clone(), lines(format!("event {}{}", e.name, e.params_text()), &e.description)),
-        Target::Directive(d) => {
-            (Tab::Manifest, d.name.clone(), d.name.clone(), lines(format!("{} ({})", d.name, d.value_type_text()), &d.description))
-        }
+        Target::Event(e) => (
+            Tab::Events,
+            e.name.clone(),
+            e.name.clone(),
+            lines(format!("event {}{}", e.name, e.params_text()), &e.description),
+        ),
+        Target::Directive(d) => (
+            Tab::Manifest,
+            d.name.clone(),
+            d.name.clone(),
+            lines(format!("{} ({})", d.name, d.value_type_text()), &d.description),
+        ),
         Target::Hash(literal, value) => {
             let head = match value {
                 Some(v) => format!("Signed (int32): {v} · Unsigned (uint32): {} · Hex: {}", *v as u32, hex(*v)),
-                None => "Invalid hash literal: it is unterminated or has an escape sequence the runtime rejects.".into(),
+                None => {
+                    "Invalid hash literal: it is unterminated or has an escape sequence the runtime rejects.".into()
+                }
             };
             let md = "Compile-time Jenkins one-at-a-time hash (joaat) of the ASCII lower-cased text, replaced by a signed 32-bit integer.";
             (Tab::Syntax, "hash-literal".into(), format!("hash {literal}"), lines(head, md))
@@ -180,22 +192,29 @@ mod tests {
     use crate::testing::Fixture;
 
     fn target_at(rel: &str, code: &str) -> Option<(Tab, String, String, String)> {
-        let fx = Fixture::new(&[("res/fxmanifest.lua", "game 'gta5'\nclient_script 'client/*.lua'"), (rel, code)]).with_natives(fixture());
+        let fx = Fixture::new(&[("res/fxmanifest.lua", "game 'gta5'\nclient_script 'client/*.lua'"), (rel, code)])
+            .with_natives(fixture());
         let (doc, at) = fx.caret(rel);
         find(&doc, at, &fx.natives, &[NativeSet::Gta5]).as_ref().map(summary)
     }
 
     #[test]
     fn natives_events_hashes_and_directives() {
-        let (tab, id, title, body) = target_at("res/client/main.lua", "local c = GetEntity<caret>Coords(PlayerPedId(), false)").unwrap();
+        let (tab, id, title, body) =
+            target_at("res/client/main.lua", "local c = GetEntity<caret>Coords(PlayerPedId(), false)").unwrap();
         assert_eq!((tab, id.as_str(), title.as_str()), (Tab::Natives, "GTA5:GetEntityCoords", "GetEntityCoords"));
-        assert_eq!(body, "GetEntityCoords(entity: integer, alive: boolean): vector3\nSee the Sensity tool window.");
+        assert_eq!(body, "GetEntityCoords(entity: integer, alive: boolean): vector3\nSee the CfxLua tool window.");
         let (_, id, _, body) = target_at("res/client/main.lua", "GetGroundZFor_3dCoord<caret>(0, 0, 0)").unwrap();
         assert_eq!(id, "GTA5:GetGroundZFor_3dCoord");
         assert!(body.contains("\nGets the ground elevation at the specified position.\n"), "{body}");
-        assert_eq!(target_at("res/client/main.lua", "DropPl<caret>ayer(1)").unwrap().1, "SERVER:DropPlayer", "any set as a fallback");
+        assert_eq!(
+            target_at("res/client/main.lua", "DropPl<caret>ayer(1)").unwrap().1,
+            "SERVER:DropPlayer",
+            "any set as a fallback"
+        );
         assert!(target_at("res/client/main.lua", "x.GetEntity<caret>Coords()").is_none());
-        let (tab, id, _, body) = target_at("res/client/main.lua", "AddEventHandler('onResource<caret>Start', function() end)").unwrap();
+        let (tab, id, _, body) =
+            target_at("res/client/main.lua", "AddEventHandler('onResource<caret>Start', function() end)").unwrap();
         assert_eq!((tab, id.as_str()), (Tab::Events, "onResourceStart"));
         assert!(body.starts_with("event onResourceStart(resourceName)\n"), "{body}");
         assert!(target_at("res/client/main.lua", "print('onResource<caret>Start')").is_none());
@@ -203,9 +222,17 @@ mod tests {
         assert!(target_at("res/client/main.lua", "AddEventHandler('myres:<caret>x')").is_none());
         let (tab, id, title, body) = target_at("res/client/main.lua", "local h = `ad<caret>der`").unwrap();
         assert_eq!((tab, id.as_str(), title.as_str()), (Tab::Syntax, "hash-literal", "hash `adder`"));
-        assert!(body.starts_with("Signed (int32): -1216765807 · Unsigned (uint32): 3078201489 · Hex: 0xB779A091\n"), "{body}");
-        assert!(target_at("res/client/main.lua", "local h = `ad<caret>der").unwrap().3.starts_with("Invalid hash literal"));
-        let fx = Fixture::new(&[("res/fxmanifest.lua", "fx_version 'cerulean'\nclient_scripts {\n  'cl<caret>ient.lua'\n}")]);
+        assert!(
+            body.starts_with("Signed (int32): -1216765807 · Unsigned (uint32): 3078201489 · Hex: 0xB779A091\n"),
+            "{body}"
+        );
+        assert!(
+            target_at("res/client/main.lua", "local h = `ad<caret>der").unwrap().3.starts_with("Invalid hash literal")
+        );
+        let fx = Fixture::new(&[(
+            "res/fxmanifest.lua",
+            "fx_version 'cerulean'\nclient_scripts {\n  'cl<caret>ient.lua'\n}",
+        )]);
         let (doc, at) = fx.caret("res/fxmanifest.lua");
         let (tab, id, _, body) = summary(&find(&doc, at, &fx.natives, &[]).unwrap());
         assert_eq!((tab, id.as_str()), (Tab::Manifest, "client_script"));

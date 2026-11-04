@@ -1,4 +1,4 @@
-// Sensity documentation tool window: six tabs (Natives, Runtime API, Events,
+// CfxLua documentation tool window: six tabs (Natives, Runtime API, Events,
 // Manifest, Syntax, Guides), each a searchable list beside an HTML page. The
 // plugin searches and builds every page (src/docs); this page only renders.
 //

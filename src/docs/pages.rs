@@ -32,7 +32,8 @@ fn note(text: &str) -> String {
 
 /// The native sheet.
 pub fn native(n: &Native) -> String {
-    let name = if n.is_alias() { format!("<span class='deprecated'>{}</span>", esc(&n.lua_name)) } else { esc(&n.lua_name) };
+    let name =
+        if n.is_alias() { format!("<span class='deprecated'>{}</span>", esc(&n.lua_name)) } else { esc(&n.lua_name) };
     let mut out = title(&name);
     out.push_str("<p class='badges'>");
     out.push_str(&badge(&n.namespace, "badge"));
@@ -63,8 +64,13 @@ pub fn native(n: &Native) -> String {
         out.push_str(&subhead("Parameters"));
         let mut t = Table::new(&["Name", "Type", "Description"]);
         for p in params {
-            let kept = if p.kept_trailing_pointer { note("(pointer kept in the call, also returned)") } else { String::new() };
-            t.row(vec![id_cell(&p.name), type_cell(&p.lua_type, &p.native_type), esc(p.description.as_deref().unwrap_or("")) + &kept]);
+            let kept =
+                if p.kept_trailing_pointer { note("(pointer kept in the call, also returned)") } else { String::new() };
+            t.row(vec![
+                id_cell(&p.name),
+                type_cell(&p.lua_type, &p.native_type),
+                esc(p.description.as_deref().unwrap_or("")) + &kept,
+            ]);
         }
         out.push_str(&t.html());
     }
@@ -74,7 +80,11 @@ pub fn native(n: &Native) -> String {
         for r in &n.returns {
             let out_pointer = n.params.iter().any(|p| p.out_pointer && p.name == r.name);
             let kept = if out_pointer { note("(out-pointer: returned, not passed)") } else { String::new() };
-            t.row(vec![id_cell(&r.name), type_cell(&r.lua_type, &r.native_type), esc(r.description.as_deref().unwrap_or("")) + &kept]);
+            t.row(vec![
+                id_cell(&r.name),
+                type_cell(&r.lua_type, &r.native_type),
+                esc(r.description.as_deref().unwrap_or("")) + &kept,
+            ]);
         }
         out.push_str(&t.html());
     }
@@ -88,13 +98,15 @@ pub fn native(n: &Native) -> String {
     }
     out.push_str(&subhead("Details"));
     let mut t = Table::default();
-    let original = n.original_name.as_deref().map_or_else(|| esc("Unnamed (hash only)"), |o| format!("<code>{}</code>", esc(o)));
+    let original =
+        n.original_name.as_deref().map_or_else(|| esc("Unnamed (hash only)"), |o| format!("<code>{}</code>", esc(o)));
     t.row(vec![esc("Native name"), original]);
     t.row(vec![esc("Hash"), format!("<code>{}</code>", esc(&n.hash_display()))]);
     t.row(vec![esc("Namespace"), format!("<code>{}</code>", esc(&n.namespace))]);
     t.row(vec![esc("Natives set"), esc(n.set.display_name())]);
     if !n.aliases.is_empty() {
-        let aliases: Vec<String> = n.aliases.iter().map(|a| format!("<code class='deprecated'>{}</code>", esc(a))).collect();
+        let aliases: Vec<String> =
+            n.aliases.iter().map(|a| format!("<code class='deprecated'>{}</code>", esc(a))).collect();
         t.row(vec![esc("Deprecated aliases"), aliases.join(", ")]);
     }
     if let Some(alt) = &n.alt_name {
@@ -217,7 +229,12 @@ pub fn guide(g: &Guide) -> String {
 pub fn category(name: &str) -> String {
     let mut out = title(&esc(name));
     for g in guides().iter().filter(|g| g.category == name) {
-        out.push_str(&format!("<h3><a href='cfxdoc:{}'>{}</a></h3><p>{}</p>", esc(&g.id), esc(&g.title), esc(&g.summary)));
+        out.push_str(&format!(
+            "<h3><a href='cfxdoc:{}'>{}</a></h3><p>{}</p>",
+            esc(&g.id),
+            esc(&g.title),
+            esc(&g.summary)
+        ));
     }
     out
 }
@@ -252,10 +269,16 @@ mod tests {
         ] {
             assert!(html.contains(part), "{part} in {html}");
         }
-        assert_eq!(html.matches("<code class='id'>groundZ</code>").count(), 1, "an out-pointer is a return, not a parameter");
+        assert_eq!(
+            html.matches("<code class='id'>groundZ</code>").count(),
+            1,
+            "an out-pointer is a return, not a parameter"
+        );
         let alias = native(&fixture_native("GetEntityCoordinates"));
         assert!(alias.contains("<span class='deprecated'>GetEntityCoordinates</span>"));
-        assert!(alias.contains("<p>Deprecated alias: use <a href='cfxnative:GTA5:GetEntityCoords'>GetEntityCoords</a> instead.</p>"));
+        assert!(alias.contains(
+            "<p>Deprecated alias: use <a href='cfxnative:GTA5:GetEntityCoords'>GetEntityCoords</a> instead.</p>"
+        ));
         assert!(alias.contains("<span class='warning'>Deprecated</span>"));
         let unnamed = native(&fixture_native("N_0x0b40ed49d7d6ff84"));
         assert!(unnamed.contains("<span class='warning'>Unnamed</span>") && unnamed.contains("Unnamed (hash only)"));
@@ -266,15 +289,24 @@ mod tests {
     #[test]
     fn event_directive_syntax_and_guide_pages() {
         let start = event(data::event("onResourceStart").unwrap());
-        assert!(start.contains("<span class='shared'>Shared</span> <span class='accent'>All games</span></p>"), "{start}");
+        assert!(
+            start.contains("<span class='shared'>Shared</span> <span class='accent'>All games</span></p>"),
+            "{start}"
+        );
         assert!(start.contains("Handler parameters") && start.contains("<code class='id'>resourceName</code>"));
         let connecting = event(data::event("playerConnecting").unwrap());
         assert!(connecting.contains("<span class='warning'>Cancelable</span>"));
         assert!(connecting.contains("Call CancelEvent() in a handler to cancel the default behavior."));
         let fx = directive(data::directive("fx_version").unwrap());
-        assert!(fx.contains("<div class='subhead'>Allowed values</div><ul>") && fx.contains("<li><code>cerulean</code></li>"));
+        assert!(
+            fx.contains("<div class='subhead'>Allowed values</div><ul>")
+                && fx.contains("<li><code>cerulean</code></li>")
+        );
         let lua54 = directive(data::directive("lua54").unwrap());
-        assert!(lua54.contains("<span class='deprecated'>lua54</span>") && lua54.contains("<span class='warning'>Deprecated</span>"));
+        assert!(
+            lua54.contains("<span class='deprecated'>lua54</span>")
+                && lua54.contains("<span class='warning'>Deprecated</span>")
+        );
         let feature = data::syntax_features().iter().find(|f| f.id == "compound-assignment").unwrap();
         let html = syntax(feature);
         assert!(html.contains("<p><code>target += expr</code> &nbsp;|&nbsp; <code>-=</code>"), "{html}");
@@ -283,6 +315,9 @@ mod tests {
         assert!(natives.starts_with("<p class='badges'><span class='accent'>Natives</span></p><h1>"), "{natives}");
         let cat = category("Natives");
         assert!(cat.contains("<h3><a href='cfxdoc:natives'>Calling natives from Lua</a></h3><p>"), "{cat}");
-        assert_eq!(handler_code(data::event("onResourceStart").unwrap()), "AddEventHandler('onResourceStart', function(resourceName)\nend)");
+        assert_eq!(
+            handler_code(data::event("onResourceStart").unwrap()),
+            "AddEventHandler('onResourceStart', function(resourceName)\nend)"
+        );
     }
 }

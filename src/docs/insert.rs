@@ -43,7 +43,8 @@ pub fn example(f: &SyntaxFeature) -> String {
 /// editor with `text(indentation of the caret's line)`, retrying once if the
 /// document changed meanwhile. The file name on success, else what to tell the user.
 pub fn at_caret(inv: &Invocation, text: impl Fn(&str) -> String) -> Result<String, String> {
-    let editor = inv.editor().ok_or_else(|| "Open a file in the editor first: the text is inserted at its caret.".to_owned())?;
+    let editor =
+        inv.editor().ok_or_else(|| "Open a file in the editor first: the text is inserted at its caret.".to_owned())?;
     let failed = |e: Error| format!("The text could not be inserted: {e}");
     let mut last = Error::Stale;
     for _ in 0..2 {
@@ -76,7 +77,10 @@ mod tests {
         assert_eq!(native_call(drop), "DropPlayer(playerSrc, reason)");
         let start = data::event("onResourceStart").unwrap();
         assert_eq!(handler(start, false, ""), "AddEventHandler('onResourceStart', function(resourceName)\n    \nend)");
-        assert_eq!(handler(start, true, "  "), "RegisterNetEvent('onResourceStart', function(resourceName)\n      \n  end)");
+        assert_eq!(
+            handler(start, true, "  "),
+            "RegisterNetEvent('onResourceStart', function(resourceName)\n      \n  end)"
+        );
         assert_eq!(directive(data::directive("fx_version").unwrap()), "fx_version 'cerulean'");
         let f = data::syntax_features().iter().find(|f| f.id == "compound-assignment").unwrap();
         assert!(example(f).starts_with("local count = 10\n") && example(f).ends_with("stats.kills += 1\n"));
@@ -95,7 +99,9 @@ mod tests {
         );
         let denied = MockHost::install().with_capabilities(&["editor.read"]);
         denied.open_editor("/project/a.lua", "lua", "", &[(0, 0, 0, 0)]);
-        assert!(at_caret(&denied.invocation(), |_| "x".into()).unwrap_err().starts_with("The text could not be inserted"));
+        assert!(
+            at_caret(&denied.invocation(), |_| "x".into()).unwrap_err().starts_with("The text could not be inserted")
+        );
         let none = MockHost::install();
         assert!(at_caret(&none.invocation(), |_| "x".into()).unwrap_err().starts_with("Open a file"));
     }

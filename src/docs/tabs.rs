@@ -56,7 +56,14 @@ pub struct Filters {
 
 impl Default for Filters {
     fn default() -> Self {
-        Self { set: "project".into(), namespace: String::new(), side: String::new(), game: String::new(), aliases: true, unnamed: true }
+        Self {
+            set: "project".into(),
+            namespace: String::new(),
+            side: String::new(),
+            game: String::new(),
+            aliases: true,
+            unnamed: true,
+        }
     }
 }
 
@@ -137,7 +144,8 @@ impl Listing {
             }
             // Else the first row named `id` (runtime: `CreateThread` for `CreateThread(routine)`).
             Self::Rows(rows) => rows.iter().position(|r| r.id == id).or_else(|| {
-                rows.iter().position(|r| r.label == id || r.label.strip_prefix(id).is_some_and(|rest| rest.starts_with('(')))
+                rows.iter()
+                    .position(|r| r.label == id || r.label.strip_prefix(id).is_some_and(|rest| rest.starts_with('(')))
             }),
         }
     }
@@ -218,7 +226,12 @@ pub fn list(tab: Tab, natives: &Natives, rt: &Runtime, project: &[NativeSet], te
         Tab::Guides => {
             let rows = guide_rows(text);
             let guides = rows.iter().filter(|r| r.kind != "category").count();
-            Results { listing: Listing::Rows(rows), count: format!("{} guides", group(guides)), empty: nothing(text), namespaces: None }
+            Results {
+                listing: Listing::Rows(rows),
+                count: format!("{} guides", group(guides)),
+                empty: nothing(text),
+                namespaces: None,
+            }
         }
     }
 }
@@ -243,7 +256,12 @@ fn natives_list(natives: &Natives, project: &[NativeSet], text: &str, f: &Filter
     let generated = sets.iter().any(|s| !natives.catalog(*s).is_empty());
     let empty = if generated { nothing(text) } else { "Natives not generated yet".into() };
     let count = format!("{} natives", group(keys.len()));
-    Results { listing: Listing::Natives { keys, multi: sets.len() > 1 }, count, empty, namespaces: Some(search::namespaces(natives, &sets)) }
+    Results {
+        listing: Listing::Natives { keys, multi: sets.len() > 1 },
+        count,
+        empty,
+        namespaces: Some(search::namespaces(natives, &sets)),
+    }
 }
 
 fn side_class(side: Side) -> &'static str {
@@ -256,7 +274,8 @@ fn side_class(side: Side) -> &'static str {
 
 /// `GetEntityCoords  ENTITY  Client  FiveM  0x3FEF770D40960D5A`.
 pub fn native_row(n: &Native, multi: bool) -> Row {
-    let mut parts = vec![(format!("  {}", n.namespace), "muted"), (format!("  {}", n.side_label()), side_class(n.apiset))];
+    let mut parts =
+        vec![(format!("  {}", n.namespace), "muted"), (format!("  {}", n.side_label()), side_class(n.apiset))];
     if multi && n.set != NativeSet::Server {
         parts.push((format!("  {}", n.set.short_name()), "muted small"));
     }
@@ -283,7 +302,10 @@ fn event_rows(text: &str, f: &Filters) -> Vec<Row> {
         .filter(|e| game.is_none_or(|g| e.game().is_none_or(|eg| eg == g)))
         .filter_map(|e| {
             let (name, desc) = (e.name.to_lowercase(), e.description.to_lowercase());
-            words.iter().all(|w| name.contains(w.as_str()) || desc.contains(w.as_str())).then(|| (e, all_in(&words, &name)))
+            words
+                .iter()
+                .all(|w| name.contains(w.as_str()) || desc.contains(w.as_str()))
+                .then(|| (e, all_in(&words, &name)))
         })
         .collect();
     found.sort_by_key(|(_, in_name)| !in_name);
@@ -305,7 +327,10 @@ fn directive_rows(text: &str) -> Vec<Row> {
         .iter()
         .filter_map(|d| {
             let desc = d.description.to_lowercase();
-            words.iter().all(|w| d.name.contains(w.as_str()) || desc.contains(w.as_str())).then(|| (d, all_in(&words, &d.name)))
+            words
+                .iter()
+                .all(|w| d.name.contains(w.as_str()) || desc.contains(w.as_str()))
+                .then(|| (d, all_in(&words, &d.name)))
         })
         .collect();
     found.sort_by_key(|(d, in_name)| (d.deprecated, !in_name));
@@ -327,10 +352,19 @@ fn syntax_rows(text: &str) -> Vec<Row> {
     let words = words(text);
     data::syntax_features()
         .iter()
-        .filter(|f| all_in(&words, &format!("{}\n{}\n{}\n{}", f.title, f.syntax, f.description, f.example).to_lowercase()))
+        .filter(|f| {
+            all_in(&words, &format!("{}\n{}\n{}\n{}", f.title, f.syntax, f.description, f.example).to_lowercase())
+        })
         .map(|f| {
             let first = f.syntax.split(" | ").next().unwrap_or("");
-            Row { id: f.id.clone(), label: f.title.clone(), icon: "tpl", bold: true, parts: vec![(format!("  {first}"), "muted")], ..Row::default() }
+            Row {
+                id: f.id.clone(),
+                label: f.title.clone(),
+                icon: "tpl",
+                bold: true,
+                parts: vec![(format!("  {first}"), "muted")],
+                ..Row::default()
+            }
         })
         .collect()
 }
@@ -352,7 +386,13 @@ fn guide_rows(text: &str) -> Vec<Row> {
         }
         let mut rows = Vec::new();
         for c in categories {
-            rows.push(Row { id: format!("category:{c}"), label: c.to_uppercase(), bold: true, kind: "category", ..Row::default() });
+            rows.push(Row {
+                id: format!("category:{c}"),
+                label: c.to_uppercase(),
+                bold: true,
+                kind: "category",
+                ..Row::default()
+            });
             rows.extend(guides.iter().filter(|g| g.category == c).map(guide_row));
         }
         return rows;
@@ -514,7 +554,6 @@ pub fn runtime_node(rt: &Runtime, id: &str) -> Option<RuntimeNode> {
     (0..rt.decls.len()).find(|&d| rt.decl(d).label() == id || rt.decl(d).name == id).map(RuntimeNode::Decl)
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -550,7 +589,10 @@ mod tests {
         assert_eq!((r.listing.len(), r.empty.as_str()), (0, "Nothing matches 'zzz'"));
         assert_eq!(r.listing.position("GTA5:GetEntityCoords"), None);
         let empty = Natives::from_natives(Vec::new());
-        assert_eq!(list(Tab::Natives, &empty, runtime(), &[], "", &Filters::default()).empty, "Natives not generated yet");
+        assert_eq!(
+            list(Tab::Natives, &empty, runtime(), &[], "", &Filters::default()).empty,
+            "Natives not generated yet"
+        );
         assert_eq!(group(12_345_678), "12,345,678");
         assert_eq!(group(999), "999");
     }
@@ -563,16 +605,24 @@ mod tests {
         assert_eq!(all.listing.len(), data::events().len());
         let client = Filters { side: "client".into(), ..Filters::default() };
         let r = list(Tab::Events, &n, rt, &[], "", &client);
-        assert!(r.listing.position("onClientResourceStart").is_some() && r.listing.position("onResourceStart").is_some());
+        assert!(
+            r.listing.position("onClientResourceStart").is_some() && r.listing.position("onResourceStart").is_some()
+        );
         assert!(r.listing.position("playerConnecting").is_none());
         let redm = Filters { game: "rdr3".into(), ..Filters::default() };
         let redm = list(Tab::Events, &n, rt, &[], "", &redm);
         let fivem_only = data::events().iter().find(|e| e.game() == Some(Game::Gta5)).unwrap();
-        assert!(redm.listing.position(&fivem_only.name).is_none() && redm.listing.position("onResourceStart").is_some());
+        assert!(
+            redm.listing.position(&fivem_only.name).is_none() && redm.listing.position("onResourceStart").is_some()
+        );
         let r = list(Tab::Events, &n, rt, &[], "resource start", &Filters::default());
         assert!(r.listing.len() >= 2 && r.count.ends_with(" events"));
         let row = &r.listing.rows(&n, 0, 1)[0];
-        assert!(row.label.to_lowercase().contains("resource") && row.label.to_lowercase().contains("start"), "{}", row.label);
+        assert!(
+            row.label.to_lowercase().contains("resource") && row.label.to_lowercase().contains("start"),
+            "{}",
+            row.label
+        );
         let m = list(Tab::Manifest, &n, rt, &[], "", &Filters::default());
         let rows = m.listing.rows(&n, 0, 100);
         let first_deprecated = rows.iter().position(|r| r.strike).unwrap();
@@ -584,7 +634,10 @@ mod tests {
         let g = list(Tab::Guides, &n, rt, &[], "", &Filters::default());
         let rows = g.listing.rows(&n, 0, 100);
         assert_eq!(rows.len(), data::guides().len() + 6);
-        assert_eq!((rows[0].id.as_str(), rows[0].label.as_str(), rows[0].kind), ("category:Getting started", "GETTING STARTED", "category"));
+        assert_eq!(
+            (rows[0].id.as_str(), rows[0].label.as_str(), rows[0].kind),
+            ("category:Getting started", "GETTING STARTED", "category")
+        );
         assert_eq!(g.listing.first_selectable(), Some(1));
         assert_eq!(g.count, format!("{} guides", data::guides().len()));
         let found = list(Tab::Guides, &n, rt, &[], "state bags", &Filters::default());
@@ -609,7 +662,11 @@ mod tests {
         assert!(rows.iter().any(|r| r.id == "Shared/Citizen/CreateThread(routine)" && r.depth == Some(2)));
         let found = runtime_rows(rt, "createthread");
         let labels: Vec<&str> = found.iter().map(|r| r.label.as_str()).collect();
-        assert!(labels.contains(&"Citizen") && labels.contains(&"CreateThread(routine)") && labels.contains(&"CreateThreadNow(routine, name)"));
+        assert!(
+            labels.contains(&"Citizen")
+                && labels.contains(&"CreateThread(routine)")
+                && labels.contains(&"CreateThreadNow(routine, name)")
+        );
         assert!(!labels.contains(&"Client") && !labels.contains(&"Wait(ms)"), "{labels:?}");
         let json = runtime_rows(rt, "json");
         assert!(json.iter().any(|r| r.label == "encode(value, options)"), "a matching node keeps its children");

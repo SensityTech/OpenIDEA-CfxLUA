@@ -42,7 +42,14 @@ pub struct Query {
 
 impl Default for Query {
     fn default() -> Self {
-        Self { text: String::new(), namespace: None, sides: None, include_aliases: true, include_unnamed: true, limit: usize::MAX }
+        Self {
+            text: String::new(),
+            namespace: None,
+            sides: None,
+            include_aliases: true,
+            include_unnamed: true,
+            limit: usize::MAX,
+        }
     }
 }
 
@@ -291,7 +298,14 @@ pub(crate) mod tests {
     /// The fixture catalogs of the original test suite.
     pub(crate) fn fixture() -> Vec<Native> {
         let g = NativeSet::Gta5;
-        let mut ground = named(g, "GetGroundZFor_3dCoord", Some("GET_GROUND_Z_FOR_3D_COORD"), "0xC906A7DAB05C8D2B", "MISC", Side::Client);
+        let mut ground = named(
+            g,
+            "GetGroundZFor_3dCoord",
+            Some("GET_GROUND_Z_FOR_3D_COORD"),
+            "0xC906A7DAB05C8D2B",
+            "MISC",
+            Side::Client,
+        );
         ground.params = vec![
             param("x", "number", "float", None, false),
             param("y", "number", "float", None, false),
@@ -299,12 +313,19 @@ pub(crate) mod tests {
             param("groundZ", "number", "float*", None, true),
             param("ignoreWater", "boolean", "BOOL", Some("Ignore water surfaces"), false),
         ];
-        ground.returns =
-            vec![ret("retval", "boolean", "BOOL", Some("Whether the ground was found")), ret("groundZ", "number", "float*", None)];
-        ground.description = "Gets the ground elevation at the specified position.\n\n**Note**: the area must be loaded.".into();
+        ground.returns = vec![
+            ret("retval", "boolean", "BOOL", Some("Whether the ground was found")),
+            ret("groundZ", "number", "float*", None),
+        ];
+        ground.description =
+            "Gets the ground elevation at the specified position.\n\n**Note**: the area must be loaded.".into();
         ground.lua_example = Some("local found, z = GetGroundZFor_3dCoord(0.0, 0.0, 1000.0, false)".into());
-        let mut coords = named(g, "GetEntityCoords", Some("GET_ENTITY_COORDS"), "0x3FEF770D40960D5A", "ENTITY", Side::Client);
-        coords.params = vec![param("entity", "integer", "Entity", Some("The entity"), false), param("alive", "boolean", "BOOL", None, false)];
+        let mut coords =
+            named(g, "GetEntityCoords", Some("GET_ENTITY_COORDS"), "0x3FEF770D40960D5A", "ENTITY", Side::Client);
+        coords.params = vec![
+            param("entity", "integer", "Entity", Some("The entity"), false),
+            param("alive", "boolean", "BOOL", None, false),
+        ];
         coords.returns = vec![ret("retval", "vector3", "Vector3", None)];
         coords.aliases = vec!["GetEntityCoordinates".into()];
         let mut alias = coords.clone();
@@ -312,22 +333,34 @@ pub(crate) mod tests {
         alias.original_name = Some("_GET_ENTITY_COORDINATES".into());
         alias.aliases.clear();
         alias.alias_of = Some("GetEntityCoords".into());
-        let mut heading = named(g, "GetEntityHeading", Some("GET_ENTITY_HEADING"), "0x00000001", "ENTITY", Side::Client);
+        let mut heading =
+            named(g, "GetEntityHeading", Some("GET_ENTITY_HEADING"), "0x00000001", "ENTITY", Side::Client);
         heading.params = vec![param("entity", "integer", "Entity", None, false)];
         heading.returns = vec![ret("retval", "number", "float", None)];
         let mut ped = named(g, "PlayerPedId", Some("PLAYER_PED_ID"), "0x00000002", "PLAYER", Side::Client);
         ped.returns = vec![ret("retval", "integer", "Ped", None)];
-        let mut set_coords = named(g, "SetEntityCoords", Some("SET_ENTITY_COORDS"), "0x00000003", "ENTITY", Side::Client);
-        set_coords.params = vec![param("entity", "integer", "Entity", None, false), param("x", "number", "float", None, false)];
+        let mut set_coords =
+            named(g, "SetEntityCoords", Some("SET_ENTITY_COORDS"), "0x00000003", "ENTITY", Side::Client);
+        set_coords.params =
+            vec![param("entity", "integer", "Entity", None, false), param("x", "number", "float", None, false)];
         let unnamed = named(g, "N_0x0b40ed49d7d6ff84", None, "0x0B40ED49D7D6FF84", "MISC", Side::Client);
-        let mut resource = named(g, "GetCurrentResourceName", Some("GET_CURRENT_RESOURCE_NAME"), "0xE5E9EBBB", "CFX", Side::Shared);
+        let mut resource =
+            named(g, "GetCurrentResourceName", Some("GET_CURRENT_RESOURCE_NAME"), "0xE5E9EBBB", "CFX", Side::Shared);
         resource.returns = vec![ret("retval", "string", "char*", None)];
         resource.game = None;
         let mut server_resource = resource.clone();
         server_resource.set = NativeSet::Server;
         let mut drop = named(NativeSet::Server, "DropPlayer", Some("DROP_PLAYER"), "0xBA0613E1", "CFX", Side::Server);
-        drop.params = vec![param("playerSrc", "string", "char*", None, false), param("reason", "string", "char*", None, false)];
-        let mut rdr = named(NativeSet::Rdr3, "GetEntityCoordsRdr", Some("GET_ENTITY_COORDS_RDR"), "0xA86D5F069399F44D", "ENTITY", Side::Client);
+        drop.params =
+            vec![param("playerSrc", "string", "char*", None, false), param("reason", "string", "char*", None, false)];
+        let mut rdr = named(
+            NativeSet::Rdr3,
+            "GetEntityCoordsRdr",
+            Some("GET_ENTITY_COORDS_RDR"),
+            "0xA86D5F069399F44D",
+            "ENTITY",
+            Side::Client,
+        );
         rdr.game = Some(Game::Rdr3);
         vec![ground, coords, alias, heading, ped, set_coords, unnamed, resource, server_resource, drop, rdr]
     }
@@ -404,9 +437,18 @@ pub(crate) mod tests {
     fn filters() {
         let n = natives();
         assert_eq!(names(&n, &Query { namespace: Some("PLAYER".into()), ..Query::default() }), ["PlayerPedId"]);
-        assert!(!names(&n, &Query { include_aliases: false, ..Query::default() }).contains(&"GetEntityCoordinates".to_owned()));
-        assert!(!names(&n, &Query { include_unnamed: false, ..Query::default() }).contains(&"N_0x0b40ed49d7d6ff84".to_owned()));
-        assert_eq!(names(&n, &Query { sides: Some(vec![Side::Shared]), ..Query::default() }), ["GetCurrentResourceName"]);
+        assert!(
+            !names(&n, &Query { include_aliases: false, ..Query::default() })
+                .contains(&"GetEntityCoordinates".to_owned())
+        );
+        assert!(
+            !names(&n, &Query { include_unnamed: false, ..Query::default() })
+                .contains(&"N_0x0b40ed49d7d6ff84".to_owned())
+        );
+        assert_eq!(
+            names(&n, &Query { sides: Some(vec![Side::Shared]), ..Query::default() }),
+            ["GetCurrentResourceName"]
+        );
         assert_eq!(names(&n, &Query { limit: 3, ..Query::default() }).len(), 3);
         assert_eq!(namespaces(&n, &[NativeSet::Gta5]), ["CFX", "ENTITY", "MISC", "PLAYER"]);
     }
@@ -438,7 +480,10 @@ pub(crate) mod tests {
     fn fast_on_a_full_size_catalog() {
         let namespaces = ["ENTITY", "PED", "VEHICLE", "PLAYER", "MISC", "GRAPHICS", "HUD", "STREAMING"];
         let verbs = ["Get", "Set", "Is", "Has", "Clear", "Request", "Network", "Task"];
-        let nouns = ["Entity", "Ped", "Vehicle", "Player", "Ground", "Coord", "Heading", "Model", "Weapon", "Blip", "Cam", "Object"];
+        let nouns = [
+            "Entity", "Ped", "Vehicle", "Player", "Ground", "Coord", "Heading", "Model", "Weapon", "Blip", "Cam",
+            "Object",
+        ];
         let big: Vec<Native> = (0..15_000usize)
             .map(|i| {
                 let name = format!("{}{}{}Value{i}", verbs[i % 8], nouns[(i / 8) % 12], nouns[(i / 96) % 12]);
@@ -470,6 +515,9 @@ pub(crate) mod tests {
         // Debug builds are several times slower than the plugin's release build.
         let budget = if cfg!(debug_assertions) { 500 } else { 50 };
         assert!(slowest.as_millis() < budget, "slowest query took {} ms", slowest.as_millis());
-        assert_eq!(search(&n, &[NativeSet::Gta5], &Query::text("GetEntityEntityValue0"))[0].0.lua_name, "GetEntityEntityValue0");
+        assert_eq!(
+            search(&n, &[NativeSet::Gta5], &Query::text("GetEntityEntityValue0"))[0].0.lua_name,
+            "GetEntityEntityValue0"
+        );
     }
 }

@@ -42,6 +42,10 @@ id = "show-docs"
 title = "CfxLua: Show Documentation"
 category = "CfxLua"
 
+[[contributes.menus]]
+menu = "editor.context"
+command = "show-docs"
+
 [[contributes.commands]]
 id = "natives.update"
 title = "CfxLua: Update Natives"

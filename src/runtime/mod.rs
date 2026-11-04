@@ -77,7 +77,9 @@ fn global_items(rt: &Runtime, parts: &[Part], prefix: &str) -> Vec<CompletionIte
     let prefix = prefix.to_ascii_lowercase();
     let mut items: Vec<CompletionItem> = rt
         .globals()
-        .filter(|(name, g)| !g.extension && parts.contains(&rt.decl(g.decl).part) && name.to_ascii_lowercase().starts_with(&prefix))
+        .filter(|(name, g)| {
+            !g.extension && parts.contains(&rt.decl(g.decl).part) && name.to_ascii_lowercase().starts_with(&prefix)
+        })
         .map(|(_, g)| item(rt, rt.decl(g.decl)))
         .collect();
     items.sort_by(|a, b| a.label.cmp(&b.label));
@@ -260,8 +262,7 @@ mod tests {
     use crate::testing::Fixture;
     use serde_json::Value;
 
-    const MANIFEST: &str =
-        "fx_version 'cerulean'\ngame 'gta5'\nclient_script 'client/*.lua'\nserver_script 'server/*.lua'\nshared_script 'shared/*.lua'";
+    const MANIFEST: &str = "fx_version 'cerulean'\ngame 'gta5'\nclient_script 'client/*.lua'\nserver_script 'server/*.lua'\nshared_script 'shared/*.lua'";
 
     fn complete_with(settings: Settings, rel: &str, code: &str) -> Vec<CompletionItem> {
         let fx = Fixture::new(&[("res/fxmanifest.lua", MANIFEST), (rel, code)]).with_settings(settings);
@@ -280,8 +281,17 @@ mod tests {
     #[test]
     fn globals_by_side() {
         let client = labels("res/client/main.lua", "<caret>");
-        let expected =
-            ["Citizen", "CreateThread", "AddEventHandler", "TriggerServerEvent", "SendNUIMessage", "json", "vector3", "LocalPlayer", "GlobalState"];
+        let expected = [
+            "Citizen",
+            "CreateThread",
+            "AddEventHandler",
+            "TriggerServerEvent",
+            "SendNUIMessage",
+            "json",
+            "vector3",
+            "LocalPlayer",
+            "GlobalState",
+        ];
         for name in expected {
             assert!(has(&client, name), "{name} in client");
         }
@@ -289,7 +299,12 @@ mod tests {
             assert!(!has(&client, name), "{name} not in client");
         }
         let server = labels("res/server/main.lua", "<caret>");
-        assert!(has(&server, "TriggerClientEvent") && has(&server, "source") && has(&server, "Wait") && has(&server, "GetPlayers"));
+        assert!(
+            has(&server, "TriggerClientEvent")
+                && has(&server, "source")
+                && has(&server, "Wait")
+                && has(&server, "GetPlayers")
+        );
         assert!(!has(&server, "TriggerServerEvent") && !has(&server, "SendNUIMessage") && !has(&server, "LocalPlayer"));
         let shared = labels("res/shared/config.lua", "<caret>");
         assert!(has(&shared, "TriggerClientEvent") && has(&shared, "TriggerServerEvent"));
@@ -307,8 +322,11 @@ mod tests {
         let off = Settings::defaults().with(keys::RUNTIME_API, Value::from(false));
         assert!(complete_with(off, "res/client/main.lua", "<caret>").is_empty());
         let no_client = Settings::defaults().with(keys::CLIENT_NATIVES, Value::from(false));
-        let shared: Vec<String> = complete_with(no_client, "res/shared/a.lua", "<caret>").into_iter().map(|i| i.label).collect();
-        assert!(has(&shared, "CreateThread") && has(&shared, "TriggerClientEvent") && !has(&shared, "TriggerServerEvent"));
+        let shared: Vec<String> =
+            complete_with(no_client, "res/shared/a.lua", "<caret>").into_iter().map(|i| i.label).collect();
+        assert!(
+            has(&shared, "CreateThread") && has(&shared, "TriggerClientEvent") && !has(&shared, "TriggerServerEvent")
+        );
         let disabled = Settings::defaults().with(keys::ENABLED, Value::from(false));
         assert!(complete_with(disabled, "res/client/main.lua", "<caret>").is_empty());
     }
@@ -327,7 +345,10 @@ mod tests {
         assert!(has(&promise, "new") && has(&promise, "all") && !has(&promise, "resolve"));
         assert_eq!(labels("res/server/main.lua", "Player(source).state:<caret>"), ["set"]);
         assert_eq!(labels("res/client/main.lua", "LocalPlayer.<caret>"), ["state"]);
-        assert!(labels("res/client/main.lua", "GlobalState.<caret>").is_empty(), "state bag keys belong to the state bags feature");
+        assert!(
+            labels("res/client/main.lua", "GlobalState.<caret>").is_empty(),
+            "state bag keys belong to the state bags feature"
+        );
         assert!(labels("res/client/main.lua", "LocalPlayer.state.<caret>").is_empty());
         let math = labels("res/client/main.lua", "math.<caret>");
         assert!(has(&math, "round") && has(&math, "clamp") && has(&math, "eps"));
@@ -347,7 +368,12 @@ mod tests {
         assert_eq!(create.detail.as_deref(), Some("Citizen.CreateThread(routine: fun()): integer"));
         assert_eq!(create.kind, Some(CompletionKind::Method));
         let doc = create.documentation.as_deref().unwrap();
-        assert!(doc.starts_with("```lua\nfunction Citizen.CreateThread(routine: fun()): integer\n```\n\nCreates a new scheduler thread"), "{doc}");
+        assert!(
+            doc.starts_with(
+                "```lua\nfunction Citizen.CreateThread(routine: fun()): integer\n```\n\nCreates a new scheduler thread"
+            ),
+            "{doc}"
+        );
         assert!(doc.contains("**Parameters**\n\n- `routine` `fun()`: The function to run in the new thread."), "{doc}");
         assert!(doc.contains("**Returns**\n\n- `integer`: The scheduler bookmark id of the new thread."), "{doc}");
         assert!(doc.ends_with("*Cfx runtime API (shared)*"), "{doc}");

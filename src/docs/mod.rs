@@ -73,7 +73,7 @@ const PREFS_MAX: usize = 64 * 1024;
 /// How long an `open` waits for a page that was hidden.
 const PENDING: Duration = Duration::from_secs(120);
 /// `show-docs` without a target.
-const WHERE: &str = "The documentation is in the Sensity tool window (View > Tool Windows > Sensity). \
+const WHERE: &str = "The documentation is in the CfxLua tool window (View > Tool Windows > CfxLua). \
                      Put the caret on a native, a hash literal, a built-in event or a manifest directive to show its page there.";
 
 #[derive(Default)]
@@ -171,8 +171,15 @@ impl Docs {
     fn reply(&self, cx: &CommandCx, request: Request) -> Option<Value> {
         match request {
             Request::Init => {
-                let prefs = host::storage::get(PREFS).ok().flatten().and_then(|s| serde_json::from_str::<Value>(&s).ok());
-                let open = self.state.borrow_mut().pending.take().filter(|(at, _)| at.elapsed() < PENDING).map(|(_, open)| open);
+                let prefs =
+                    host::storage::get(PREFS).ok().flatten().and_then(|s| serde_json::from_str::<Value>(&s).ok());
+                let open = self
+                    .state
+                    .borrow_mut()
+                    .pending
+                    .take()
+                    .filter(|(at, _)| at.elapsed() < PENDING)
+                    .map(|(_, open)| open);
                 Some(json!({ "op": "init", "prefs": prefs.unwrap_or_else(|| json!({})), "open": open }))
             }
             Request::Search(search) => {
@@ -203,7 +210,8 @@ impl Docs {
             }
             Request::Prefs { prefs } => {
                 let text = prefs.to_string();
-                if prefs.is_object() && text.len() <= PREFS_MAX
+                if prefs.is_object()
+                    && text.len() <= PREFS_MAX
                     && let Err(e) = host::storage::set(PREFS, &text)
                 {
                     host::log(LogLevel::Debug, &format!("docs preferences: {e}"));
@@ -222,7 +230,8 @@ impl Docs {
             && let Some(set) = select.and_then(|id| id.split_once(':')).and_then(|(s, _)| NativeSet::parse(s))
             && !filters.sets(&project).contains(&set)
         {
-            filters = Filters { set: "all".into(), aliases: filters.aliases, unnamed: filters.unnamed, ..Filters::default() };
+            filters =
+                Filters { set: "all".into(), aliases: filters.aliases, unnamed: filters.unnamed, ..Filters::default() };
         }
         let rt = runtime();
         let mut results = tabs::list(tab, cx.natives, rt, &project, &text, &filters);
@@ -232,7 +241,9 @@ impl Docs {
             results = tabs::list(tab, cx.natives, rt, &project, &text, &filters);
             index = select.and_then(|id| results.listing.position(id));
         }
-        let index = index.or_else(|| selected.and_then(|id| results.listing.position(id))).or_else(|| results.listing.first_selectable());
+        let index = index
+            .or_else(|| selected.and_then(|id| results.listing.position(id)))
+            .or_else(|| results.listing.first_selectable());
         let detail = index.and_then(|i| results.listing.id(i)).map(|id| Value::Object(detail(cx, tab, &id)));
         let rows = results.listing.rows(cx.natives, 0, limit);
         let reply = json!({
@@ -257,7 +268,14 @@ impl Docs {
     }
 
     /// Runs `f` on the listing of a search, the cached one for the natives when it matches.
-    fn with_listing<R>(&self, cx: &CommandCx, tab: Tab, text: &str, filters: &Filters, f: impl FnOnce(&Listing) -> R) -> R {
+    fn with_listing<R>(
+        &self,
+        cx: &CommandCx,
+        tab: Tab,
+        text: &str,
+        filters: &Filters,
+        f: impl FnOnce(&Listing) -> R,
+    ) -> R {
         let project = project_sets(cx);
         let key = listing_key(text, filters, &project);
         if tab == Tab::Natives
@@ -295,7 +313,7 @@ impl Docs {
                 self.open(tab, &id);
                 host::notify(NotificationLevel::Info, &title, &body);
             }
-            None => host::notify(NotificationLevel::Info, "Sensity DevKit", WHERE),
+            None => host::notify(NotificationLevel::Info, "CfxLua", WHERE),
         }
         Ok(None)
     }
@@ -456,7 +474,10 @@ mod tests {
         fn new() -> Self {
             Self {
                 mock: MockHost::install(),
-                ws: Workspace::from_files("/project", &[("res/fxmanifest.lua", "game 'gta5'\nclient_script 'client/*.lua'")]),
+                ws: Workspace::from_files(
+                    "/project",
+                    &[("res/fxmanifest.lua", "game 'gta5'\nclient_script 'client/*.lua'")],
+                ),
                 settings: Settings::defaults(),
                 natives: Natives::from_natives(fixture()),
             }
@@ -467,10 +488,13 @@ mod tests {
             let cx = CommandCx { ws: Some(&self.ws), settings: &self.settings, natives: &self.natives, doc, inv: &inv };
             let before = self.mock.view_messages().len();
             docs.handle(&cx, VIEW, ViewEvent::Message(message.to_string())).unwrap();
-            self.mock.view_messages()[before..].iter().map(|(v, m)| {
-                assert_eq!(v, VIEW);
-                serde_json::from_str(m).unwrap()
-            }).collect()
+            self.mock.view_messages()[before..]
+                .iter()
+                .map(|(v, m)| {
+                    assert_eq!(v, VIEW);
+                    serde_json::from_str(m).unwrap()
+                })
+                .collect()
         }
 
         fn one(&self, docs: &Docs, message: Value) -> Value {
@@ -483,13 +507,17 @@ mod tests {
         let env = Env::new();
         let docs = Docs::default();
         let items = env.one(&docs, json!({ "op": "search", "tab": "natives", "seq": 3, "text": "", "limit": 4 }));
-        assert_eq!((items["op"].as_str(), items["seq"].as_u64(), items["total"].as_u64()), (Some("items"), Some(3), Some(9)));
+        assert_eq!(
+            (items["op"].as_str(), items["seq"].as_u64(), items["total"].as_u64()),
+            (Some("items"), Some(3), Some(9))
+        );
         assert_eq!(items["count"], "9 natives");
         assert_eq!(items["rows"].as_array().unwrap().len(), 4);
         assert_eq!(items["selected"], 0);
         assert_eq!(items["namespaces"], json!(["CFX", "ENTITY", "MISC", "PLAYER"]));
         assert!(items["detail"]["html"].as_str().unwrap().starts_with("<div class='title'>"));
-        let rows = env.one(&docs, json!({ "op": "rows", "tab": "natives", "seq": 3, "text": "", "offset": 4, "limit": 100 }));
+        let rows =
+            env.one(&docs, json!({ "op": "rows", "tab": "natives", "seq": 3, "text": "", "offset": 4, "limit": 100 }));
         assert_eq!(rows["rows"].as_array().unwrap().len(), 5);
         let detail = env.one(&docs, json!({ "op": "detail", "tab": "natives", "id": "GTA5:GetGroundZFor_3dCoord" }));
         assert_eq!(detail["copy"]["signature"], "local retval, groundZ = GetGroundZFor_3dCoord(x, y, z, ignoreWater)");
@@ -523,11 +551,18 @@ mod tests {
         let index = items["selected"].as_u64().unwrap() as usize;
         assert_eq!(items["rows"][index]["id"], "RDR3:GetEntityCoordsRdr");
         assert_eq!(items["detail"]["id"], "RDR3:GetEntityCoordsRdr");
-        let kept = env.one(&docs, json!({ "op": "search", "tab": "events", "text": "resource", "selected": "onResourceStop" }));
+        let kept = env
+            .one(&docs, json!({ "op": "search", "tab": "events", "text": "resource", "selected": "onResourceStop" }));
         assert_eq!(kept["rows"][kept["selected"].as_u64().unwrap() as usize]["id"], "onResourceStop");
         let guides = env.one(&docs, json!({ "op": "search", "tab": "guides", "text": "" }));
-        assert_eq!((guides["selected"].as_u64(), guides["count"].as_str()), (Some(1), Some(format!("{} guides", data::guides().len()).as_str())));
-        let runtime = env.one(&docs, json!({ "op": "search", "tab": "runtime", "text": "", "select": "PerformHttpRequest", "limit": 5000 }));
+        assert_eq!(
+            (guides["selected"].as_u64(), guides["count"].as_str()),
+            (Some(1), Some(format!("{} guides", data::guides().len()).as_str()))
+        );
+        let runtime = env.one(
+            &docs,
+            json!({ "op": "search", "tab": "runtime", "text": "", "select": "PerformHttpRequest", "limit": 5000 }),
+        );
         let row = &runtime["rows"][runtime["selected"].as_u64().unwrap() as usize];
         assert!(row["label"].as_str().unwrap().starts_with("PerformHttpRequest("), "{row}");
     }
@@ -546,18 +581,20 @@ mod tests {
         env.mock.open_editor("/project/res/client/main.lua", "lua", text, &[(0, 15, 0, 15)]);
         let doc = crate::feature::Doc::new(&env.ws, "/project/res/client/main.lua", "lua", 1, text);
         let inv = env.mock.invocation();
-        let cx = CommandCx { ws: Some(&env.ws), settings: &env.settings, natives: &env.natives, doc: Some(&doc), inv: &inv };
+        let cx =
+            CommandCx { ws: Some(&env.ws), settings: &env.settings, natives: &env.natives, doc: Some(&doc), inv: &inv };
         assert!(docs.command(&cx, "other", None).is_none());
         docs.command(&cx, SHOW_DOCS, None).unwrap().unwrap();
         let open: Value = serde_json::from_str(&env.mock.view_messages().last().unwrap().1).unwrap();
         assert_eq!(open, json!({ "op": "open", "tab": "natives", "id": "GTA5:GetEntityCoords" }));
         let note = env.mock.notifications().pop().unwrap();
         assert_eq!(note.title, "GetEntityCoords");
-        assert!(note.body.ends_with("See the Sensity tool window."));
+        assert!(note.body.ends_with("See the CfxLua tool window."));
         assert_eq!(env.one(&docs, json!({ "op": "init" }))["open"], open, "a page loading later still opens it");
         assert_eq!(env.one(&docs, json!({ "op": "init" }))["open"], Value::Null);
 
-        let notice = env.one(&docs, json!({ "op": "insert", "tab": "natives", "id": "GTA5:PlayerPedId", "variant": "call" }));
+        let notice =
+            env.one(&docs, json!({ "op": "insert", "tab": "natives", "id": "GTA5:PlayerPedId", "variant": "call" }));
         assert_eq!((notice["text"].as_str(), notice["error"].as_bool()), (Some("Inserted in main.lua."), Some(false)));
         assert_eq!(env.mock.editor_text(), "local x = GetEnlocal retval = PlayerPedId()tityCoords(PlayerPedId())\n");
         let bad = env.one(&docs, json!({ "op": "insert", "tab": "guides", "id": "natives", "variant": "call" }));
@@ -567,7 +604,7 @@ mod tests {
         let inv = elsewhere.invocation();
         let cx = CommandCx { ws: None, settings: &env.settings, natives: &env.natives, doc: None, inv: &inv };
         docs.command(&cx, SHOW_DOCS, None).unwrap().unwrap();
-        assert!(elsewhere.notifications()[0].body.starts_with("The documentation is in the Sensity tool window"));
+        assert!(elsewhere.notifications()[0].body.starts_with("The documentation is in the CfxLua tool window"));
         assert_eq!(project_sets(&cx), Vec::<NativeSet>::new());
     }
 }

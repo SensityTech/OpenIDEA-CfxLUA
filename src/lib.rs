@@ -81,7 +81,7 @@ impl Default for DevKit {
     fn default() -> Self {
         Self {
             features: all_features(),
-            docs: docs::Docs,
+            docs: docs::Docs::default(),
             settings: Settings::live(),
             natives: Natives::bundled(),
             workspaces: Vec::new(),

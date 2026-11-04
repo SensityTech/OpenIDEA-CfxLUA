@@ -270,10 +270,17 @@ mod tests {
 
     #[test]
     fn guide_links_and_code_blocks() {
-        let html = markdown("See `cfxdoc:natives` and `cfxdoc:nope`.\n\n```lua\nlocal x = 1 -- one\n```\n\n```\nplain <b>\n```\n");
+        let html = markdown(
+            "See `cfxdoc:natives` and `cfxdoc:nope`.\n\n```lua\nlocal x = 1 -- one\n```\n\n```\nplain <b>\n```\n",
+        );
         assert!(html.contains("<a href=\"cfxdoc:natives\">Calling natives from Lua</a>"), "{html}");
         assert!(html.contains("<code>cfxdoc:nope</code>"), "{html}");
-        assert!(html.contains("<pre><span class='l-kw'>local</span> x <span class='l-op'>=</span> <span class='l-num'>1</span>"), "{html}");
+        assert!(
+            html.contains(
+                "<pre><span class='l-kw'>local</span> x <span class='l-op'>=</span> <span class='l-num'>1</span>"
+            ),
+            "{html}"
+        );
         assert!(html.contains("<span class='l-com'>-- one</span></pre>"), "{html}");
         assert!(html.contains("<pre>plain &lt;b&gt;</pre>"), "{html}");
     }
@@ -284,7 +291,10 @@ mod tests {
             "Read https://docs.fivem.net/docs/ (or <https://x.io>).\n\n- [ ] todo\n- [x] done\n\n\
              ~~old~~ <img src=x onerror=alert(1)> a<br>b",
         );
-        assert!(html.contains("<a href=\"https://docs.fivem.net/docs/\">https://docs.fivem.net/docs/</a> (or"), "{html}");
+        assert!(
+            html.contains("<a href=\"https://docs.fivem.net/docs/\">https://docs.fivem.net/docs/</a> (or"),
+            "{html}"
+        );
         assert!(html.contains("<a href=\"https://x.io\">https://x.io</a>)"), "{html}");
         assert!(html.contains("type=\"checkbox\""), "{html}");
         assert!(html.contains("<del>old</del>"), "{html}");

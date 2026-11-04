@@ -203,7 +203,13 @@ pub fn runtime() -> &'static Runtime {
 impl Runtime {
     /// Parses stub files `(part, file name, text)`, in order.
     pub fn parse(files: &[(Part, &'static str, &str)]) -> Self {
-        let mut rt = Self { decls: Vec::new(), tops: Default::default(), globals: HashMap::new(), members: HashMap::new(), classes: HashMap::new() };
+        let mut rt = Self {
+            decls: Vec::new(),
+            tops: Default::default(),
+            globals: HashMap::new(),
+            members: HashMap::new(),
+            classes: HashMap::new(),
+        };
         for &(part, file, text) in files {
             let src = Source::new(text);
             let tops = FileParser { rt: &mut rt, src: &src, part, file, vars: HashMap::new(), tops: Vec::new() }.run();
@@ -244,7 +250,10 @@ impl Runtime {
     /// members: `EventHandlerData|nil` → `EventHandlerData`.
     pub fn table_of<'a>(&self, ty: &'a str) -> Option<&'a str> {
         let first = ty.split(',').next().unwrap_or(ty);
-        first.split('|').map(|t| t.trim().trim_end_matches('?')).find(|t| self.classes.contains_key(*t) || self.members.contains_key(*t))
+        first
+            .split('|')
+            .map(|t| t.trim().trim_end_matches('?'))
+            .find(|t| self.classes.contains_key(*t) || self.members.contains_key(*t))
     }
 
     /// The table a declaration's members belong to.
@@ -336,7 +345,11 @@ impl FileParser<'_, '_> {
             }
             let name = src.tok_text(i + 1);
             let class = doc.class.clone();
-            let d = self.add(class.as_deref().unwrap_or(name), if class.is_some() { Kind::Class } else { Kind::Local }, doc);
+            let d = self.add(
+                class.as_deref().unwrap_or(name),
+                if class.is_some() { Kind::Class } else { Kind::Local },
+                doc,
+            );
             self.tops.push(d);
             self.vars.insert(name.to_owned(), d);
             if let Some(c) = class {
@@ -407,7 +420,12 @@ impl FileParser<'_, '_> {
             return None;
         }
         let close = src.pair[open]?;
-        Some((open + 1..close).filter(|&k| src.is_name(k) || src.is_op(k, "...")).map(|k| src.tok_text(k).to_owned()).collect())
+        Some(
+            (open + 1..close)
+                .filter(|&k| src.is_name(k) || src.is_op(k, "..."))
+                .map(|k| src.tok_text(k).to_owned())
+                .collect(),
+        )
     }
 
     /// Reads the value assigned to `d` from token `i` (table constructor
@@ -426,7 +444,8 @@ impl FileParser<'_, '_> {
         let Some(close) = src.is_op(i, "{").then(|| src.pair[i]).flatten() else { return i + 1 };
         let mut k = i + 1;
         while k < close {
-            let field = src.is_name(k) && src.is_op(k + 1, "=") && [",", ";", "{"].iter().any(|op| src.is_op(k - 1, op));
+            let field =
+                src.is_name(k) && src.is_op(k + 1, "=") && [",", ";", "{"].iter().any(|op| src.is_op(k - 1, op));
             if field {
                 let doc = self.doc_before(k);
                 let f = self.add(src.tok_text(k), Kind::Field, doc);
@@ -470,7 +489,9 @@ impl FileParser<'_, '_> {
                         self.rt.decls[d].doc.class = class;
                     }
                     None => {
-                        self.rt.globals.insert(root.clone(), Global { decl: d, table: Some(root.clone()), extension: true });
+                        self.rt
+                            .globals
+                            .insert(root.clone(), Global { decl: d, table: Some(root.clone()), extension: true });
                     }
                 }
                 d
@@ -531,7 +552,11 @@ impl FileParser<'_, '_> {
             let c = src.all[k - 1];
             let body = c.text(&src.text);
             let gap = &src.text[c.end..next];
-            if c.kind != Tok::LineComment || !body.starts_with("---") || gap.matches('\n').count() != 1 || !gap.trim().is_empty() {
+            if c.kind != Tok::LineComment
+                || !body.starts_with("---")
+                || gap.matches('\n').count() != 1
+                || !gap.trim().is_empty()
+            {
                 break;
             }
             lines.push(body);
@@ -595,7 +620,8 @@ pub fn annotations(lines: &[&str]) -> Annotations {
                 a.parents = parents.split(',').map(str::trim).filter(|p| !p.is_empty()).map(str::to_owned).collect();
             }
             "field" => {
-                let rest = ["public ", "protected ", "private "].iter().find_map(|v| rest.strip_prefix(v)).unwrap_or(rest);
+                let rest =
+                    ["public ", "protected ", "private "].iter().find_map(|v| rest.strip_prefix(v)).unwrap_or(rest);
                 if let Some(t) = named(rest) {
                     a.fields.push(t);
                 }
@@ -673,7 +699,11 @@ mod tests {
     use super::*;
 
     fn find<'a>(rt: &'a Runtime, part: Part, label: &str) -> &'a Decl {
-        rt.tops[part as usize].iter().map(|&i| rt.decl(i)).find(|d| d.label() == label).unwrap_or_else(|| panic!("no {label}"))
+        rt.tops[part as usize]
+            .iter()
+            .map(|&i| rt.decl(i))
+            .find(|d| d.label() == label)
+            .unwrap_or_else(|| panic!("no {label}"))
     }
 
     fn children(rt: &Runtime, d: &Decl) -> Vec<String> {
@@ -701,7 +731,10 @@ mod tests {
             "---@type CfxExports|fun(name:string)",
         ]);
         assert_eq!(a.description, "Creates a thread.\n\n* item\n  continued");
-        assert_eq!(a.params[0], Typed { name: "routine".into(), ty: "fun(a:string, b:string)".into(), desc: "The function.".into() });
+        assert_eq!(
+            a.params[0],
+            Typed { name: "routine".into(), ty: "fun(a:string, b:string)".into(), desc: "The function.".into() }
+        );
         assert_eq!(a.params[1], Typed { name: "name?".into(), ty: "string".into(), desc: "Optional name.".into() });
         assert_eq!(a.params[2].name, "...");
         assert_eq!(a.returns[0].ty, "integer");
@@ -747,11 +780,14 @@ mod tests {
         let citizen = find(rt, Part::Shared, "Citizen");
         assert_eq!(citizen.kind, Kind::Global);
         assert!(children(rt, citizen).contains(&"CreateThread(routine)".to_owned()));
-        let create = rt.decl(rt.members("Citizen").iter().copied().find(|&m| rt.decl(m).name == "CreateThread").unwrap());
+        let create =
+            rt.decl(rt.members("Citizen").iter().copied().find(|&m| rt.decl(m).name == "CreateThread").unwrap());
         assert_eq!(create.qualified(), "Citizen.CreateThread");
         assert_eq!(create.doc.returns[0].ty, "integer");
         assert!(create.doc.description.starts_with("Creates a new scheduler thread"));
-        assert!(rt.members("Citizen").iter().any(|&m| rt.decl(m).name == "GetNative" && rt.decl(m).part == Part::Client));
+        assert!(
+            rt.members("Citizen").iter().any(|&m| rt.decl(m).name == "GetNative" && rt.decl(m).part == Part::Client)
+        );
         assert_eq!(rt.global("promise").unwrap().table, None);
         assert_eq!(rt.decl(rt.global("promise").unwrap().decl).doc.ty.as_deref(), Some("PromiseLib"));
         assert_eq!(rt.members("PromiseLib").len(), 4);
