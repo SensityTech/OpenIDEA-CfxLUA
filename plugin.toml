@@ -43,6 +43,15 @@ title = "CfxLua: Show Documentation"
 category = "CfxLua"
 
 [[contributes.commands]]
+id = "natives.update"
+title = "CfxLua: Update Natives"
+category = "CfxLua"
+
+[[contributes.menus]]
+menu = "tools"
+command = "natives.update"
+
+[[contributes.commands]]
 id = "escrow.check"
 title = "CfxLua: Check Resource Before Escrow Upload"
 category = "CfxLua"

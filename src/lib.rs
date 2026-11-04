@@ -165,6 +165,11 @@ impl DevKit {
         for feature in &self.features {
             feature.indexed(ws);
         }
+        // Parse the natives the project uses now, not on the first keystroke.
+        let games = natives::project_games(&self.settings, &ws.detected_games());
+        for set in games.into_iter().map(natives::NativeSet::for_game).chain([natives::NativeSet::Server]) {
+            self.natives.catalog(set);
+        }
         host::log(LogLevel::Info, &format!("indexed {} files of {root} in {} ms", total, start.elapsed().as_millis()));
     }
 

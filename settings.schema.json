@@ -39,6 +39,12 @@
       "description": "Hidden natives are still recognised: existing scripts are not flagged.",
       "default": false
     },
+    "natives.autoUpdate": {
+      "type": "boolean",
+      "title": "Check for new natives automatically",
+      "description": "Once a day, download the Cfx.re native databases (static.cfx.re, GitHub) if they changed.",
+      "default": true
+    },
     "escrow.showStatus": {
       "type": "boolean",
       "title": "Show the Asset Escrow status of resource files",

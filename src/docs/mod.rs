@@ -1,4 +1,4 @@
-//! The Sensity tool window: natives browser, runtime API, built-in events,
+//! The CfxLua tool window: natives browser, runtime API, built-in events,
 //! manifest directives, CfxLua syntax and the bundled guides. The page
 //! (`web/`) is a thin client: searching and HTML building happen here.
 

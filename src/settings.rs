@@ -1,4 +1,4 @@
-//! The plugin's settings (Settings › Plugins › Sensity DevKit, per project or
+//! The plugin's settings (Settings › Plugins › OpenIDEA-CfxLUA, per project or
 //! global), declared in `settings.schema.json`. Features read them through
 //! [`Settings`] with the schema's default, so a missing or mistyped value never
 //! breaks anything; tests set values with [`Settings::with`].
