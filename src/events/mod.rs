@@ -86,7 +86,10 @@ impl EventsFeature {
         let config = Config::read(cx.settings);
         let mut projects = self.projects.borrow_mut();
         let p = projects.entry(cx.ws.root.clone()).or_default();
-        if (p.db.is_none() || p.dirty || p.config != config) && !(cx.ws.indexing && p.db.is_some()) {
+        // Queries build the first database, follow a settings change or update a few files; other full rebuilds
+        // happen in `indexed` (heavy calls).
+        let full = p.manifests_changed || p.changed.len() > MAX_UPDATED_FILES;
+        if p.db.is_none() || p.config != config || p.dirty && !full {
             p.rebuild(cx.ws, config);
         }
         p.db.clone()

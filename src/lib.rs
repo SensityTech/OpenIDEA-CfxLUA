@@ -45,13 +45,14 @@ struct Slice {
     heavy: bool,
 }
 
+// Measured: up to ~1 800 instructions per indexed byte; web files cost twice Lua (counted twice).
 const ACTIVATION: Slice = Slice { reads: 1_500, bytes: 512 << 10, heavy: true };
-const EVENTS: Slice = Slice { reads: 1_500, bytes: 2 << 20, heavy: true };
-// Bigger files are generated data or bundles: indexing one would take a call on its own.
+const EVENTS: Slice = Slice { reads: 1_500, bytes: 1 << 20, heavy: true };
+const VIEW: Slice = Slice { reads: 64, bytes: 256 << 10, heavy: false };
+const EDIT: Slice = Slice { reads: 8, bytes: 24 << 10, heavy: false };
+// Bigger files are generated data or bundles: lexing one would take a call on its own.
 const MAX_INDEXED: usize = 1 << 20;
 const DERIVE_EVERY: u32 = 6;
-const VIEW: Slice = Slice { reads: 64, bytes: 512 << 10, heavy: false };
-const EDIT: Slice = Slice { reads: 16, bytes: 0, heavy: false };
 
 pub fn all_features() -> Vec<Box<dyn Feature>> {
     vec![
@@ -168,7 +169,6 @@ impl DevKit {
             }
         }
         ws.scanned = true;
-        ws.indexing = true;
         // Read last, popped first: manifests say which resource and side every other file belongs to.
         self.unread.sort_by_key(|(_, p)| project::file_kind(p) == FileKind::Manifest);
         self.catalogs.push(i);
@@ -177,6 +177,15 @@ impl DevKit {
     }
 
     fn step(&mut self, slice: Slice) {
+        if slice.heavy {
+            let wanted = self.natives.take_wanted();
+            if !wanted.is_empty() {
+                for set in wanted {
+                    self.natives.catalog(set);
+                }
+                return;
+            }
+        }
         let left = self.unread.len() + self.pending.len();
         if left == 0 && self.catalogs.is_empty() && self.derive.is_empty() && !self.indexing {
             return;
@@ -189,7 +198,6 @@ impl DevKit {
             return;
         }
         if self.deriving || !self.derive.is_empty() && (left == 0 || self.slices >= DERIVE_EVERY) {
-            self.load_catalogs();
             self.deriving = !self.derive_slice();
             if !self.deriving {
                 self.slices = 0;
@@ -207,19 +215,16 @@ impl DevKit {
         }
         if self.indexing && self.unread.is_empty() && self.pending.is_empty() && self.derive.is_empty() {
             self.indexing = false;
-            for ws in &mut self.workspaces {
-                ws.indexing = false;
-            }
             host::log(LogLevel::Info, "resources indexed");
         }
     }
 
-    // Derived indexes (event links, NUI bridge, state bags) grow with the project: one rebuild per call once a call is busy.
+    // Derived indexes (event links, NUI bridge, state bags) grow with the project: one real rebuild per call.
     fn derive_slice(&mut self) -> bool {
         let start = std::time::Instant::now();
         while let Some(&i) = self.derive.first() {
             while self.derived < self.features.len() {
-                if start.elapsed().as_millis() > 50 {
+                if start.elapsed().as_millis() > 10 {
                     return false;
                 }
                 self.features[self.derived].indexed(&self.workspaces[i]);
@@ -282,16 +287,19 @@ impl DevKit {
             if text.len() > MAX_INDEXED {
                 continue;
             }
-            if used + text.len() > slice.bytes && (used > 0 || !slice.heavy) {
+            let cost = if f.kind == FileKind::Web { 2 * text.len() } else { text.len() };
+            if used + cost > slice.bytes && (used > 0 || !slice.heavy) {
                 self.pending.push((i, path));
                 break;
             }
-            used += text.len();
+            used += cost;
             let src = parse(f.kind, text);
             for feature in &self.features {
                 feature.index_file(ws, &f.path, f.kind, &src);
             }
-            if !self.derive.contains(&i) {
+            if self.derive.first() == Some(&i) {
+                self.derived = 0;
+            } else if !self.derive.contains(&i) {
                 self.derive.push(i);
             }
         }
@@ -321,37 +329,69 @@ impl DevKit {
         if !self.workspaces[i].scanned {
             return;
         }
-        let kind = project::file_kind(path);
         let text = match host::projects() {
             Ok(ps) => ps.into_iter().find_map(|p| p.read_file(path).ok()),
             Err(_) => None,
         };
+        let key = slash(path);
         let ws = &mut self.workspaces[i];
-        match text {
-            Some(t) => ws.set(path, Some(&t)),
-            None => ws.remove(path),
+        if ws.text(&key) == text.as_deref() {
+            return;
         }
-        let ws = &self.workspaces[i];
-        match ws.text(path) {
+        match text {
             Some(t) => {
-                let src = parse(kind, t);
-                for f in &self.features {
-                    f.index_file(ws, &slash(path), kind, &src);
+                ws.set(path, Some(&t));
+                // Indexed by the next slice, under its budget.
+                if ws.text(&key).is_some() {
+                    self.pending.push((i, key));
                 }
             }
             None => {
+                ws.remove(path);
                 for f in &self.features {
-                    f.forget_file(&slash(path));
+                    f.forget_file(&key);
                 }
+                self.mark_derive(i);
             }
-        }
-        if !self.derive.contains(&i) {
-            self.derive.push(i);
         }
         self.last = None;
     }
 
+    fn command(&mut self, id: &str, ctx: &Invocation, arg: Option<&str>) -> Result<Option<String>, Error> {
+        let (ws, doc) = self.command_doc(ctx);
+        let cx = CommandCx {
+            ws: ws.map(|i| &self.workspaces[i]),
+            settings: &self.settings,
+            natives: &self.natives,
+            doc: doc.as_ref(),
+            inv: ctx,
+        };
+        let result = std::iter::once(&self.docs as &dyn Feature)
+            .chain(self.features.iter().map(|f| f.as_ref()))
+            .find_map(|f| f.command(&cx, id, arg))
+            .unwrap_or_else(|| Err(Error::NotFound(format!("command {id}"))));
+        if matches!(id, natives::UPDATE | natives::SCHEDULED_UPDATE) {
+            let changed = natives::take_changed();
+            if !changed.is_empty() {
+                // Reloaded by the next heavy call: in this one the update already took its share of the budget.
+                self.natives.invalidate(&changed);
+                self.catalogs = (0..self.workspaces.len()).collect();
+                self.last = None;
+            }
+        }
+        result
+    }
+
+    fn mark_derive(&mut self, i: usize) {
+        if self.derive.first() == Some(&i) {
+            self.derived = 0;
+        } else if !self.derive.contains(&i) {
+            self.derive.push(i);
+        }
+    }
+
     fn prepare(&mut self, d: &Document) -> Option<usize> {
+        self.natives.freeze(true);
         if !self.settings.enabled() {
             return None;
         }
@@ -365,6 +405,11 @@ impl DevKit {
         {
             return Some(i);
         }
+        // Generated data, bundles and declaration files: lexing one would overrun an editor call.
+        if d.text.len() > MAX_INDEXED || d.text.starts_with("---@meta") {
+            self.last = None;
+            return None;
+        }
         self.settings.reset();
         let ws = &mut self.workspaces[i];
         let changed = ws.text(&path) != Some(d.text.as_str());
@@ -374,13 +419,9 @@ impl DevKit {
         if changed {
             for f in &self.features {
                 f.index_file(ws, &path, doc.kind, &doc.src);
-                if !ws.indexing {
-                    f.indexed(ws);
-                }
             }
-            if ws.indexing && !self.derive.contains(&i) {
-                self.derive.push(i);
-            }
+            // Derived indexes are rebuilt by the next heavy call, never on the editing path.
+            self.mark_derive(i);
         }
         self.last = Some((doc, None));
         Some(i)
@@ -433,6 +474,9 @@ impl DevKit {
             inv.project().and_then(|p| p.root().ok()).map(|root| self.workspace_for(&format!("{}/", slash(&root))));
         let doc = inv.editor().and_then(|e| {
             let d = e.document().ok()?;
+            if d.text.len() > MAX_INDEXED {
+                return None;
+            }
             let path = e.path();
             let i = ws.unwrap_or_else(|| self.workspace_for(&path));
             Some(Doc::new(&self.workspaces[i], &path, &e.language(), d.version, &d.text))
@@ -502,6 +546,7 @@ fn parse(kind: FileKind, text: &str) -> Source {
 
 impl Plugin for DevKit {
     fn activate(&mut self, _ctx: &Context) -> Result<(), Error> {
+        self.natives.freeze(false);
         for kind in [EventKind::FileOpened, EventKind::FileSaved, EventKind::EditorFocused, EventKind::Scheduled] {
             if let Err(e) = host::subscribe(kind) {
                 host::log(LogLevel::Warn, &format!("events: {e}"));
@@ -523,36 +568,14 @@ impl Plugin for DevKit {
     }
 
     fn run_command(&mut self, id: &str, ctx: &Invocation, arg: Option<&str>) -> Result<Option<String>, Error> {
+        self.natives.freeze(false);
         self.settings.reset();
         self.step(VIEW);
-        let (ws, doc) = self.command_doc(ctx);
-        let cx = CommandCx {
-            ws: ws.map(|i| &self.workspaces[i]),
-            settings: &self.settings,
-            natives: &self.natives,
-            doc: doc.as_ref(),
-            inv: ctx,
-        };
-        let result = std::iter::once(&self.docs as &dyn Feature)
-            .chain(self.features.iter().map(|f| f.as_ref()))
-            .find_map(|f| f.command(&cx, id, arg))
-            .unwrap_or_else(|| Err(Error::NotFound(format!("command {id}"))));
-        if matches!(id, natives::UPDATE | natives::SCHEDULED_UPDATE) {
-            let changed = natives::take_changed();
-            if !changed.is_empty() {
-                // Reloaded here, under the command's budget: an editor call loading a catalog overruns its 50 ms.
-                let reload: Vec<_> = changed.iter().copied().filter(|&s| self.natives.is_loaded(s)).collect();
-                self.natives.invalidate(&changed);
-                for set in reload {
-                    self.natives.catalog(set);
-                }
-                self.last = None;
-            }
-        }
-        result
+        self.command(id, ctx, arg)
     }
 
     fn handle_events(&mut self, events: &[Event], ctx: &Invocation) {
+        self.natives.freeze(false);
         let mut slice = EVENTS;
         for e in events {
             match e {
@@ -570,7 +593,7 @@ impl Plugin for DevKit {
                     self.update_status(path.as_deref());
                 }
                 Event::Scheduled => {
-                    let _ = self.run_command("natives.scheduled-update", ctx, None);
+                    let _ = self.command(natives::SCHEDULED_UPDATE, ctx, None);
                     slice = VIEW;
                 }
                 _ => {}
@@ -663,6 +686,7 @@ impl Providers for DevKit {
 
 impl Views for DevKit {
     fn render(&mut self, view: &str, viewport: Option<Viewport>, ctx: &Invocation) -> Result<View, Error> {
+        self.natives.freeze(false);
         self.step(VIEW);
         let (ws, doc) = self.command_doc(ctx);
         let cx = CommandCx {
@@ -676,8 +700,15 @@ impl Views for DevKit {
     }
 
     fn handle(&mut self, view: &str, event: ViewEvent, ctx: &Invocation) -> Result<(), Error> {
+        self.natives.freeze(false);
         self.settings.reset();
-        self.step(VIEW);
+        // Opening the window or searching moves the scan on; rows, details and preferences are answered at once.
+        if let ViewEvent::Message(text) = &event
+            && serde_json::from_str::<serde_json::Value>(text)
+                .is_ok_and(|m| matches!(m["op"].as_str(), Some("init" | "search")))
+        {
+            self.step(VIEW);
+        }
         let (ws, doc) = self.command_doc(ctx);
         let cx = CommandCx {
             ws: ws.map(|i| &self.workspaces[i]),
@@ -687,7 +718,7 @@ impl Views for DevKit {
             inv: ctx,
         };
         let Some(command) = self.docs.handle(&cx, view, event)? else { return Ok(()) };
-        let result = self.run_command(command, ctx, None);
+        let result = self.command(command, ctx, None);
         self.docs.refresh(command);
         result.map(|_| ())
     }
@@ -814,6 +845,41 @@ mod tests {
         let _ = kit.run_command(natives::UPDATE, &inv, None);
         assert!(kit.natives.is_loaded(natives::NativeSet::Server), "an update that changed nothing keeps the catalogs");
         assert!(coords(&mut kit));
+    }
+
+    #[test]
+    fn editor_calls_never_load_a_catalog() {
+        let host = openidea_plugin::mock::MockHost::install();
+        let (mut kit, path, body) = windows_server_resource(&host);
+        kit.natives.invalidate(&natives::NativeSet::ALL);
+        let doc = |version| Document {
+            path: path.clone(),
+            language: "lua".into(),
+            version,
+            text: format!("{body}\nGetEntityCo"),
+        };
+        let coords = |kit: &mut DevKit, version| {
+            kit.completion(&doc(version), Position::new(3, 11), None).iter().any(|i| i.label == "GetEntityCoords")
+        };
+        assert!(!coords(&mut kit, 2));
+        assert!(!kit.natives.is_loaded(natives::NativeSet::Server), "left to the next heavy call");
+        kit.handle_events(&[Event::EditorFocused(Some(path.clone()))], &host.invocation());
+        assert!(kit.natives.is_loaded(natives::NativeSet::Server));
+        assert!(coords(&mut kit, 3));
+    }
+
+    #[test]
+    fn huge_and_generated_files_are_left_alone() {
+        let host = openidea_plugin::mock::MockHost::install();
+        let (mut kit, path, _) = windows_server_resource(&host);
+        for text in
+            [format!("local t = {{ {} }}\nGetEntityCo", "1, ".repeat(MAX_INDEXED / 3)), "---@meta\nGetEntityCo".into()]
+        {
+            let lines = text.lines().count() as u32;
+            let doc = Document { path: path.clone(), language: "lua".into(), version: 9, text };
+            assert!(kit.completion(&doc, Position::new(lines - 1, 11), None).is_empty());
+            assert!(kit.line_markers(&doc).is_empty());
+        }
     }
 
     #[test]

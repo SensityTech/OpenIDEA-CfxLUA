@@ -504,6 +504,7 @@ fn the_bridge_follows_edits_of_the_page() {
     assert!(sites_of(&fx, &f, Channel::Callback, "lateCall").is_empty());
     assert_eq!(sites_of(&fx, &f, Channel::Callback, "renamedCall"), ["FETCH shop/web/src/Late.tsx:2"]);
     f.forget_file(&path);
+    f.indexed(&fx.ws);
     assert!(sites_of(&fx, &f, Channel::Callback, "renamedCall").is_empty());
 }
 

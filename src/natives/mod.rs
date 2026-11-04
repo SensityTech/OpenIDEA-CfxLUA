@@ -12,7 +12,7 @@ pub use model::{Native, NativeSet, Param, Return};
 
 use crate::project::{Game, Side};
 use crate::settings::{Settings, keys};
-use std::cell::OnceCell;
+use std::cell::{Cell, OnceCell};
 use std::collections::HashMap;
 
 pub struct Catalog {
@@ -48,6 +48,10 @@ enum Source {
 pub struct Natives {
     source: Source,
     sets: [OnceCell<Catalog>; 3],
+    /// Editor calls: a catalog not loaded yet reads as empty and is loaded by the next heavy call.
+    frozen: Cell<bool>,
+    wanted: Cell<[bool; 3]>,
+    empty: [OnceCell<Catalog>; 3],
 }
 
 impl Default for Natives {
@@ -58,11 +62,31 @@ impl Default for Natives {
 
 impl Natives {
     pub fn bundled() -> Self {
-        Self { source: Source::Bundled, sets: Default::default() }
+        Self::with_source(Source::Bundled)
+    }
+
+    fn with_source(source: Source) -> Self {
+        Self {
+            source,
+            sets: Default::default(),
+            frozen: Cell::new(false),
+            wanted: Cell::new([false; 3]),
+            empty: Default::default(),
+        }
+    }
+
+    pub fn freeze(&self, frozen: bool) {
+        self.frozen.set(frozen);
+    }
+
+    /// The catalogs editor calls asked for while frozen (taken once).
+    pub fn take_wanted(&self) -> Vec<NativeSet> {
+        let wanted = self.wanted.take();
+        NativeSet::ALL.into_iter().filter(|&s| wanted[s as usize]).collect()
     }
 
     pub fn from_natives(natives: Vec<Native>) -> Self {
-        let this = Self { source: Source::Fixed, sets: Default::default() };
+        let this = Self::with_source(Source::Fixed);
         let mut by_set: HashMap<NativeSet, Vec<Native>> = HashMap::new();
         for n in natives {
             by_set.entry(n.set).or_default().push(n);
@@ -74,6 +98,12 @@ impl Natives {
     }
 
     pub fn catalog(&self, set: NativeSet) -> &Catalog {
+        if self.frozen.get() && !self.is_loaded(set) {
+            let mut wanted = self.wanted.get();
+            wanted[set as usize] = true;
+            self.wanted.set(wanted);
+            return self.empty[set as usize].get_or_init(|| Catalog::new(set, Vec::new()));
+        }
         self.sets[set as usize].get_or_init(|| match self.source {
             Source::Bundled => Catalog::new(set, load(set)),
             Source::Fixed => Catalog::new(set, Vec::new()),

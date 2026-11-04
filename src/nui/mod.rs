@@ -163,8 +163,9 @@ impl NuiFeature {
     fn bridge(&self, ws: &Workspace, settings: &Settings) -> Rc<Bridge> {
         let keys = read_keys(settings);
         let mut st = self.state.borrow_mut();
+        // Rebuilt in `indexed` (heavy calls): a query keeps the bridge it has.
         if let Some((k, b)) = &st.bridge
-            && (!st.dirty && *k == keys || ws.indexing)
+            && *k == keys
         {
             return b.clone();
         }
