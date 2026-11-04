@@ -216,7 +216,9 @@ package file there.
 ## Getting started
 
 Open a folder that contains FiveM or RedM resources — a whole `server-data` folder works. The plugin indexes the
-resources in the background (a task in the status bar) and is ready when it disappears. Then:
+resources in the background, the resource you open first; in a big project it goes on while you work, and events,
+NUI callbacks and state bags of the whole project fill in within the first minutes (natives are there at once).
+Then:
 
 - open a client script: the status bar says `Client script · <resource> · FiveM`; type `GetEntity` to see natives
   with their documentation;

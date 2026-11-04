@@ -23,8 +23,10 @@ lua-language-server* below).
 2. Accept the permissions. `project.read`, `editor.read`, `editor.write`, `storage` and `events` are needed;
    `net:static.cfx.re` and `net:raw.githubusercontent.com` are only used to download natives updates, and
    `clipboard` only by the copy buttons of the tool window.
-3. Open a folder that contains resources — a whole `server-data` folder works. A background task, *CfxLua: indexing
-   resources*, reads the manifests, the Lua scripts and the NUI pages once; the plugin is ready when it disappears.
+3. Open a folder that contains resources — a whole `server-data` folder works. The plugin reads the manifests, the
+   Lua scripts and the NUI pages in the background (*CfxLua: indexing resources*), the resource you open first. In a
+   big project this goes on while you work: events, NUI callbacks and state bags of the whole project fill in within
+   the first minutes; natives are there at once. Files over 1 MB (generated data, bundles) are not indexed.
 
 Every option is in **Settings › Plugins › OpenIDEA-CfxLUA** and can be overridden per project. The master switch,
 *Enable FiveM / RedM support*, turns everything off for projects that are not resources.
