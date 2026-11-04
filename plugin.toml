@@ -65,7 +65,7 @@ command = "natives.update"
 id = "coords.convert-selection"
 title = "CfxLua: Convert Coordinates"
 category = "CfxLua"
-when = "editorFocus"
+when = "textEditorActive && (editorFocus || popupOpen || !toolWindowFocus)"
 
 [[contributes.commands]]
 id = "luals.definitions"
