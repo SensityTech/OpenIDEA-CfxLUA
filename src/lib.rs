@@ -171,6 +171,7 @@ impl DevKit {
             }
         }
         ws.scanned = true;
+        ws.indexing = true;
         // Read last, popped first: manifests say which resource and side every other file belongs to.
         self.unread.sort_by_key(|(_, p)| project::file_kind(p) == FileKind::Manifest);
         self.catalogs.push(i);
@@ -221,7 +222,11 @@ impl DevKit {
         }
         if self.indexing && self.unread.is_empty() && self.pending.is_empty() && self.derive.is_empty() {
             self.indexing = false;
+            for ws in &mut self.workspaces {
+                ws.indexing = false;
+            }
             host::log(LogLevel::Info, "resources indexed");
+            self.docs.indexed();
         }
     }
 

@@ -1,5 +1,6 @@
 mod check;
 mod edits;
+mod facts;
 mod rules;
 
 use crate::feature::{CommandCx, Ctx, Feature, Fix, Intention, Problem};
@@ -11,9 +12,7 @@ use crate::settings::Settings;
 use crate::text::{file_name, parent};
 use crate::workspace::Workspace;
 use openidea_plugin::Severity;
-use rules::{Load, Status};
-use std::cell::RefCell;
-use std::collections::HashMap;
+use rules::Status;
 
 pub mod keys {
     pub const SHOW_STATUS: &str = "escrow.showStatus";
@@ -30,9 +29,7 @@ const SCRIPT_DIRECTIVES: [&str; 6] =
     ["client_script", "client_scripts", "server_script", "server_scripts", "shared_script", "shared_scripts"];
 
 #[derive(Default)]
-pub struct EscrowFeature {
-    loads: RefCell<HashMap<String, Vec<Load>>>,
-}
+pub struct EscrowFeature;
 
 pub use check::COMMAND as CHECK;
 
@@ -50,7 +47,7 @@ pub fn resources<'a>(ws: &'a Workspace, settings: &Settings) -> Vec<(&'a Resourc
 /// The pre-publish report of the resource in `dir`, in Markdown.
 pub fn report(ws: &Workspace, dir: &str) -> Option<String> {
     let res = ws.resources().find(|r| r.dir == dir)?;
-    Some(check::markdown(&[check::check(ws, res)]))
+    Some(check::markdown(&[check::cached(ws, res)]))
 }
 
 fn add_title(pattern: &str) -> String {
@@ -67,21 +64,14 @@ fn is_main_manifest(ws: &Workspace, path: &str) -> bool {
 }
 
 impl Feature for EscrowFeature {
-    fn index_file(&self, _ws: &Workspace, path: &str, kind: FileKind, src: &Source) {
-        if kind != FileKind::Lua {
-            return;
-        }
-        let loads = if rules::is_protected(&src.text) { Vec::new() } else { rules::loads(src) };
-        let mut map = self.loads.borrow_mut();
-        if loads.is_empty() {
-            map.remove(path);
-        } else {
-            map.insert(path.to_owned(), loads);
+    fn index_file(&self, ws: &Workspace, path: &str, kind: FileKind, src: &Source) {
+        if kind == FileKind::Lua {
+            facts::record(ws, path, src);
         }
     }
 
     fn forget_file(&self, path: &str) {
-        self.loads.borrow_mut().remove(path);
+        facts::forget(path);
     }
 
     fn problems(&self, cx: &Ctx) -> Vec<Problem> {
@@ -133,9 +123,9 @@ impl EscrowFeature {
     fn patterns(&self, ws: &Workspace, res: &Resource) -> Vec<String> {
         let files = rules::files_of(ws, res);
         let mut out: Vec<String> = rules::editable_groups(&files).into_iter().map(|(p, _)| p).collect();
-        let loads = self.loads.borrow();
         for f in files.iter().filter(|f| rules::extension(&f.rel) == "lua") {
-            for load in loads.get(&f.path).into_iter().flatten() {
+            let Some(facts) = facts::indexed(ws, &f.path) else { continue };
+            for load in &facts.loads {
                 if let Some((target, Status::Encrypted)) = rules::target(ws, res, load)
                     && !out.contains(&target)
                 {
@@ -233,7 +223,7 @@ mod tests {
 
     fn problems(fx: &Fixture, rel: &str) -> Vec<(&'static str, Severity, String, String)> {
         let doc = fx.doc(rel);
-        let feature = EscrowFeature::default();
+        let feature = EscrowFeature;
         fx.index(&feature);
         feature
             .problems(&fx.cx(&doc))
@@ -250,7 +240,7 @@ mod tests {
 
     fn fixed_manifest(fx: &Fixture, message: &str) -> String {
         let doc = fx.doc("res/fxmanifest.lua");
-        let p = EscrowFeature::default().problems(&fx.cx(&doc));
+        let p = EscrowFeature.problems(&fx.cx(&doc));
         let p = p.iter().find(|p| p.message.starts_with(message)).unwrap_or_else(|| panic!("{message}: {p:?}"));
         apply(doc.text(), &p.fixes[0].edits)
     }
@@ -437,7 +427,7 @@ mod tests {
             ]
         );
         let doc = fx.doc("res/client/main.lua");
-        let problems = EscrowFeature::default().problems(&fx.cx(&doc));
+        let problems = EscrowFeature.problems(&fx.cx(&doc));
         let fix = &problems.iter().find(|p| p.code == LOADED).unwrap().fixes[0];
         assert_eq!(fix.title, "Add 'data/items.lua' to escrow_ignore");
         assert!(fix.edits.is_empty());
@@ -461,7 +451,7 @@ mod tests {
         ];
         files.extend(loading_fixture_files());
         let fx = Fixture::new(&files);
-        let feature = EscrowFeature::default();
+        let feature = EscrowFeature;
         fx.index(&feature);
         let doc = fx.doc("res/fxmanifest.lua");
         let intentions = feature.intentions(&fx.cx(&doc), 0, 0);

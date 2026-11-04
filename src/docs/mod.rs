@@ -125,6 +125,13 @@ impl Docs {
         }
     }
 
+    /// The first scan ended: tabs listing what it found show it.
+    pub fn indexed(&self) {
+        for tab in [Tab::Events, Tab::Escrow] {
+            post(&json!({ "op": "refresh", "tab": tab.id() }));
+        }
+    }
+
     fn reply(&self, cx: &CommandCx, request: Request) -> Option<Value> {
         match request {
             Request::Init => {
@@ -199,9 +206,9 @@ impl Docs {
             results = tab_results(cx, tab, rt, &project, &text, &filters);
             index = select.and_then(|id| results.listing.position(id));
         }
-        let index = index
-            .or_else(|| selected.and_then(|id| results.listing.position(id)))
-            .or_else(|| results.listing.first_selectable());
+        // An escrow report checks a whole resource: only for the row the page asks for.
+        let first = if tab == Tab::Escrow { None } else { results.listing.first_selectable() };
+        let index = index.or_else(|| selected.and_then(|id| results.listing.position(id))).or(first);
         let detail = index.and_then(|i| results.listing.id(i)).map(|id| Value::Object(detail(cx, tab, &id)));
         let rows = results.listing.rows(cx.natives, 0, limit);
         let reply = json!({
@@ -622,5 +629,20 @@ mod tests {
         assert!(items["detail"]["copy"]["report"].as_str().unwrap().starts_with("# Escrow pre-publish check: res"));
         let none = env.one(&docs, json!({ "op": "search", "tab": "escrow", "seq": 2, "text": "zzz", "limit": 10 }));
         assert_eq!(none["empty"], "Nothing matches 'zzz'");
+    }
+
+    #[test]
+    fn the_escrow_tab_checks_only_the_resource_asked_for() {
+        let env = Env::new();
+        let docs = Docs::default();
+        let listed = env.one(&docs, json!({ "op": "search", "tab": "escrow", "seq": 1, "text": "", "limit": 10 }));
+        assert_eq!(listed["rows"][0]["id"], "/project/res");
+        assert_eq!((&listed["selected"], &listed["detail"]), (&Value::Null, &Value::Null));
+        let kept = env.one(
+            &docs,
+            json!({ "op": "search", "tab": "escrow", "seq": 2, "text": "res", "selected": "/project/res", "limit": 10 }),
+        );
+        assert_eq!(kept["selected"], 0);
+        assert!(kept["detail"]["copy"]["report"].as_str().unwrap().starts_with("# Escrow pre-publish check: res"));
     }
 }

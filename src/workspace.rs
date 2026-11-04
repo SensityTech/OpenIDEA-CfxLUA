@@ -32,6 +32,8 @@ pub struct Workspace {
     /// Changes when a path is added or removed, unique across workspaces: caches of the file list key on it.
     pub listing: u64,
     pub scanned: bool,
+    /// The first scan is still reading and indexing files.
+    pub indexing: bool,
     pub native_backslashes: bool,
 }
 

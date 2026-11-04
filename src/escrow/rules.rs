@@ -135,6 +135,7 @@ pub struct Load {
     pub value: String,
     pub start: usize,
     pub end: usize,
+    pub line: usize,
 }
 
 impl Load {
@@ -188,7 +189,8 @@ pub fn loads(src: &Source) -> Vec<Load> {
         };
         let Some(tok) = src.string_arg(arg) else { continue };
         let t = src.toks[tok];
-        out.push(Load { module, owner, value: t.string_value(&src.text), start: t.start, end: t.end });
+        let line = src.lines.line_of(t.start) + 1;
+        out.push(Load { module, owner, value: t.string_value(&src.text), start: t.start, end: t.end, line });
     }
     out
 }

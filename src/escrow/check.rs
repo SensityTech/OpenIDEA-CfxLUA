@@ -1,13 +1,19 @@
+use super::facts;
 use super::rules::{self, EscrowFile, NUI_EXTENSIONS, Status};
 use crate::feature::CommandCx;
 use crate::lua::Source;
 use crate::lua::lexer::Tok;
 use crate::manifest::catalog::{PathKind, RDR3_WARNING};
-use crate::manifest::files::{Tree, checkable};
+use crate::manifest::files::{Tree, checkable, is_glob, normalize};
 use crate::manifest::view::View;
-use crate::project::Resource;
+use crate::project::glob::Glob;
+use crate::project::{CASE_SENSITIVE, Resource};
 use crate::workspace::Workspace;
 use openidea_plugin::{NotificationLevel, host};
+use std::borrow::Borrow;
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::sync::Arc;
 
 pub const COMMAND: &str = "escrow.check";
 const MAX_LISTED_FILES: usize = 40;
@@ -45,6 +51,10 @@ pub struct Finding {
 }
 
 impl Finding {
+    fn new(level: Level, message: String, path: Option<String>, line: usize, pattern: Option<String>) -> Self {
+        Self { level, message, path, line, pattern }
+    }
+
     fn markdown(&self) -> String {
         let location = match (&self.path, self.line) {
             (Some(p), 0) => format!("`{p}`: "),
@@ -60,7 +70,8 @@ pub struct Report {
     pub name: String,
     pub folder: String,
     pub findings: Vec<Finding>,
-    pub files: Vec<EscrowFile>,
+    pub files: Rc<Vec<EscrowFile>>,
+    pub unchecked: usize,
 }
 
 impl Report {
@@ -109,7 +120,7 @@ pub fn run(cx: &CommandCx) -> Vec<String> {
         host::notify(NotificationLevel::Info, "Escrow check: no resource (folder with an fxmanifest.lua) found", "");
         return Vec::new();
     };
-    let reports: Vec<Report> = resources.iter().map(|r| check(ws, r)).collect();
+    let reports: Vec<Rc<Report>> = resources.iter().map(|r| cached(ws, r)).collect();
     let (level, title, body) = notification(&reports);
     host::notify(level, &title, &format!("{body}\nThe full report is in the Escrow tab of the CfxLua tool window."));
     resources.iter().map(|r| r.dir.clone()).collect()
@@ -182,26 +193,25 @@ pub fn check(ws: &Workspace, res: &Resource) -> Report {
     let manifest = ws.text(&res.manifest_path()).unwrap_or("");
     let msrc = Source::new(manifest);
     let view = View::new(&msrc);
-    let files = rules::files_of(ws, res);
+    let layout = layout(ws, res, &msrc, &view);
+    let files = &layout.files;
     let m = || Some(res.manifest.clone());
     let mut out: Vec<Finding> = Vec::new();
-    let mut push = |level: Level, message: String, path: Option<String>, line: usize, pattern: Option<String>| {
-        out.push(Finding { level, message, path, line, pattern });
-    };
 
     // Blockers: the upload fails or the resource does not start.
     if let Some((at, error)) = syntax_error(&msrc) {
         let message =
             format!("Syntax error in the manifest ({error}): the upload fails with \"error loading manifest file\"");
-        push(Level::Blocker, message, m(), line_of(&msrc, at), None);
+        out.push(Finding::new(Level::Blocker, message, m(), line_of(&msrc, at), None));
     }
     let legacy = res.manifest.eq_ignore_ascii_case("__resource.lua");
     if legacy {
         let message = "Legacy __resource.lua manifest: Asset Escrow reads fxmanifest.lua; rename it and declare fx_version and game";
-        push(Level::Blocker, message.into(), m(), 0, None);
+        out.push(Finding::new(Level::Blocker, message.into(), m(), 0, None));
     }
     if !legacy && !view.has("fx_version") {
-        push(Level::Blocker, "Missing fx_version: FXServer does not start the resource".into(), m(), 0, None);
+        let message = "Missing fx_version: FXServer does not start the resource";
+        out.push(Finding::new(Level::Blocker, message.into(), m(), 0, None));
     }
     let games: Vec<&str> = view
         .decls
@@ -211,49 +221,50 @@ pub fn check(ws: &Workspace, res: &Resource) -> Report {
         .map(|v| v.text.as_str())
         .collect();
     if !legacy && games.is_empty() {
-        push(Level::Blocker, "Missing game: FXServer does not start the resource".into(), m(), 0, None);
+        let message = "Missing game: FXServer does not start the resource";
+        out.push(Finding::new(Level::Blocker, message.into(), m(), 0, None));
     }
     if games.contains(&"rdr3") && !view.named("rdr3_warning").any(|d| d.values().any(|v| v.text == RDR3_WARNING)) {
         let message =
             "RedM resource without the exact rdr3_warning acknowledgement: FXServer does not start it on RedM";
-        push(Level::Blocker, message.into(), m(), 0, None);
+        out.push(Finding::new(Level::Blocker, message.into(), m(), 0, None));
     }
 
     // Warnings: the protected build does not work as expected.
     if !view.has("escrow_ignore") {
         let message = "No escrow_ignore: every Lua, YFT, YDD and YDR file will be encrypted, configuration included";
-        push(Level::Warning, message.into(), m(), 0, None);
+        out.push(Finding::new(Level::Warning, message.into(), m(), 0, None));
     }
-    for (pattern, group) in rules::editable_groups(&files) {
-        let message = if pattern == group[0].rel {
-            format!("'{pattern}' will be encrypted: buyers will not be able to edit it.")
-        } else {
-            let paths: Vec<&str> = group.iter().map(|f| f.rel.as_str()).collect();
-            format!(
-                "'{pattern}' will be encrypted ({}): buyers will not be able to edit these files.",
-                paths.join(", ")
-            )
-        };
-        push(Level::Warning, message, Some(group[0].rel.clone()), 0, Some(pattern));
-    }
+    out.extend(layout.editable.iter().cloned());
     let manifest_path = res.manifest_path();
     let mut protected: Vec<&str> = Vec::new();
+    let mut unchecked = 0;
+    // The indexing reads every file: lexing them here again would overrun the call.
+    let mut budget = if ws.indexing { 0 } else { facts::LEXED_PER_CALL };
     for f in files.iter().filter(|f| rules::extension(&f.rel) == "lua" && f.path != manifest_path) {
-        let Some(text) = ws.text(&f.path) else { continue };
+        let Some(text) = ws.text(&f.path) else {
+            if ws.indexing {
+                unchecked += 1;
+            }
+            continue;
+        };
         if rules::is_protected(text) {
             protected.push(&f.rel);
             continue;
         }
-        let src = Source::new(text);
+        let Some(facts) = facts::of(ws, &f.path, &mut budget) else {
+            unchecked += 1;
+            continue;
+        };
         if f.status == Status::Encrypted
-            && let Some((at, error)) = syntax_error(&src)
+            && let Some((line, error)) = &facts.syntax
         {
             let message =
                 format!("Syntax error ({error}) in a file that will be encrypted: buyers will not be able to fix it.");
-            push(Level::Warning, message, Some(f.rel.clone()), line_of(&src, at), None);
+            out.push(Finding::new(Level::Warning, message, Some(f.rel.clone()), *line, None));
         }
-        for load in rules::loads(&src) {
-            let Some((target, Status::Encrypted)) = rules::target(ws, res, &load) else { continue };
+        for load in &facts.loads {
+            let Some((target, Status::Encrypted)) = rules::target(ws, res, load) else { continue };
             let message = match load.module {
                 Some(callee) => format!(
                     "{callee} loads '{target}', which will be encrypted: it cannot load it in the protected build."
@@ -262,21 +273,10 @@ pub fn check(ws: &Workspace, res: &Resource) -> Report {
                     "LoadResourceFile loads '{target}', which will be encrypted: it returns the encrypted bytes in the protected build."
                 ),
             };
-            push(Level::Warning, message, Some(f.rel.clone()), line_of(&src, load.start), Some(target));
+            out.push(Finding::new(Level::Warning, message, Some(f.rel.clone()), load.line, Some(target)));
         }
     }
-    let tree = Tree::new(ws, &res.dir);
-    for v in view.named("escrow_ignore").flat_map(|d| d.values()) {
-        let pattern = v.text.as_str();
-        if pattern.trim().is_empty()
-            || !tree.matches(pattern, PathKind::File).is_empty()
-            || !checkable(pattern, PathKind::File)
-        {
-            continue;
-        }
-        let message = format!("escrow_ignore pattern '{pattern}' matches no file of the resource.");
-        push(Level::Warning, message, m(), line_of(&msrc, v.start), None);
-    }
+    out.extend(layout.unmatched.iter().cloned());
     if !protected.is_empty() || rules::has_key_file(ws, res) {
         let examples = protected.iter().take(3).copied().collect::<Vec<_>>().join(", ");
         let message = match protected.len() {
@@ -289,7 +289,7 @@ pub fn check(ws: &Workspace, res: &Resource) -> Report {
                 "{n} Lua files are already encrypted ({examples}): this looks like a protected build, upload the original sources."
             ),
         };
-        push(Level::Warning, message, None, 0, None);
+        out.push(Finding::new(Level::Warning, message, None, 0, None));
     }
 
     // Notes: what stays readable.
@@ -303,17 +303,17 @@ pub fn check(ws: &Workspace, res: &Resource) -> Report {
             "dll" => format!("'{value}' is a C# assembly: Asset Escrow only encrypts Lua, it ships as is."),
             _ => continue,
         };
-        push(Level::Note, message, m(), line_of(&msrc, v.start), None);
+        out.push(Finding::new(Level::Note, message, m(), line_of(&msrc, v.start), None));
     }
     let nui = files.iter().filter(|f| NUI_EXTENSIONS.contains(&rules::extension(&f.rel).as_str())).count();
     if nui > 0 || view.has("ui_page") {
         let message =
             format!("NUI is not supported by Asset Escrow: the HTML, JavaScript and CSS files ({nui}) ship readable.");
-        push(Level::Note, message, None, 0, None);
+        out.push(Finding::new(Level::Note, message, None, 0, None));
     }
     if !view.has("lua54") && files.iter().any(|f| f.status == Status::Encrypted && rules::extension(&f.rel) == "lua") {
         let message = "No lua54 directive. The 2021 escrow announcement required lua54 set to yes; every script runs on Lua 5.4 since June 2025 and the flag has no effect: add it only if the portal asks for it.";
-        push(Level::Note, message.into(), m(), 0, None);
+        out.push(Finding::new(Level::Note, message.into(), m(), 0, None));
     }
 
     out.sort_by_key(|f| f.level);
@@ -321,23 +321,154 @@ pub fn check(ws: &Workspace, res: &Resource) -> Report {
         "" => res.name.clone(),
         rel => rel.to_owned(),
     };
-    Report { name: res.name.clone(), folder, findings: out, files }
+    Report { name: res.name.clone(), folder, findings: out, files: layout.files.clone(), unchecked }
 }
 
-pub fn markdown(reports: &[Report]) -> String {
+// What follows from the manifest and the file names alone, kept while both stay the same.
+struct Layout {
+    dir: String,
+    manifest: Arc<str>,
+    listing: Vec<String>,
+    files: Rc<Vec<EscrowFile>>,
+    editable: Vec<Finding>,
+    unmatched: Vec<Finding>,
+}
+
+thread_local! {
+    static LAYOUTS: RefCell<Vec<Rc<Layout>>> = const { RefCell::new(Vec::new()) };
+}
+
+fn listing<'a>(ws: &'a Workspace, res: &'a Resource) -> impl Iterator<Item = &'a str> + 'a {
+    let prefix = format!("{}/", res.dir);
+    let nested = ws.resources().map(|r| r.dir.as_str()).filter(move |d| d.starts_with(&prefix));
+    nested.chain(ws.files_under(&res.dir).map(|f| f.path.as_str()))
+}
+
+fn layout(ws: &Workspace, res: &Resource, msrc: &Source, view: &View) -> Rc<Layout> {
+    let manifest = ws.file(&res.manifest_path()).and_then(|f| f.text.clone());
+    let same = |l: &Layout| {
+        manifest.as_ref().is_some_and(|m| Arc::ptr_eq(m, &l.manifest))
+            && listing(ws, res).eq(l.listing.iter().map(String::as_str))
+    };
+    if let Some(hit) = LAYOUTS.with_borrow(|layouts| layouts.iter().find(|l| same(l)).cloned()) {
+        return hit;
+    }
+    let files = rules::files_of(ws, res);
+    let mut editable = Vec::new();
+    for (pattern, group) in rules::editable_groups(&files) {
+        let message = if pattern == group[0].rel {
+            format!("'{pattern}' will be encrypted: buyers will not be able to edit it.")
+        } else {
+            let paths: Vec<&str> = group.iter().map(|f| f.rel.as_str()).collect();
+            format!(
+                "'{pattern}' will be encrypted ({}): buyers will not be able to edit these files.",
+                paths.join(", ")
+            )
+        };
+        editable.push(Finding::new(Level::Warning, message, Some(group[0].rel.clone()), 0, Some(pattern)));
+    }
+    let mut unmatched = Vec::new();
+    let mut tree: Option<std::rc::Rc<Tree>> = None;
+    for v in view.named("escrow_ignore").flat_map(|d| d.values()) {
+        let pattern = v.text.as_str();
+        if pattern.trim().is_empty()
+            || !checkable(pattern, PathKind::File)
+            || names_a_file(ws, res, &files, pattern)
+            || tree.get_or_insert_with(|| Tree::cached(ws, &res.dir)).matches_any(pattern, PathKind::File)
+        {
+            continue;
+        }
+        let message = format!("escrow_ignore pattern '{pattern}' matches no file of the resource.");
+        unmatched.push(Finding::new(Level::Warning, message, Some(res.manifest.clone()), line_of(msrc, v.start), None));
+    }
+    let layout = Rc::new(Layout {
+        dir: res.dir.clone(),
+        manifest: manifest.unwrap_or_else(|| Arc::from("")),
+        listing: listing(ws, res).map(str::to_owned).collect(),
+        files: Rc::new(files),
+        editable,
+        unmatched,
+    });
+    LAYOUTS.with_borrow_mut(|layouts| {
+        layouts.retain(|l| l.dir != res.dir && ws.resource(&l.dir).is_some());
+        layouts.push(layout.clone());
+    });
+    layout
+}
+
+// Enough for the tree to match it, without listing every directory of the resource per pattern.
+fn names_a_file(ws: &Workspace, res: &Resource, files: &[EscrowFile], pattern: &str) -> bool {
+    let p = normalize(pattern);
+    if !is_glob(&p) {
+        return ws.exists(&format!("{}/{p}", res.dir));
+    }
+    Glob::new(&p, CASE_SENSITIVE).is_some_and(|g| files.iter().any(|f| g.matches(&f.rel)))
+}
+
+struct Cached {
+    manifest_path: String,
+    manifest: Arc<str>,
+    generation: u64,
+    report: Rc<Report>,
+}
+
+impl Cached {
+    fn fresh(&self, ws: &Workspace) -> bool {
+        self.generation == ws.generation
+            && ws
+                .file(&self.manifest_path)
+                .and_then(|f| f.text.as_ref())
+                .is_some_and(|t| Arc::ptr_eq(t, &self.manifest))
+    }
+}
+
+thread_local! {
+    static REPORTS: RefCell<Vec<Cached>> = const { RefCell::new(Vec::new()) };
+}
+
+/// The report of the workspace as it is, computed once per generation.
+pub fn cached(ws: &Workspace, res: &Resource) -> Rc<Report> {
+    let manifest_path = res.manifest_path();
+    let hit = REPORTS.with_borrow(|reports| {
+        reports.iter().find(|c| c.manifest_path == manifest_path && c.fresh(ws)).map(|c| c.report.clone())
+    });
+    if let Some(report) = hit {
+        return report;
+    }
+    let report = Rc::new(check(ws, res));
+    if let Some(manifest) = ws.file(&manifest_path).and_then(|f| f.text.clone())
+        && report.unchecked == 0
+    {
+        REPORTS.with_borrow_mut(|reports| {
+            reports.retain(|c| c.fresh(ws) && c.manifest_path != manifest_path);
+            reports.push(Cached { manifest_path, manifest, generation: ws.generation, report: report.clone() });
+        });
+    }
+    report
+}
+
+fn unchecked_note(n: usize) -> String {
+    format!(
+        "Not checked yet: {} (CfxLua is still reading the project). Run CfxLua: Check Resource Before Escrow Upload again in a moment.",
+        count(n, "Lua file", "Lua files")
+    )
+}
+
+pub fn markdown<R: Borrow<Report>>(reports: &[R]) -> String {
     let mut md = String::new();
     let mut block = |text: &str| {
         md.push_str(text);
         md.push_str("\n\n");
     };
-    match reports {
+    let reports: Vec<&Report> = reports.iter().map(Borrow::borrow).collect();
+    match reports.as_slice() {
         [one] => block(&format!("# Escrow pre-publish check: {}", one.name)),
         many => block(&format!("# Escrow pre-publish check: {} resources", grouped(many.len()))),
     }
     block(
         "Cfx Asset Escrow encrypts the Lua, YFT, YDD and YDR files of a resource, except those matched by escrow_ignore in fxmanifest.lua. The manifest, NUI files and every other file type ship as they are.",
     );
-    for r in reports {
+    for r in &reports {
         if reports.len() > 1 {
             block("---");
             block(&format!("# Resource {}", r.name));
@@ -366,7 +497,9 @@ pub fn markdown(reports: &[Report]) -> String {
             ]
             .join("\n"),
         );
-        if b + w == 0 {
+        if r.unchecked > 0 {
+            block(&unchecked_note(r.unchecked));
+        } else if b + w == 0 {
             block("No blocker and no warning: the resource is ready for the upload.");
         }
         for level in Level::ALL {
@@ -403,9 +536,11 @@ pub fn markdown(reports: &[Report]) -> String {
     md
 }
 
-pub fn notification(reports: &[Report]) -> (NotificationLevel, String, String) {
+pub fn notification<R: Borrow<Report>>(reports: &[R]) -> (NotificationLevel, String, String) {
+    let reports: Vec<&Report> = reports.iter().map(Borrow::borrow).collect();
     let b: usize = reports.iter().map(|r| r.count(Level::Blocker)).sum();
     let w: usize = reports.iter().map(|r| r.count(Level::Warning)).sum();
+    let unchecked: usize = reports.iter().map(|r| r.unchecked).sum();
     let level = if b > 0 {
         NotificationLevel::Error
     } else if w > 0 {
@@ -413,14 +548,17 @@ pub fn notification(reports: &[Report]) -> (NotificationLevel, String, String) {
     } else {
         NotificationLevel::Info
     };
-    let title = match reports {
+    let title = match reports.as_slice() {
         [one] => format!("Escrow check of {}", one.name),
         many => format!("Escrow check of {} resources", grouped(many.len())),
     };
     let mut lines = vec![format!("{}, {}", count(b, "blocker", "blockers"), count(w, "warning", "warnings"))];
-    match reports {
+    if unchecked > 0 {
+        lines.push(unchecked_note(unchecked));
+    }
+    match reports.as_slice() {
         [r] => {
-            if b + w == 0 {
+            if b + w + unchecked == 0 {
                 lines.push("No blocker and no warning: the resource is ready for the upload.".into());
             }
             for level in Level::ALL {
@@ -457,7 +595,9 @@ pub fn notification(reports: &[Report]) -> (NotificationLevel, String, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::escrow::EscrowFeature;
     use crate::manifest::edits::apply;
+    use crate::testing::Fixture;
 
     fn report(files: &[(&str, &str)]) -> Report {
         let ws = Workspace::from_files("/p", files);
@@ -634,5 +774,107 @@ mod tests {
         assert_eq!(title, "Escrow check of 2 resources");
         assert!(body.contains("Resource res: 2 blockers, 5 warnings, 3 notes"), "{body}");
         assert!(markdown(&many).contains("---\n\n# Resource res\n\n## Summary"));
+    }
+
+    type Line = (Level, String, Option<String>, usize);
+
+    fn lines(r: &Report) -> Vec<Line> {
+        r.findings.iter().map(|f| (f.level, f.message.clone(), f.path.clone(), f.line)).collect()
+    }
+
+    fn res(fx: &Fixture) -> &Resource {
+        fx.ws.resource("/p/res").expect("res")
+    }
+
+    #[test]
+    fn indexed_files_are_not_lexed_again() {
+        let expected = lines(&report(&bad()));
+        let mut fx = Fixture::new(&bad());
+        fx.ws.indexing = true;
+        let r = check(&fx.ws, res(&fx));
+        assert_eq!(r.unchecked, 5, "{:?}", kinds(&r));
+        let note = "Not checked yet: 5 Lua files (CfxLua is still reading the project). Run CfxLua: Check Resource Before Escrow Upload again in a moment.";
+        let md = markdown(&[&r]);
+        assert!(md.contains(&format!("files of types escrow never encrypts\n\n{note}\n\n")), "{md}");
+        let (_, _, body) = notification(&[&r]);
+        assert!(body.starts_with(&format!("2 blockers, 3 warnings\n{note}\nBlockers\n")), "{body}");
+        fx.index(&EscrowFeature);
+        let r = check(&fx.ws, res(&fx));
+        assert_eq!((r.unchecked, lines(&r)), (0, expected));
+        assert!(!markdown(&[r]).contains("Not checked yet"));
+    }
+
+    #[test]
+    fn a_file_edited_after_the_indexing_is_checked_as_it_is_now() {
+        let mut fx = Fixture::new(&bad());
+        fx.index(&EscrowFeature);
+        fx.ws.set("/p/res/server/main.lua", Some("local x = 1"));
+        fx.ws.set("/p/res/client/main.lua", Some("print(1)\nlocal y = = 2"));
+        fx.ws.indexing = true;
+        let stale = check(&fx.ws, res(&fx));
+        assert_eq!(stale.unchecked, 2);
+        assert!(stale.findings.iter().all(|f| f.path.as_deref() != Some("server/main.lua")), "{:?}", kinds(&stale));
+        fx.ws.indexing = false;
+        let now = check(&fx.ws, res(&fx));
+        assert_eq!(now.unchecked, 0);
+        let edited: Vec<Line> =
+            lines(&now).into_iter().filter(|l| l.2.as_deref().is_some_and(|p| p.ends_with("main.lua"))).collect();
+        assert_eq!(
+            edited,
+            [(
+                Level::Warning,
+                "Syntax error (unexpected '=') in a file that will be encrypted: buyers will not be able to fix it."
+                    .to_owned(),
+                Some("client/main.lua".to_owned()),
+                2
+            )]
+        );
+        fx.index(&EscrowFeature);
+        fx.ws.indexing = true;
+        assert_eq!(lines(&check(&fx.ws, res(&fx))), lines(&now));
+    }
+
+    #[test]
+    fn reports_are_kept_until_the_workspace_changes() {
+        let mut fx = Fixture::new(&bad());
+        let first = cached(&fx.ws, res(&fx));
+        assert!(Rc::ptr_eq(&first, &cached(&fx.ws, res(&fx))));
+        let (s, e, t) = super::super::edits::pattern_edit(BAD_MANIFEST, &first.patterns()).unwrap();
+        let fixed = apply(BAD_MANIFEST, &[(s, e, t)]);
+        let mut files = bad();
+        files[0] = ("res/fxmanifest.lua", fixed.as_str());
+        let twin = Fixture::new(&files);
+        assert_eq!(twin.ws.generation, fx.ws.generation);
+        assert!(cached(&twin.ws, res(&twin)).patterns().is_empty(), "another workspace in the same generation");
+        fx.ws.set("/p/res/locales/fr.lua", Some(""));
+        let added = cached(&fx.ws, res(&fx));
+        assert!(!Rc::ptr_eq(&first, &added));
+        assert!(kinds(&added).iter().any(|k| k.1.contains("(locales/en.lua, locales/fr.lua)")), "{:?}", kinds(&added));
+        fx.ws.set("/p/res/fxmanifest.lua", Some(&fixed));
+        assert!(cached(&fx.ws, res(&fx)).patterns().is_empty());
+        let mut pending = Fixture::new(&bad());
+        pending.ws.indexing = true;
+        let r = cached(&pending.ws, res(&pending));
+        assert!(
+            r.unchecked > 0 && !Rc::ptr_eq(&r, &cached(&pending.ws, res(&pending))),
+            "an incomplete report is not kept"
+        );
+    }
+
+    #[test]
+    fn ignore_patterns_matching_without_their_case_or_as_a_folder() {
+        let r = report(&[
+            (
+                "res/fxmanifest.lua",
+                "fx_version 'cerulean'\ngame 'gta5'\nlua54 'yes'\nescrow_ignore { 'CONFIG.lua', 'Locales/*.lua', 'old.lua', 'missing.lua' }\n",
+            ),
+            ("res/config.lua", ""),
+            ("res/locales/en.lua", ""),
+            ("res/old.lua/notes.txt", ""),
+        ]);
+        assert_eq!(
+            kinds(&r),
+            [(Level::Warning, "escrow_ignore pattern 'missing.lua' matches no file of the resource.")]
+        );
     }
 }
