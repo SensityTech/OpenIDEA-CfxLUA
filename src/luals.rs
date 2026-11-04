@@ -171,6 +171,12 @@ fn single_line(text: Option<&str>) -> String {
     text.map(|d| d.replace('\n', " ").trim().to_owned()).unwrap_or_default()
 }
 
+/// lua-language-server checks every line ending with a space in an open file, in quadratic time.
+fn line(out: &mut String, text: &str) {
+    out.push_str(text.trim_end());
+    out.push('\n');
+}
+
 fn write_native(out: &mut String, group: &[&Native]) {
     let n = group[0];
     if !n.description.trim().is_empty() {
@@ -181,15 +187,15 @@ fn write_native(out: &mut String, group: &[&Native]) {
     if let Some(original) = &n.original_name {
         details = format!("`{original}` · {details}");
     }
-    let _ = writeln!(out, "--- {details}");
+    line(out, &format!("--- {details}"));
     if !n.doc_url.is_empty() {
         let _ = writeln!(out, "---\n--- [Online documentation]({})", n.doc_url);
     }
     for (name, p) in annotated_params(n) {
-        let _ = writeln!(out, "---@param {name} {} {}", p.lua_type, single_line(p.description.as_deref()));
+        line(out, &format!("---@param {name} {} {}", p.lua_type, single_line(p.description.as_deref())));
     }
     for r in &n.returns {
-        let _ = writeln!(out, "---@return {} {} {}", r.lua_type, r.name, single_line(r.description.as_deref()));
+        line(out, &format!("---@return {} {} {}", r.lua_type, r.name, single_line(r.description.as_deref())));
     }
     let mut signatures = vec![signature(n)];
     for other in &group[1..] {
@@ -282,6 +288,7 @@ mod tests {
             definitions(&natives, &[NativeSet::Gta5, NativeSet::Server], &[Part::Shared, Part::Client, Part::Server]);
         assert!(count > 9000, "{count}");
         assert!(text.len() < 16 << 20, "{} bytes", text.len());
+        assert_eq!(text.lines().filter(|l| l.ends_with([' ', '\t'])).count(), 0, "lines ending with a space");
         eprintln!("{count} natives, {} KiB", text.len() >> 10);
     }
 }
