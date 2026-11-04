@@ -137,6 +137,10 @@ button, input, select { font: inherit; color: inherit; }
 .ico[data-i="help"]::before { content: "?"; }
 .ico[data-i="part"] { border-radius: 2px; background: #B98B3E; }
 .ico[data-i="part"]::before { content: ""; }
+.ico[data-i="lock"] { border-radius: 3px; background: #C75450; }
+.ico[data-i="lock"]::before { content: "e"; }
+.ico[data-i="res"] { border-radius: 3px; background: #6F737A; }
+.ico[data-i="res"]::before { content: "r"; }
 
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 1px; padding: 2px 4px; flex: none; border-bottom: 1px solid var(--openidea-border, var(--border)); }
 .toolbar button { display: inline-flex; align-items: center; gap: 1px; border: none; background: none; padding: 3px; border-radius: 4px; cursor: pointer; color: var(--openidea-fg, var(--fg)); }

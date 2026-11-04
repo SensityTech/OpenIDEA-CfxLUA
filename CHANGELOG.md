@@ -12,14 +12,23 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   Cfx runtime API, so that lua-language-server checks native calls and shows their documentation.
 - A **lua-language-server config (.luarc.json)** New file template: CfxLua syntax, the `.cfxlua` library, manifests
   left to the plugin.
+- An **Escrow** tab in the tool window: every resource of the project, those using Asset Escrow first, with the full
+  pre-publish report of the selected one and a **Copy Report** button. **CfxLua: Check Resource Before Escrow Upload**
+  opens it on the checked resource.
+- An **Update Natives Now** button in the Natives tab.
 
 ### Changed
 
 - lua-language-server is now listed as a requirement next to OpenIDEA.
+- Typing in a project with many events no longer rebuilds the whole event database: only the edited file is resolved
+  again, unless it changes an event helper.
 
 ### Fixed
 
 - The `string.blob_pack` overload of the runtime API used an invalid vararg annotation.
+- Safe navigation with spaces (`x ? . y`) and safe calls with a long string (`f?[[text]]`) are parsed as CfxLua does.
+- Go to Definition on `AddEventHandler('__cfx_nui:…')` only lists the page's NUI callbacks, not event sites.
+- The escrow report says "0 files", not "0 file".
 
 ## [0.1.0] - 2026-11-04
 

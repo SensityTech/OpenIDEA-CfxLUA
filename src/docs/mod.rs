@@ -7,6 +7,7 @@ pub mod search;
 pub mod tabs;
 mod target;
 
+use crate::escrow;
 use crate::feature::{CommandCx, CommandResult, Feature};
 use crate::natives::{self, NativeSet};
 use crate::runtime::runtime;
@@ -191,11 +192,11 @@ impl Docs {
                 Filters { set: "all".into(), aliases: filters.aliases, unnamed: filters.unnamed, ..Filters::default() };
         }
         let rt = runtime();
-        let mut results = tabs::list(tab, cx.natives, rt, &project, &text, &filters);
+        let mut results = tab_results(cx, tab, rt, &project, &text, &filters);
         let mut index = select.and_then(|id| results.listing.position(id));
         if select.is_some() && index.is_none() && !text.is_empty() {
             text.clear();
-            results = tabs::list(tab, cx.natives, rt, &project, &text, &filters);
+            results = tab_results(cx, tab, rt, &project, &text, &filters);
             index = select.and_then(|id| results.listing.position(id));
         }
         let index = index
@@ -240,7 +241,7 @@ impl Docs {
         {
             return f(listing);
         }
-        let results = tabs::list(tab, cx.natives, runtime(), &project, text, filters);
+        let results = tab_results(cx, tab, runtime(), &project, text, filters);
         let out = f(&results.listing);
         if tab == Tab::Natives {
             self.state.borrow_mut().natives = Some((key, results.listing));
@@ -276,13 +277,36 @@ impl Docs {
 
 impl Feature for Docs {
     fn command(&self, cx: &CommandCx, id: &str, _arg: Option<&str>) -> Option<CommandResult> {
-        (id == SHOW_DOCS).then(|| self.show_docs(cx))
+        match id {
+            SHOW_DOCS => Some(self.show_docs(cx)),
+            escrow::CHECK => {
+                if let Some(dir) = escrow::check_resources(cx).first() {
+                    self.open(Tab::Escrow, dir);
+                }
+                Some(Ok(None))
+            }
+            _ => None,
+        }
     }
 }
 
 fn post(message: &Value) {
     if let Err(e) = host::post_view_message(VIEW, &message.to_string()) {
         host::log(LogLevel::Debug, &format!("docs page: {e}"));
+    }
+}
+
+fn tab_results(
+    cx: &CommandCx,
+    tab: Tab,
+    rt: &crate::runtime::Runtime,
+    project: &[NativeSet],
+    text: &str,
+    filters: &Filters,
+) -> tabs::Results {
+    match (tab, cx.ws.filter(|_| cx.settings.enabled())) {
+        (Tab::Escrow, Some(ws)) => tabs::escrow_list(&escrow::resources(ws, cx.settings), &ws.root, text),
+        _ => tabs::list(tab, cx.natives, rt, project, text, filters),
     }
 }
 
@@ -344,6 +368,14 @@ fn detail(cx: &CommandCx, tab: Tab, id: &str) -> Map<String, Value> {
                 copy.insert("example".into(), f.example.clone().into());
                 insert.push("example");
                 pages::syntax(f)
+            }
+            None => pages::NOTHING_SELECTED.to_owned(),
+        },
+        Tab::Escrow => match cx.ws.and_then(|ws| escrow::report(ws, id)) {
+            Some(report) => {
+                let page = html::markdown(&report);
+                copy.insert("report".into(), report.into());
+                page
             }
             None => pages::NOTHING_SELECTED.to_owned(),
         },
@@ -570,5 +602,25 @@ mod tests {
         docs.refresh(crate::natives::UPDATE);
         let (_, message) = env.mock.view_messages().pop().unwrap();
         assert_eq!(serde_json::from_str::<Value>(&message).unwrap(), json!({ "op": "refresh", "tab": "natives" }));
+    }
+
+    #[test]
+    fn the_escrow_check_opens_its_report_in_the_escrow_tab() {
+        let env = Env::new();
+        let docs = Docs::default();
+        let inv: Invocation = env.mock.invocation();
+        let cx = CommandCx { ws: Some(&env.ws), settings: &env.settings, natives: &env.natives, doc: None, inv: &inv };
+        assert_eq!(docs.command(&cx, escrow::CHECK, None).unwrap().unwrap(), None);
+        let open: Value = serde_json::from_str(&env.mock.view_messages().last().unwrap().1).unwrap();
+        assert_eq!(open, json!({ "op": "open", "tab": "escrow", "id": "/project/res" }));
+        let items = env.one(
+            &docs,
+            json!({ "op": "search", "tab": "escrow", "seq": 1, "text": "", "select": "/project/res", "limit": 10 }),
+        );
+        assert_eq!((items["rows"][0]["label"].as_str(), items["count"].as_str()), (Some("res"), Some("1 resource")));
+        assert!(items["detail"]["html"].as_str().unwrap().contains("Escrow pre-publish check: res"));
+        assert!(items["detail"]["copy"]["report"].as_str().unwrap().starts_with("# Escrow pre-publish check: res"));
+        let none = env.one(&docs, json!({ "op": "search", "tab": "escrow", "seq": 2, "text": "zzz", "limit": 10 }));
+        assert_eq!(none["empty"], "Nothing matches 'zzz'");
     }
 }

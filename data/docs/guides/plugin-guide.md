@@ -66,7 +66,7 @@ way round. Calling a server native from a client script (or a client native from
 
 ## The CfxLua tool window
 
-The **CfxLua** tool window (its button is on the left tool window bar) has six tabs:
+The **CfxLua** tool window (its button is on the left tool window bar) has seven tabs:
 
 | Tab | What it shows |
 |---|---|
@@ -76,6 +76,7 @@ The **CfxLua** tool window (its button is on the left tool window bar) has six t
 | Manifest | Every `fxmanifest.lua` directive with its values and an example. |
 | Syntax | The CfxLua syntax features and their pitfalls. |
 | Guides | These guides. |
+| Escrow | The resources of the project, those using Asset Escrow first, with the pre-publish report of the selected one. |
 
 **Insert** buttons put a call, an event handler, a directive or an example at the caret of the editor you were in.
 **Copy** buttons copy a name, a signature, a hash or an example. Online documentation links show their address with a
@@ -182,7 +183,8 @@ instead of `GetDistanceBetweenCoords`, and removing prints from per-frame code â
 
 In resources that declare `escrow_ignore`, each Lua file shows on its first line whether it will be encrypted or stay
 open; checks report configuration and translation files, and files loaded at runtime, that buyers could not edit.
-**CfxLua: Check Resource Before Escrow Upload** runs the pre-publish checklist. Encrypted `FXAP` files are never parsed.
+**CfxLua: Check Resource Before Escrow Upload** runs the pre-publish checklist and opens its full report in the
+**Escrow** tab of the tool window, which lists every resource. Encrypted `FXAP` files are never parsed.
 See `cfxdoc:escrow`.
 
 ## Working with lua-language-server

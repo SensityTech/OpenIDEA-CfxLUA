@@ -2,11 +2,12 @@ mod check;
 mod edits;
 mod rules;
 
-use crate::feature::{CommandCx, CommandResult, Ctx, Feature, Fix, Intention, Problem};
+use crate::feature::{CommandCx, Ctx, Feature, Fix, Intention, Problem};
 use crate::lua::Source;
 use crate::manifest::view::View;
 use crate::project::glob::Glob;
 use crate::project::{CASE_SENSITIVE, FileKind, Resource};
+use crate::settings::Settings;
 use crate::text::{file_name, parent};
 use crate::workspace::Workspace;
 use openidea_plugin::Severity;
@@ -31,6 +32,25 @@ const SCRIPT_DIRECTIVES: [&str; 6] =
 #[derive(Default)]
 pub struct EscrowFeature {
     loads: RefCell<HashMap<String, Vec<Load>>>,
+}
+
+pub use check::COMMAND as CHECK;
+
+/// Checks the resource of the focused file, or every resource; returns the folders checked.
+pub fn check_resources(cx: &CommandCx) -> Vec<String> {
+    check::run(cx)
+}
+
+/// The resources of the project by name, each with whether it uses Asset Escrow.
+pub fn resources<'a>(ws: &'a Workspace, settings: &Settings) -> Vec<(&'a Resource, bool)> {
+    let assume = settings.bool(keys::ASSUME_ESCROW, false);
+    check::resources_for(ws, None).into_iter().map(|r| (r, assume || rules::uses_escrow(ws, r))).collect()
+}
+
+/// The pre-publish report of the resource in `dir`, in Markdown.
+pub fn report(ws: &Workspace, dir: &str) -> Option<String> {
+    let res = ws.resources().find(|r| r.dir == dir)?;
+    Some(check::markdown(&[check::check(ws, res)]))
 }
 
 fn add_title(pattern: &str) -> String {
@@ -62,10 +82,6 @@ impl Feature for EscrowFeature {
 
     fn forget_file(&self, path: &str) {
         self.loads.borrow_mut().remove(path);
-    }
-
-    fn command(&self, cx: &CommandCx, id: &str, _arg: Option<&str>) -> Option<CommandResult> {
-        (id == check::COMMAND).then(|| check::run(cx))
     }
 
     fn problems(&self, cx: &Ctx) -> Vec<Problem> {
@@ -461,30 +477,26 @@ mod tests {
         let host = openidea_plugin::mock::MockHost::install();
         let inv = host.invocation();
         let fx = loading_fixture();
-        let run = |doc: Option<&crate::feature::Doc>, ws: Option<&Workspace>| {
-            let cx = CommandCx { ws, settings: &fx.settings, natives: &fx.natives, doc, inv: &inv };
-            EscrowFeature::default().command(&cx, "escrow.check", None).expect("owned").expect("runs")
-        };
         let doc = fx.doc("res/client/main.lua");
-        let report = run(Some(&doc), Some(&fx.ws)).expect("a report");
-        assert!(report.starts_with("# Escrow pre-publish check: res\n"));
+        let cx =
+            CommandCx { ws: Some(&fx.ws), settings: &fx.settings, natives: &fx.natives, doc: Some(&doc), inv: &inv };
+        let dirs = check_resources(&cx);
+        assert_eq!(dirs, [fx.ws.resource_of(&doc.path).unwrap().dir.clone()]);
+        assert!(report(&fx.ws, &dirs[0]).expect("a report").starts_with("# Escrow pre-publish check: res\n"));
+        assert_eq!(
+            resources(&fx.ws, &fx.settings).iter().map(|(r, e)| (r.name.as_str(), *e)).collect::<Vec<_>>(),
+            [("res", true)]
+        );
         let n = host.notifications();
         assert_eq!(
             (n[0].level, n[0].title.as_str()),
             (openidea_plugin::NotificationLevel::Error, "Escrow check of res")
         );
         assert!(n[0].body.starts_with("2 blockers, 5 warnings\nBlockers\n"), "{}", n[0].body);
-        assert!(run(None, None).is_none());
+        assert!(n[0].body.ends_with("The full report is in the Escrow tab of the CfxLua tool window."));
+        let nothing = CommandCx { ws: None, settings: &fx.settings, natives: &fx.natives, doc: None, inv: &inv };
+        assert!(check_resources(&nothing).is_empty());
         assert_eq!(host.notifications()[1].title, "Escrow check: no resource (folder with an fxmanifest.lua) found");
-        assert!(
-            EscrowFeature::default()
-                .command(
-                    &CommandCx { ws: None, settings: &fx.settings, natives: &fx.natives, doc: None, inv: &inv },
-                    "other",
-                    None
-                )
-                .is_none()
-        );
     }
 
     fn loading_fixture_files() -> Vec<(&'static str, &'static str)> {

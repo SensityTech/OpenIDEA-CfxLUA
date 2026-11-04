@@ -1,7 +1,7 @@
 use super::data;
 use super::search::{self, Query};
 use crate::natives::{Native, NativeSet, Natives};
-use crate::project::{Game, Side};
+use crate::project::{Game, Resource, Side};
 use crate::runtime::{Decl, Kind, Part, Runtime};
 use serde::{Deserialize, Serialize};
 
@@ -13,10 +13,12 @@ pub enum Tab {
     Manifest,
     Syntax,
     Guides,
+    Escrow,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 6] = [Tab::Natives, Tab::Runtime, Tab::Events, Tab::Manifest, Tab::Syntax, Tab::Guides];
+    pub const ALL: [Tab; 7] =
+        [Tab::Natives, Tab::Runtime, Tab::Events, Tab::Manifest, Tab::Syntax, Tab::Guides, Tab::Escrow];
 
     pub fn id(self) -> &'static str {
         match self {
@@ -26,6 +28,7 @@ impl Tab {
             Self::Manifest => "manifest",
             Self::Syntax => "syntax",
             Self::Guides => "guides",
+            Self::Escrow => "escrow",
         }
     }
 
@@ -197,6 +200,7 @@ pub fn list(tab: Tab, natives: &Natives, rt: &Runtime, project: &[NativeSet], te
         Tab::Events => rows_result(event_rows(text, f), text, "events"),
         Tab::Manifest => rows_result(directive_rows(text), text, "directives"),
         Tab::Syntax => rows_result(syntax_rows(text), text, "features"),
+        Tab::Escrow => escrow_list(&[], "", text),
         Tab::Guides => {
             let rows = guide_rows(text);
             let guides = rows.iter().filter(|r| r.kind != "category").count();
@@ -208,6 +212,36 @@ pub fn list(tab: Tab, natives: &Natives, rt: &Runtime, project: &[NativeSet], te
             }
         }
     }
+}
+
+/// The resources, those using Asset Escrow first; a row's id is the resource folder.
+pub fn escrow_list(resources: &[(&Resource, bool)], root: &str, text: &str) -> Results {
+    let words = words(text);
+    let mut rows: Vec<(bool, Row)> = resources
+        .iter()
+        .filter_map(|&(r, escrow)| {
+            let folder = r.dir.strip_prefix(root).unwrap_or(&r.dir).trim_start_matches('/');
+            all_in(&words, &format!("{} {}", r.name.to_lowercase(), folder.to_lowercase())).then(|| {
+                let tip = if escrow { "Uses Asset Escrow" } else { "Does not use Asset Escrow: no escrow_ignore" };
+                let row = Row {
+                    id: r.dir.clone(),
+                    label: r.name.clone(),
+                    icon: if escrow { "lock" } else { "res" },
+                    bold: escrow,
+                    parts: vec![(format!("  {folder}"), "muted")],
+                    tip: tip.into(),
+                    ..Row::default()
+                };
+                (escrow, row)
+            })
+        })
+        .collect();
+    rows.sort_by_key(|(escrow, _)| !escrow);
+    let rows: Vec<Row> = rows.into_iter().map(|(_, r)| r).collect();
+    let empty =
+        if resources.is_empty() { "No resource (folder with an fxmanifest.lua) found".into() } else { nothing(text) };
+    let count = format!("{} {}", group(rows.len()), if rows.len() == 1 { "resource" } else { "resources" });
+    Results { listing: Listing::Rows(rows), count, empty, namespaces: None }
 }
 
 fn rows_result(rows: Vec<Row>, text: &str, what: &str) -> Results {

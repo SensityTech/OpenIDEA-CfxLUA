@@ -1,5 +1,5 @@
 use super::rules::{self, EscrowFile, NUI_EXTENSIONS, Status};
-use crate::feature::{CommandCx, CommandResult};
+use crate::feature::CommandCx;
 use crate::lua::Source;
 use crate::lua::lexer::Tok;
 use crate::manifest::catalog::{PathKind, RDR3_WARNING};
@@ -99,21 +99,20 @@ fn count(n: usize, one: &str, many: &str) -> String {
     format!("{} {}", grouped(n), if n == 1 { one } else { many })
 }
 
-pub fn run(cx: &CommandCx) -> CommandResult {
+/// Checks the resource of the focused file, or every resource, notifies a summary and returns the folders checked.
+pub fn run(cx: &CommandCx) -> Vec<String> {
     if !cx.settings.enabled() {
-        return Ok(None);
+        return Vec::new();
     }
-    let reports: Vec<Report> = match cx.ws {
-        Some(ws) => resources_for(ws, cx.doc.map(|d| d.path.as_str())).into_iter().map(|r| check(ws, r)).collect(),
-        None => Vec::new(),
-    };
-    if reports.is_empty() {
+    let resources = cx.ws.map(|ws| resources_for(ws, cx.doc.map(|d| d.path.as_str()))).unwrap_or_default();
+    let (Some(ws), false) = (cx.ws, resources.is_empty()) else {
         host::notify(NotificationLevel::Info, "Escrow check: no resource (folder with an fxmanifest.lua) found", "");
-        return Ok(None);
-    }
+        return Vec::new();
+    };
+    let reports: Vec<Report> = resources.iter().map(|r| check(ws, r)).collect();
     let (level, title, body) = notification(&reports);
-    host::notify(level, &title, &body);
-    Ok(Some(markdown(&reports)))
+    host::notify(level, &title, &format!("{body}\nThe full report is in the Escrow tab of the CfxLua tool window."));
+    resources.iter().map(|r| r.dir.clone()).collect()
 }
 
 pub fn resources_for<'a>(ws: &'a Workspace, path: Option<&str>) -> Vec<&'a Resource> {
@@ -347,7 +346,7 @@ pub fn markdown(reports: &[Report]) -> String {
         let encrypted: Vec<&EscrowFile> = r.with_status(Status::Encrypted).collect();
         let ignored: Vec<&EscrowFile> = r.with_status(Status::Ignored).collect();
         let unprotected = r.files.len() - encrypted.len() - ignored.len();
-        let open = |n: usize| format!("{} {}", grouped(n), if n <= 1 { "file" } else { "files" });
+        let open = |n: usize| count(n, "file", "files");
         block("## Summary");
         block(
             &[

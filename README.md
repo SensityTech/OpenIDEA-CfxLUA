@@ -143,15 +143,17 @@ Values are completed with their names where a native expects them.
 
 For resources sold through Cfx Asset Escrow: each file shows whether it will be encrypted or stay open according to
 `escrow_ignore`, checks catch configuration and loaded files that buyers could not edit, encrypted (`FXAP`) files are
-no longer parsed as Lua, and **CfxLua: Check Resource Before Escrow Upload** runs the pre-publish checklist.
+no longer parsed as Lua, and **CfxLua: Check Resource Before Escrow Upload** runs the pre-publish checklist and
+opens its full report — blockers, warnings, suggested `escrow_ignore` patterns, the files kept open and the files
+encrypted — in the **Escrow** tab of the tool window, which lists every resource of the project.
 
 ### Built-in documentation
 
-The **CfxLua** tool window (left side) has six tabs: a natives browser (search by name, `NATIVE_NAME`, hash or
+The **CfxLua** tool window (left side) has seven tabs: a natives browser (search by name, `NATIVE_NAME`, hash or
 camel humps such as `ggz`; FiveM / RedM / server filters; full sheet with native types, returns and example; insert
-into the editor), the runtime API, the built-in events, the manifest directives, the CfxLua syntax features and
+into the editor), the runtime API, the built-in events, the manifest directives, the CfxLua syntax features,
 **guides** (getting started, natives, threads, events, exports, state bags, NUI, fxmanifest, vectors, json/msgpack,
-commands, RedM vs FiveM, Asset Escrow, performance, security…).
+commands, RedM vs FiveM, Asset Escrow, performance, security…) and the **Asset Escrow** report of each resource.
 **CfxLua: Show Documentation** shows the native, event, hash or directive at the caret.
 
 | | |
@@ -162,6 +164,8 @@ commands, RedM vs FiveM, Asset Escrow, performance, security…).
 | **Runtime API** — `Citizen`, events, state bags, `json`, `msgpack`, vectors… | **Syntax** — what CfxLua adds to Lua 5.4, and its pitfalls. |
 | ![Manifest directives: client_script](assets/screenshots/tool-window-manifest.png) | ![Guides: state bags](assets/screenshots/tool-window-guides.png) |
 | **Manifest** — every `fxmanifest.lua` directive. | **Guides** — from your first resource to security and performance. |
+| ![Escrow: the pre-publish report of a resource](assets/screenshots/tool-window-escrow.png) | |
+| **Escrow** — the pre-publish report of each resource, with the patterns to add to `escrow_ignore`. | |
 
 The tool window follows the IDE theme ([light theme](assets/screenshots/tool-window-natives-light.png)).
 
@@ -206,7 +210,7 @@ Run them from **Find Action** (`Ctrl+Shift+A` / `Cmd+Shift+A`); bind keys in **S
 | **CfxLua: Show Documentation** | Shows the native, event, hash literal or manifest directive at the caret in the tool window. Also on the status bar item. |
 | **CfxLua: Update Natives** | Downloads the latest Cfx.re native databases now. |
 | **CfxLua: Generate lua-language-server Definitions** | Fills the focused empty `.lua` file with the natives and the runtime API for lua-language-server ([how](#working-with-lua-language-server)). |
-| **CfxLua: Check Resource Before Escrow Upload** | Runs the Asset Escrow pre-publish checklist on the resource of the focused file (Tools menu). |
+| **CfxLua: Check Resource Before Escrow Upload** | Runs the Asset Escrow pre-publish checklist on the resource of the focused file and opens its report in the Escrow tab (Tools menu). |
 | **CfxLua: Convert Coordinates** | Converts the selected coordinates to another format. |
 
 ## Settings

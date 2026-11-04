@@ -106,6 +106,12 @@
       copy: 'link', filters: [],
       toolbar: [copyButton('link', 'Copy Guide Link'), sep, ...zoom],
     },
+    {
+      id: 'escrow', title: 'Escrow', key: 'Escrow', stacked: 0.3, placeholder: 'Resource name or folder', label: 'Search resources',
+      copy: 'report', filters: [],
+      nothing: "<p class='empty'>Select a resource to see its Asset Escrow pre-publish report.</p>",
+      toolbar: [copyButton('report', 'Copy Report'), sep, ...zoom],
+    },
   ];
   const TAB = Object.fromEntries(TABS.map((t) => [t.id, t]));
 
