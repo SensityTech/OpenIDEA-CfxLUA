@@ -133,17 +133,14 @@ pub fn first_sentence(md: &str) -> String {
 }
 
 pub fn summary(t: &Target) -> (Tab, String, String, String) {
-    let footer = "See the CfxLua tool window.";
+    // The notification shows line breaks as spaces: a dash keeps the signature apart from the description.
     let lines = |head: String, md: &str| {
         let sentence = first_sentence(md);
-        let mut out = head;
-        if !sentence.is_empty() {
-            out.push('\n');
-            out.push_str(&sentence);
+        if sentence.is_empty() {
+            format!("{head} — details in the CfxLua tool window.")
+        } else {
+            format!("{head} — {sentence}\nDetails in the CfxLua tool window.")
         }
-        out.push('\n');
-        out.push_str(footer);
-        out
     };
     match t {
         Target::Native(n) => (Tab::Natives, n.key(), n.lua_name.clone(), lines(n.typed_signature(), &n.description)),
@@ -190,10 +187,16 @@ mod tests {
         let (tab, id, title, body) =
             target_at("res/client/main.lua", "local c = GetEntity<caret>Coords(PlayerPedId(), false)").unwrap();
         assert_eq!((tab, id.as_str(), title.as_str()), (Tab::Natives, "GTA5:GetEntityCoords", "GetEntityCoords"));
-        assert_eq!(body, "GetEntityCoords(entity: integer, alive: boolean): vector3\nSee the CfxLua tool window.");
+        assert_eq!(
+            body,
+            "GetEntityCoords(entity: integer, alive: boolean): vector3 — details in the CfxLua tool window."
+        );
         let (_, id, _, body) = target_at("res/client/main.lua", "GetGroundZFor_3dCoord<caret>(0, 0, 0)").unwrap();
         assert_eq!(id, "GTA5:GetGroundZFor_3dCoord");
-        assert!(body.contains("\nGets the ground elevation at the specified position.\n"), "{body}");
+        assert!(
+            body.contains(": boolean, number — Gets the ground elevation at the specified position.\nDetails"),
+            "{body}"
+        );
         assert_eq!(
             target_at("res/client/main.lua", "DropPl<caret>ayer(1)").unwrap().1,
             "SERVER:DropPlayer",
@@ -203,14 +206,14 @@ mod tests {
         let (tab, id, _, body) =
             target_at("res/client/main.lua", "AddEventHandler('onResource<caret>Start', function() end)").unwrap();
         assert_eq!((tab, id.as_str()), (Tab::Events, "onResourceStart"));
-        assert!(body.starts_with("event onResourceStart(resourceName)\n"), "{body}");
+        assert!(body.starts_with("event onResourceStart(resourceName) — Raised"), "{body}");
         assert!(target_at("res/client/main.lua", "print('onResource<caret>Start')").is_none());
         assert!(target_at("res/client/main.lua", "TriggerEvent('x', 'onResource<caret>Start')").is_none());
         assert!(target_at("res/client/main.lua", "AddEventHandler('myres:<caret>x')").is_none());
         let (tab, id, title, body) = target_at("res/client/main.lua", "local h = `ad<caret>der`").unwrap();
         assert_eq!((tab, id.as_str(), title.as_str()), (Tab::Syntax, "hash-literal", "hash `adder`"));
         assert!(
-            body.starts_with("Signed (int32): -1216765807 · Unsigned (uint32): 3078201489 · Hex: 0xB779A091\n"),
+            body.starts_with("Signed (int32): -1216765807 · Unsigned (uint32): 3078201489 · Hex: 0xB779A091 — Compile"),
             "{body}"
         );
         assert!(
@@ -223,7 +226,7 @@ mod tests {
         let (doc, at) = fx.caret("res/fxmanifest.lua");
         let (tab, id, _, body) = summary(&find(&doc, at, &fx.natives, &[]).unwrap());
         assert_eq!((tab, id.as_str()), (Tab::Manifest, "client_script"));
-        assert!(body.starts_with("client_script (glob list)\nScript(s) loaded on each client"), "{body}");
+        assert!(body.starts_with("client_script (glob list) — Script(s) loaded on each client"), "{body}");
         assert!(target_at("res/client/main.lua", "local x<caret> = 1").is_none());
     }
 

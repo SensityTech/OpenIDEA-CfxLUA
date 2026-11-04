@@ -48,6 +48,12 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   `.luarc.jsonc`, `${workspaceFolder}`, a nested folder or the file itself.
 - The **Escrow** tab checks the resource you pick, not the first one listed. While the project is still being read,
   a report says which files are not checked yet.
+- A loop that runs every frame gets the regular gutter icon: the green Run triangle read as a button that runs it.
+- Project events in completion have the event icon, as built-in events do.
+- **CfxLua: Show Documentation** separates the signature from the description with a dash: the notification shows
+  line breaks as spaces.
+- The tool window tabs go onto a second line when the window is narrow, instead of being cut off; the Asset Escrow
+  badge is blue instead of red, which read as an error.
 
 ### Added
 

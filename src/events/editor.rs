@@ -234,7 +234,7 @@ fn builtin_item(e: &BuiltinEvent, replace: Range) -> CompletionItem {
 }
 
 fn project_item(label: &str, detail: String, replace: Range, documentation: Option<String>) -> CompletionItem {
-    let mut item = CompletionItem::new(label, CompletionKind::Value);
+    let mut item = CompletionItem::new(label, CompletionKind::Event);
     item.detail = Some(detail);
     item.replace = Some(replace);
     item.sort_text = Some(format!("1{label}"));

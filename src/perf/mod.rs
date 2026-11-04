@@ -13,7 +13,6 @@ use crate::project::{FileKind, Side};
 use crate::workspace::Workspace;
 use ast::{ExprKind, Node};
 use classify::{FileFacts, Perf, ProjectIndex};
-use loops::Cost;
 use openidea_plugin::providers::LineMarker;
 use std::cell::RefCell;
 
@@ -83,11 +82,11 @@ impl Feature for PerfFeature {
         let p = Perf::new(cx, &index);
         checks::markers(&p)
             .into_iter()
-            .map(|(s, cost, tooltip)| {
+            .map(|(s, _, tooltip)| {
                 let keyword = cx.doc.src.toks[p.ast.stats[s].first];
                 LineMarker {
                     line: cx.doc.position(keyword.start).line,
-                    icon: Some(if cost == Cost::PerFrame { "run" } else { "navigate" }.to_owned()),
+                    icon: Some("navigate".to_owned()),
                     tooltip,
                     target: Some(cx.doc.location(keyword.start, keyword.end)),
                 }

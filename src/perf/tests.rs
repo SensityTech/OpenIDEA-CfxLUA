@@ -1325,7 +1325,7 @@ fn cost_classes() {
     );
     let doc = r.fx.doc(&r.rel);
     let markers = r.feature.line_markers(&r.fx.cx(&doc));
-    assert_eq!(markers[0].icon.as_deref(), Some("run"));
+    assert_eq!(markers[0].icon.as_deref(), Some("navigate"));
     assert_eq!(markers[1].icon.as_deref(), Some("navigate"));
     assert_eq!(markers[0].target.as_ref().map(|t| t.range.start.line), Some(1));
 }

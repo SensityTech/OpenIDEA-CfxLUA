@@ -66,7 +66,7 @@ body { font-family: var(--sans); font-size: var(--ui-size); color: var(--fg); ba
 button, input, select { font: inherit; color: inherit; }
 [hidden] { display: none !important; }
 
-#tabs { display: flex; flex: none; overflow-x: auto; border-bottom: 1px solid var(--openidea-border, var(--border)); scrollbar-width: none; }
+#tabs { display: flex; flex-wrap: wrap; flex: none; border-bottom: 1px solid var(--openidea-border, var(--border)); }
 #tabs button { flex: none; border: none; background: none; padding: 6px 10px 5px; cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; color: var(--openidea-fg-muted, var(--muted)); }
 #tabs button:hover { background: var(--openidea-bg-hover, var(--code-bg)); }
 #tabs button[aria-selected="true"] { color: var(--openidea-fg-strong, var(--fg)); border-bottom-color: var(--accent); }
@@ -137,7 +137,7 @@ button, input, select { font: inherit; color: inherit; }
 .ico[data-i="help"]::before { content: "?"; }
 .ico[data-i="part"] { border-radius: 2px; background: #B98B3E; }
 .ico[data-i="part"]::before { content: ""; }
-.ico[data-i="lock"] { border-radius: 3px; background: #C75450; }
+.ico[data-i="lock"] { border-radius: 3px; background: #3574F0; }
 .ico[data-i="lock"]::before { content: "e"; }
 .ico[data-i="res"] { border-radius: 3px; background: #6F737A; }
 .ico[data-i="res"]::before { content: "r"; }

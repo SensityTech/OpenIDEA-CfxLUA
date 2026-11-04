@@ -578,7 +578,7 @@ mod tests {
         assert_eq!(open, json!({ "op": "open", "tab": "natives", "id": "GTA5:GetEntityCoords" }));
         let note = env.mock.notifications().pop().unwrap();
         assert_eq!(note.title, "GetEntityCoords");
-        assert!(note.body.ends_with("See the CfxLua tool window."));
+        assert!(note.body.ends_with("in the CfxLua tool window."));
         assert_eq!(env.one(&docs, json!({ "op": "init" }))["open"], open, "a page loading later still opens it");
         assert_eq!(env.one(&docs, json!({ "op": "init" }))["open"], Value::Null);
 
