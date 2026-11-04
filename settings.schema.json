@@ -45,6 +45,30 @@
       "description": "Once a day, download the Cfx.re native databases (static.cfx.re, GitHub) if they changed.",
       "default": true
     },
+    "events.detectHelpers": {
+      "type": "boolean",
+      "title": "Detect event helpers automatically",
+      "description": "Functions whose parameters reach the event name of AddEventHandler / RegisterNetEvent / Trigger*Event are treated as event helpers.",
+      "default": true
+    },
+    "events.helpers": {
+      "type": "string",
+      "title": "Event helpers declared by hand",
+      "description": "One per line: the function path and its annotation, for example: Legacy.Emit trigger server key(1)",
+      "multiline": true,
+      "default": ""
+    },
+    "events.aliasFunctions": {
+      "type": "string",
+      "title": "Event alias functions",
+      "description": "Functions declaring that a network name and a key are the same event. Comma-separated.",
+      "default": "RegisterEventAlias"
+    },
+    "events.reportIgnoredValues": {
+      "type": "boolean",
+      "title": "Report handlers ignoring some of the values sent",
+      "default": true
+    },
     "nui.messageKeys": {
       "type": "string",
       "title": "NUI message keys",
