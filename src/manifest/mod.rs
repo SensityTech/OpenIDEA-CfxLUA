@@ -68,7 +68,7 @@ fn definition(cx: &Ctx, at: usize) -> Vec<Location> {
             };
             dirs.into_iter()
                 .flat_map(|dir| {
-                    Tree::new(cx.ws, dir)
+                    Tree::cached(cx.ws, dir)
                         .matches(path, kind)
                         .into_iter()
                         .filter(|m| !m.dir)
@@ -401,5 +401,39 @@ mod tests {
         );
         let p = &problems("fxmanifest.lua", &text)[0];
         assert_eq!(p.1, Severity::Warning);
+    }
+
+    #[test]
+    fn missing_files_among_many_globs() {
+        let mut paths: Vec<String> = (0..40)
+            .flat_map(|i| [format!("res/client/m{i}/main.lua"), format!("res/client/m{i}/sub/deep/x.lua")])
+            .collect();
+        paths.extend(["res/html/index.html".to_owned(), "res/web/node_modules/a/index.js".to_owned()]);
+        let globs: Vec<String> = (0..40).map(|i| format!("'client/m{i}/**/*.lua'")).collect();
+        let manifest = format!(
+            "{OK}client_scripts {{ {}, 'client/*/sub/deep/*.lua', 'client/m40/*.lua', 'CLIENT/M7/*.LUA', 'web/*/*.js', '**/*.js' }}\n\
+             files {{ 'html/*.html', 'html/*.htm', 'client/m3' }}\n",
+            globs.join(", ")
+        );
+        let mut files: Vec<(&str, &str)> = paths.iter().map(|p| (p.as_str(), "")).collect();
+        files.push(("res/fxmanifest.lua", &manifest));
+        let mut fx = Fixture::new(&files);
+        let missing = |fx: &Fixture| -> Vec<String> {
+            let doc = fx.doc("res/fxmanifest.lua");
+            let problems = ManifestFeature.problems(&fx.cx(&doc));
+            problems.into_iter().filter(|p| p.code == checks::MISSING_FILE).map(|p| p.message).collect()
+        };
+        let expected = [
+            "'client/m40/*.lua' matches no file of the resource",
+            "'web/*/*.js' matches no file of the resource",
+            "'**/*.js' matches no file of the resource",
+            "'html/*.htm' matches no file of the resource",
+        ];
+        assert_eq!(missing(&fx), expected);
+        assert_eq!(missing(&fx), expected, "same answer from the cached tree");
+        fx.ws.set("/p/res/client/m40/new.lua", Some(""));
+        assert_eq!(missing(&fx), expected[1..], "a new file is seen");
+        fx.ws.remove("/p/res/client/m40/new.lua");
+        assert_eq!(missing(&fx), expected, "a removed file is seen");
     }
 }

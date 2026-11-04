@@ -208,10 +208,10 @@ fn path_items(cx: &Ctx, kind: PathKind, prefix: &str) -> Vec<CompletionItem> {
             .ws
             .resources()
             .filter(|r| r.name == name)
-            .flat_map(|r| children(&Tree::new(cx.ws, &r.dir), rel, &format!("@{name}/"), &r.manifest_path(), kind))
+            .flat_map(|r| children(&Tree::cached(cx.ws, &r.dir), rel, &format!("@{name}/"), &r.manifest_path(), kind))
             .collect();
     }
-    let mut items = children(&Tree::new(cx.ws, parent(&cx.doc.path)), prefix, "", &cx.doc.path, kind);
+    let mut items = children(&Tree::cached(cx.ws, parent(&cx.doc.path)), prefix, "", &cx.doc.path, kind);
     if kind == PathKind::Script && !prefix.contains('/') {
         items.extend(resource_items(-5));
     }

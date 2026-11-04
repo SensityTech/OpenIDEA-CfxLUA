@@ -242,7 +242,7 @@ fn unknown(view: &View, out: &mut Vec<Problem>) {
 }
 
 fn missing_files(cx: &Ctx, view: &View, out: &mut Vec<Problem>) {
-    let tree = Tree::new(cx.ws, parent(&cx.doc.path));
+    let tree = Tree::cached(cx.ws, parent(&cx.doc.path));
     for d in &view.decls {
         for (arg, v) in d.args() {
             let Role::Path(kind) = catalog::role(d.name(), arg) else { continue };
@@ -252,14 +252,11 @@ fn missing_files(cx: &Ctx, view: &View, out: &mut Vec<Problem>) {
             }
             let message = match split_resource_path(value) {
                 Some((res, path)) => {
-                    if !kind.other_resources() || path.trim().is_empty() {
+                    if !kind.other_resources() || path.trim().is_empty() || !checkable(path, kind) {
                         continue;
                     }
                     let mut dirs = cx.ws.resources().filter(|r| r.name == res).map(|r| r.dir.as_str()).peekable();
-                    if dirs.peek().is_none() || dirs.any(|dir| !Tree::new(cx.ws, dir).matches(path, kind).is_empty()) {
-                        continue;
-                    }
-                    if !checkable(path, kind) {
+                    if dirs.peek().is_none() || dirs.any(|dir| Tree::cached(cx.ws, dir).matches_any(path, kind)) {
                         continue;
                     }
                     if is_glob(path) {
@@ -269,7 +266,7 @@ fn missing_files(cx: &Ctx, view: &View, out: &mut Vec<Problem>) {
                     }
                 }
                 None => {
-                    if !tree.matches(value, kind).is_empty() || !checkable(value, kind) {
+                    if !checkable(value, kind) || tree.matches_any(value, kind) {
                         continue;
                     }
                     if is_glob(value) {

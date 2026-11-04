@@ -2,6 +2,9 @@ use crate::project::{self, FileKind, Resource, Side};
 use crate::text::{parent, slash};
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static LISTINGS: AtomicU64 = AtomicU64::new(1);
 
 pub const SCAN: &[(&str, u32)] = &[
     ("**/*.lua", 20_000),
@@ -26,6 +29,8 @@ pub struct Workspace {
     files: BTreeMap<String, WsFile>,
     resources: BTreeMap<String, Resource>,
     pub generation: u64,
+    /// Changes when a path is added or removed, unique across workspaces: caches of the file list key on it.
+    pub listing: u64,
     pub scanned: bool,
     pub native_backslashes: bool,
 }
@@ -72,7 +77,9 @@ impl Workspace {
             return;
         }
         let manifest = kind == FileKind::Manifest;
-        self.files.insert(path.clone(), WsFile { path: path.clone(), kind, text: text.clone() });
+        if self.files.insert(path.clone(), WsFile { path: path.clone(), kind, text: text.clone() }).is_none() {
+            self.listing = LISTINGS.fetch_add(1, Ordering::Relaxed);
+        }
         if manifest {
             self.reload_resource(parent(&path).to_owned());
         }
@@ -97,6 +104,7 @@ impl Workspace {
     pub fn remove(&mut self, path: &str) {
         let path = slash(path);
         if self.files.remove(&path).is_some() {
+            self.listing = LISTINGS.fetch_add(1, Ordering::Relaxed);
             if project::file_kind(&path) == FileKind::Manifest {
                 self.reload_resource(parent(&path).to_owned());
             }
