@@ -5,13 +5,33 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-04
+
+First preview release.
+
 ### Added
 
-- Client / server / shared classification of scripts from the manifests and naming conventions, shown in the status
-  bar and by file icons.
-- FiveM, RedM and FXServer natives from the Cfx.re databases, with completion, documentation and updates.
-- Cfx runtime API completion and documentation.
-- State bags, events and NUI bridge: completion, navigation, gutter icons and checks.
-- fxmanifest completion, navigation, checks and quick fixes; file templates.
-- CfxLua syntax checks, readable magic values, coordinate tools, performance linter, Asset Escrow tools.
-- The CfxLua tool window: natives browser, runtime API, events, manifest directives, syntax and guides.
+- **Client / server awareness**: every Lua script is classified as client, server or shared from its resource's
+  manifest (globs included) or the naming conventions; shown in the status bar, with file icons for the conventions.
+- **Natives**: the Cfx.re databases for FiveM (GTA V + CFX), RedM (RDR3 + CFX) and FXServer, filtered by game and
+  side, with completion, full documentation, out-parameters returned as Lua does, a wrong-side check, and updates
+  (manual and daily) stored as compact deltas.
+- **Cfx runtime API**: completion and documentation of `Citizen`, events, exports, state bags, `json`, `msgpack`,
+  `promise`, vectors and the CfxLua standard library extensions.
+- **State bags**: keys indexed across the project, completion with types and write sites, navigation, unknown-key
+  check with suggestions.
+- **Events**: handlers and triggers matched across the project (helpers and `---@cfx.event` included), built-in
+  events, completion, navigation, gutter icons and six checks.
+- **fxmanifest**: completion of directives, values, paths and dependencies, navigation, six checks with quick fixes,
+  snippets and New file templates.
+- **NUI bridge** between Lua client scripts and pages in JavaScript, TypeScript, JSX/TSX, Vue, Svelte and HTML, with
+  completion, navigation, gutter icons, three checks and a dev-server switch.
+- **CfxLua syntax checks**: `i--`, `++`, `^=`, compound assignment to `<const>`, `<close>` in `in` unpacking, and
+  syntax from other languages (`!=`, `!x`, `&&`, `||`, `//=`, `%=`, `..=`), with fixes.
+- **Readable magic values** (controls, hashes, blips, markers, HUD colours, explosions, animation flags),
+  **coordinate tools** and a **performance linter** with loop-cost gutter markers.
+- **Asset Escrow**: per-file encryption status, checks and a pre-upload checklist.
+- **The CfxLua tool window**: natives browser, runtime API, events, manifest directives, syntax features and guides.
+
+[Unreleased]: https://github.com/SensityTech/OpenIDEA-CfxLUA/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/SensityTech/OpenIDEA-CfxLUA/releases/tag/v0.1.0
