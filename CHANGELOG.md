@@ -9,7 +9,17 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
 
 - **A signed marketplace.** Every release is also published, signed by the `sensity` publisher, with the `index.json`
   OpenIDEA reads in **Settings › Plugins › Available**: installs from there are checked against the publisher's key,
-  and new versions are offered as updates. The package file of a release stays unsigned.
+  and new versions are offered as updates. The package file of a release stays unsigned. The marketplace copy is
+  signed on Windows: on Linux and macOS OpenIDEA refuses it until
+  [l0ng-ai/openidea#1258](https://github.com/l0ng-ai/openidea/issues/1258) is fixed.
+- A daily workflow tests every new OpenIDEA release with OpenIDEA's own `openidea-plugin check`, and updates the
+  documented requirement once one can install the plugin.
+
+### Fixed
+
+- **The OpenIDEA requirement.** The plugin needs plugin API 1.0, which no OpenIDEA release has yet (0.1.35 ships
+  plugin API 0.1): OpenIDEA must be built from source at `4c5b6de` or later, not "0.1.35 or newer"
+  ([#1](https://github.com/SensityTech/OpenIDEA-CfxLUA/issues/1)).
 
 ## [0.1.1] - 2026-11-04
 

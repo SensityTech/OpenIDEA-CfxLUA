@@ -7,9 +7,12 @@ report. This guide describes what it does and where to find it.
 
 ## Getting set up
 
-OpenIDEA-CfxLUA needs two things: OpenIDEA 0.1.35 or newer, and
-[lua-language-server](https://luals.github.io/#install) on your `PATH` (restart OpenIDEA after installing it). The
-plugin brings the Cfx.re knowledge; lua-language-server brings the Lua engine (see *Working with
+OpenIDEA-CfxLUA needs two things:
+
+- OpenIDEA built from source at revision `4c5b6de` or later: the plugin needs plugin API 1.0, which no OpenIDEA release has yet;
+- [lua-language-server](https://luals.github.io/#install) on your `PATH` (restart OpenIDEA after installing it).
+
+The plugin brings the Cfx.re knowledge; lua-language-server brings the Lua engine (see *Working with
 lua-language-server* below).
 
 1. Install the plugin: **Settings › Plugins › Install Plugin from Package File…** and pick the `.oiplugin` file.

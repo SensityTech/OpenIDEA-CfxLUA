@@ -176,7 +176,7 @@ The tool window follows the IDE theme ([light theme](assets/screenshots/tool-win
 
 | | |
 |---|---|
-| [OpenIDEA](https://github.com/l0ng-ai/openidea/releases/latest) 0.1.35 or newer | The IDE (plugin API 1.0). |
+| [OpenIDEA](https://github.com/l0ng-ai/openidea) built from source at [`4c5b6de`](https://github.com/l0ng-ai/openidea/commit/4c5b6de9ada902ffc74b429b7ae3c3384c23a5b3) or later | The IDE with plugin API 1.0, which no OpenIDEA release has yet. Clone it at that revision or later, then `pnpm install` and `pnpm tauri build` (Rust, Node 22.18+, pnpm). |
 | [lua-language-server](https://luals.github.io/#install) on your `PATH` | OpenIDEA's Lua support: types of your own code, hover, signature help, references. OpenIDEA-CfxLUA feeds it the natives and the runtime API ([see below](#working-with-lua-language-server)). |
 
 Install lua-language-server with `winget install LuaLS.lua-language-server`, `brew install lua-language-server`, your
@@ -208,6 +208,10 @@ key, shows *Signed by sensity* and offers each new version as an update.
 OpenIDEA reads one marketplace at a time and trusts the publishers it lists: while this one is set, a package signed
 by another publisher is refused. Clear the URL to go back to OpenIDEA's default marketplace. For the same reason, the
 package file of a release is not signed: OpenIDEA's default marketplace does not list `sensity`.
+
+The marketplace copy is signed on Windows. On Linux and macOS, OpenIDEA computes another digest for the same files
+until [l0ng-ai/openidea#1258](https://github.com/l0ng-ai/openidea/issues/1258) is fixed, and refuses it: install the
+package file there.
 
 ## Getting started
 
@@ -331,7 +335,8 @@ scripts/build.sh --pack          # dist/plugin.wasm and dist/sensity.cfxlua-<ver
 ```
 
 On Windows, `scripts\build.ps1 -Pack` does the same, and `scripts\build.ps1 -Link` links the repository folder into
-OpenIDEA for development (then **Settings › Plugins › Reload** after each build).
+OpenIDEA for development (then **Settings › Plugins › Reload** after each build). Linking needs an OpenIDEA with plugin
+API 1.0 built with `pnpm tauri build`: `pnpm tauri dev` builds keep their data, linked folders included, apart.
 
 The plugin is built with the [OpenIDEA plugin SDK](https://github.com/l0ng-ai/openidea/tree/main/sdk/rust/openidea-plugin)
 (see the [plugin documentation](https://github.com/l0ng-ai/openidea/tree/main/plugins)).

@@ -1,0 +1,119 @@
+name: OpenIDEA compatibility
+
+on:
+  schedule:
+    - cron: '41 6 * * *'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: OpenIDEA tag or commit to test (default the latest release)
+        required: false
+      dry_run:
+        description: Report only, change nothing
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: openidea-compat
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  TRACKING_ISSUE: 1
+  DRY_RUN: ${{ inputs.dry_run || false }}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: target
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          ref="${REF:-$(gh release view -R l0ng-ai/openidea --json tagName --jq .tagName)}"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          if grep -q 'built from source at' README.md; then echo "documented=source" >> "$GITHUB_OUTPUT"; fi
+          if gh api "repos/l0ng-ai/openidea/contents/crates/ide-host/src/bin/openidea-plugin/main.rs?ref=$ref" --silent; then
+            echo "tool=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "OpenIDEA $ref has no openidea-plugin tool: no plugin API 1.0." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+      - id: cache
+        if: steps.target.outputs.tool == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/openidea-plugin
+          key: openidea-plugin-${{ runner.os }}-${{ steps.target.outputs.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.target.outputs.tool == 'true' && steps.cache.outputs.cache-hit != 'true'
+      - name: Build openidea-plugin
+        if: steps.target.outputs.tool == 'true' && steps.cache.outputs.cache-hit != 'true'
+        env:
+          REF: ${{ steps.target.outputs.ref }}
+        run: |
+          if [[ "$REF" =~ ^[0-9a-f]{7,40}$ ]]; then at=(--rev "$REF"); else at=(--tag "$REF"); fi
+          cargo install --locked --git https://github.com/l0ng-ai/openidea "${at[@]}" ide-host --bin openidea-plugin
+      - id: check
+        name: Check the latest plugin release
+        if: steps.target.outputs.tool == 'true'
+        env:
+          REF: ${{ steps.target.outputs.ref }}
+        run: |
+          plugin="$(gh release list --json tagName --jq '[.[] | select(.tagName | startswith("v"))][0].tagName')"
+          echo "plugin=$plugin" >> "$GITHUB_OUTPUT"
+          gh release download "$plugin" --pattern '*.oiplugin' --dir "$RUNNER_TEMP/release"
+          unzip -q "$RUNNER_TEMP"/release/*.oiplugin -d "$RUNNER_TEMP/stage"
+          if openidea-plugin check "$RUNNER_TEMP/stage" > "$RUNNER_TEMP/check.log" 2>&1; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+            echo "OpenIDEA $REF installs OpenIDEA-CfxLUA $plugin." | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "OpenIDEA $REF cannot install OpenIDEA-CfxLUA $plugin." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+          cat "$RUNNER_TEMP/check.log"
+      - name: Require the first compatible release
+        if: steps.check.outputs.ok == 'true' && steps.target.outputs.documented == 'source'
+        env:
+          REF: ${{ steps.target.outputs.ref }}
+          PLUGIN: ${{ steps.check.outputs.plugin }}
+        run: |
+          version="${REF#v}"
+          if [ "$DRY_RUN" = true ]; then
+            echo "dry run: would require OpenIDEA $version or newer and close #$TRACKING_ISSUE"
+            exit 0
+          fi
+          scripts/set-openidea-requirement.sh "$version"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -am "docs: require OpenIDEA $version or newer"
+          git push origin HEAD:main
+          if [ "$(gh issue view "$TRACKING_ISSUE" --json state --jq .state)" = OPEN ]; then
+            gh issue comment "$TRACKING_ISSUE" --body "OpenIDEA $REF installs OpenIDEA-CfxLUA $PLUGIN (checked with its \`openidea-plugin check\`): the README now requires OpenIDEA $version or newer."
+            gh issue close "$TRACKING_ISSUE"
+          fi
+      - name: Follow the SDK revision
+        if: steps.check.outputs.ok != 'true' && steps.target.outputs.documented == 'source'
+        run: |
+          scripts/set-openidea-requirement.sh source
+          if git diff --quiet; then exit 0; fi
+          git diff
+          if [ "$DRY_RUN" = true ]; then echo "dry run: would commit the SDK revision"; exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -am 'docs: require OpenIDEA at the SDK revision'
+          git push origin HEAD:main
+      - name: Report an incompatible release
+        if: steps.check.outputs.ok != 'true' && steps.target.outputs.documented != 'source'
+        env:
+          REF: ${{ steps.target.outputs.ref }}
+        run: |
+          title="OpenIDEA $REF cannot install OpenIDEA-CfxLUA"
+          if [ -n "$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[].number')" ]; then exit 0; fi
+          { echo "The daily check ran OpenIDEA's \`openidea-plugin check\` from $REF on the latest release of the plugin:"
+            echo; echo '```text'; cat "$RUNNER_TEMP/check.log" 2>/dev/null || echo "no openidea-plugin tool at $REF"; echo '```'
+          } > "$RUNNER_TEMP/issue.md"
+          if [ "$DRY_RUN" = true ]; then echo "dry run: would open \"$title\""; cat "$RUNNER_TEMP/issue.md"; exit 0; fi
+          gh issue create --title "$title" --body-file "$RUNNER_TEMP/issue.md"
