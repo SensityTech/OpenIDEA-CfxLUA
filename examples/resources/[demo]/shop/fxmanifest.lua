@@ -1,6 +1,5 @@
 fx_version 'cerulean'
 game 'gta5'
-lua54 'yes'
 
 author 'OpenIDEA-CfxLUA demo'
 description 'A small shop: client, server and shared scripts with a NUI page'

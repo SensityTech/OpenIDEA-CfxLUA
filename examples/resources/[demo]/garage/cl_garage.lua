@@ -1,5 +1,5 @@
 RegisterCommand('car', function(_, tArgs)
-    local iModel = GetHashKey(tArgs[1] or 'adder')
+    local iModel = GetHashKey(tArgs[1] or Config.sDefaultModel)
     RequestModel(iModel)
     while (not HasModelLoaded(iModel)) do
         Wait(10)
@@ -7,6 +7,6 @@ RegisterCommand('car', function(_, tArgs)
 
     local vPosition = GetEntityCoords(PlayerPedId())
     local iVehicle = CreateVehicle(iModel, vPosition.x, vPosition.y, vPosition.z, 0.0, true, false)
-    SetVehicleColours(iVehicle, 27, 27)
+    SetVehicleColours(iVehicle, Config.iPrimaryColour, 27)
     TriggerServerEvent('garage:spawned', NetworkGetNetworkIdFromEntity(iVehicle))
 end, false)

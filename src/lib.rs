@@ -549,4 +549,71 @@ mod tests {
         let (text, _) = status_text(&ws, &Settings::defaults(), "/p/shop/fxmanifest.lua");
         assert_eq!(text, "Resource manifest · shop · FiveM");
     }
+
+    fn demo_files(dir: &std::path::Path, root: &std::path::Path, out: &mut Vec<(String, String)>) {
+        for entry in std::fs::read_dir(dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                demo_files(&path, root, out);
+            } else if let Ok(text) = std::fs::read_to_string(&path) {
+                out.push((slash(&path.strip_prefix(root).unwrap().to_string_lossy()), text));
+            }
+        }
+    }
+
+    /// Every feature over the demo resources, with the bundled natives: what a user sees when opening `examples/`.
+    #[test]
+    fn demo_resources_end_to_end() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples");
+        let mut files = Vec::new();
+        demo_files(&root, &root, &mut files);
+        let refs: Vec<(&str, &str)> = files.iter().map(|(p, t)| (p.as_str(), t.as_str())).collect();
+        let ws = Workspace::from_files("/demo", &refs);
+        let features = all_features();
+        for f in ws.files() {
+            let Some(text) = f.text.as_deref() else { continue };
+            let src = parse(f.kind, text);
+            for feature in &features {
+                feature.index_file(&ws, &f.path, f.kind, &src);
+            }
+        }
+        for feature in &features {
+            feature.indexed(&ws);
+        }
+        let settings = Settings::defaults();
+        let natives = Natives::bundled();
+        assert_eq!(ws.side_of("/demo/resources/[demo]/shop/client/main.lua"), Side::Client);
+        assert_eq!(ws.side_of("/demo/resources/[demo]/shop/server/main.lua"), Side::Server);
+        assert_eq!(ws.side_of("/demo/resources/[demo]/shop/shared/config.lua"), Side::Shared);
+        assert_eq!(ws.side_of("/demo/resources/[demo]/garage/cl_garage.lua"), Side::Client);
+        let mut report = String::new();
+        for (rel, text) in &files {
+            let path = format!("/demo/{rel}");
+            let doc = Doc::new(&ws, &path, testing::language_of(rel), 1, text);
+            let cx = Ctx { doc: &doc, ws: &ws, settings: &settings, natives: &natives };
+            for p in features.iter().flat_map(|f| f.problems(&cx)) {
+                let pos = doc.position(p.start);
+                report.push_str(&format!("{rel}:{}: {:?} [{}] {}\n", pos.line + 1, p.severity, p.code, p.message));
+            }
+            for m in features.iter().flat_map(|f| f.line_markers(&cx)) {
+                report.push_str(&format!(
+                    "{rel}:{}: marker {:?} {}\n",
+                    m.line + 1,
+                    m.icon,
+                    m.tooltip.replace('\n', " | ")
+                ));
+            }
+        }
+        eprintln!("{report}");
+        assert!(!report.contains("Error ["), "the demo has no errors:\n{report}");
+
+        let client = "/demo/resources/[demo]/shop/client/main.lua";
+        let text = ws.text(client).unwrap().replace("local bIsShopOpen", "GetEntity\nlocal bIsShopOpen");
+        let doc = Doc::new(&ws, client, "lua", 2, &text);
+        let cx = Ctx { doc: &doc, ws: &ws, settings: &settings, natives: &natives };
+        let at = text.find("GetEntity").unwrap() + "GetEntity".len();
+        let items: Vec<String> = features.iter().flat_map(|f| f.completion(&cx, at, None)).map(|i| i.label).collect();
+        assert!(items.iter().any(|l| l == "GetEntityCoords"), "{items:?}");
+        assert!(!items.iter().any(|l| l == "GetPlayerIdentifiers"), "no server natives in a client script");
+    }
 }
