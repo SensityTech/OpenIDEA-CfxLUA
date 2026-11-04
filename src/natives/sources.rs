@@ -2,7 +2,7 @@ use super::convert::{self, Group, Overrides};
 use super::model::NativeSet;
 use super::parse::{self, FormatError, Origin, RawNative};
 use flate2::read::GzDecoder;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::Read;
 
 const CONVERTER_VERSION: u32 = 1;
@@ -68,21 +68,16 @@ impl Database {
         GzDecoder::new(self.bundled_gz()).read_to_end(&mut bytes).map_err(|e| format!("{}: {e}", self.file_name()))?;
         Ok(decode(bytes))
     }
-
-    pub fn validate(self, text: &str) -> Result<(), FormatError> {
-        match self {
-            Self::Gta5 => parse::parse_json(text, Origin::Gta5Json).map(drop),
-            Self::Cfx => parse::parse_json(text, Origin::CfxJson).map(drop),
-            Self::Rdr3 => parse::parse_dsl(text).map(drop),
-            Self::Rdr3Docs => parse::parse_nativedb(text).map(drop),
-        }
-    }
 }
 
 pub fn fingerprint(bytes: &[u8]) -> String {
     let mut crc = flate2::Crc::new();
     crc.update(bytes);
     format!("{:08x}:{}", crc.sum(), bytes.len() as u32)
+}
+
+pub fn fingerprint_len(fingerprint: &str) -> usize {
+    fingerprint.rsplit_once(':').and_then(|(_, n)| n.parse().ok()).unwrap_or(0)
 }
 
 pub fn decode(bytes: Vec<u8>) -> String {
@@ -116,34 +111,34 @@ fn json(d: Database, text: &str, origin: Origin) -> Result<Vec<RawNative<'_>>, (
     parse::parse_json(text, origin).map_err(|e| (d, e))
 }
 
-pub fn groups(
+pub fn groups<'a>(
     set: NativeSet,
-    text: impl Fn(Database) -> Option<String>,
+    text: impl Fn(Database) -> Option<&'a str>,
 ) -> Result<Vec<Group>, (Database, FormatError)> {
     let get = |d: Database| text(d).ok_or_else(|| (d, FormatError("not available".into())));
     let cfx = get(Database::Cfx)?;
     let overrides = Overrides::bundled();
     match set {
         NativeSet::Gta5 => {
-            let gta5 = get(Database::Gta5)?;
-            let mut raw = json(Database::Gta5, &gta5, Origin::Gta5Json)?;
-            raw.extend(json(Database::Cfx, &cfx, Origin::CfxJson)?);
+            let mut raw = json(Database::Gta5, get(Database::Gta5)?, Origin::Gta5Json)?;
+            raw.extend(json(Database::Cfx, cfx, Origin::CfxJson)?);
             Ok(convert::convert(set, raw, &overrides))
         }
         NativeSet::Rdr3 => {
-            let (dsl, docs) = (get(Database::Rdr3)?, get(Database::Rdr3Docs)?);
-            let dsl = parse::parse_dsl(&dsl).map_err(|e| (Database::Rdr3, e))?;
-            let docs = parse::parse_nativedb(&docs).map_err(|e| (Database::Rdr3Docs, e))?;
+            let dsl = parse::parse_dsl(get(Database::Rdr3)?).map_err(|e| (Database::Rdr3, e))?;
+            let docs = parse::parse_nativedb(get(Database::Rdr3Docs)?).map_err(|e| (Database::Rdr3Docs, e))?;
             let mut raw = parse::join_rdr3(dsl, &docs);
-            raw.extend(json(Database::Cfx, &cfx, Origin::CfxJson)?);
+            raw.extend(json(Database::Cfx, cfx, Origin::CfxJson)?);
             Ok(convert::convert(set, raw, &overrides))
         }
-        NativeSet::Server => Ok(convert::convert(set, json(Database::Cfx, &cfx, Origin::CfxJson)?, &overrides)),
+        NativeSet::Server => Ok(convert::convert(set, json(Database::Cfx, cfx, Origin::CfxJson)?, &overrides)),
     }
 }
 
 pub fn bundled_groups(set: NativeSet) -> Vec<Group> {
-    groups(set, |d| d.bundled_text().ok()).unwrap_or_default()
+    let texts: HashMap<Database, String> =
+        databases(set).iter().filter_map(|&d| Some((d, d.bundled_text().ok()?))).collect();
+    groups(set, |d| texts.get(&d).map(String::as_str)).unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -218,14 +213,15 @@ mod tests {
             let mut raw = Vec::new();
             GzDecoder::new(d.bundled_gz()).read_to_end(&mut raw).unwrap();
             assert_eq!(fingerprint(&raw), d.bundled_fingerprint(), "{}", d.file_name());
-            assert!(d.validate(&decode(raw)).is_ok());
+            assert_eq!(fingerprint_len(&d.bundled_fingerprint()), raw.len());
         }
         assert_eq!(decode(b"\xef\xbb\xbf{}".to_vec()), "{}");
         assert_eq!(decode(b"a\xffb".to_vec()), "a\u{fffd}b");
         let id = snapshot_id(NativeSet::Rdr3);
         assert!(id.starts_with("v1;overrides=") && id.contains(";cfx=") && id.contains(";rdr3_docs="), "{id}");
         assert!(!snapshot_id(NativeSet::Server).contains("gta5="));
-        assert_eq!(Database::Cfx.validate("<html></html>").map_err(|e| e.0.starts_with("invalid JSON")), Err(true));
+        let html = groups(NativeSet::Server, |_| Some("<html></html>")).map(|g| g.len());
+        assert_eq!(html.map_err(|(d, e)| (d, e.0.starts_with("invalid JSON"))), Err((Database::Cfx, true)));
         let overrides = Overrides::bundled();
         assert_eq!(overrides.return_types.len(), 17);
         assert_eq!(overrides.param_types["REGISTER_RAW_KEYMAP"]["onKeyUp"], "fun()|nil");

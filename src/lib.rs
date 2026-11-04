@@ -187,6 +187,10 @@ impl DevKit {
                 }
                 return;
             }
+            if natives::resume(&self.natives) {
+                self.natives_changed();
+                return;
+            }
         }
         let left = self.unread.len() + self.pending.len();
         if left == 0 && self.catalogs.is_empty() && self.derive.is_empty() && !self.indexing {
@@ -373,15 +377,19 @@ impl DevKit {
             .find_map(|f| f.command(&cx, id, arg))
             .unwrap_or_else(|| Err(Error::NotFound(format!("command {id}"))));
         if matches!(id, natives::UPDATE | natives::SCHEDULED_UPDATE) {
-            let changed = natives::take_changed();
-            if !changed.is_empty() {
-                // Reloaded by the next heavy call: in this one the update already took its share of the budget.
-                self.natives.invalidate(&changed);
-                self.catalogs = (0..self.workspaces.len()).collect();
-                self.last = None;
-            }
+            self.natives_changed();
         }
         result
+    }
+
+    // Reloaded by a later heavy call: this one already spent its share of the budget on the update.
+    fn natives_changed(&mut self) {
+        let changed = natives::take_changed();
+        if !changed.is_empty() {
+            self.natives.invalidate(&changed);
+            self.catalogs = (0..self.workspaces.len()).collect();
+            self.last = None;
+        }
     }
 
     fn mark_derive(&mut self, i: usize) {

@@ -25,7 +25,7 @@ pub struct NativesFeature;
 impl Feature for NativesFeature {
     fn command(&self, cx: &CommandCx, id: &str, _arg: Option<&str>) -> Option<CommandResult> {
         match id {
-            update::UPDATE => Some(update::run(cx.natives)),
+            update::UPDATE => Some(update::run(cx)),
             update::SCHEDULED_UPDATE => Some(update::scheduled(cx)),
             _ => None,
         }

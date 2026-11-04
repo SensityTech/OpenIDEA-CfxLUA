@@ -1,8 +1,10 @@
-use super::Natives;
 use super::convert::{self, Group};
 use super::model::NativeSet;
 use super::sources::{self, Database, Inputs};
+use super::{Natives, project_games};
 use crate::feature::{CommandCx, CommandResult};
+use crate::project::Game;
+use crate::workspace::Workspace;
 use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
@@ -10,7 +12,7 @@ use openidea_plugin::{HttpRequest, LogLevel, NotificationLevel, host};
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::io::{Read, Write};
+use std::io::{self, BufWriter, Read, Write};
 use std::rc::Rc;
 
 pub const UPDATE: &str = "natives.update";
@@ -23,6 +25,8 @@ pub const MAX_STORED_DELTA: usize = 112 * 1024;
 const CHECK_INTERVAL_SECS: u64 = 24 * 60 * 60;
 const TIMEOUT_MS: u32 = 15_000;
 const TASK_TITLE: &str = "CfxLua: updating natives";
+// Fuel, not time: a call converts at most this much database text (about 0.3·10⁹ per MiB), or one set's.
+const BYTES_PER_CALL: usize = 5 << 20;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct State {
@@ -57,7 +61,11 @@ thread_local! {
     static CHANGED: RefCell<Vec<NativeSet>> = const { RefCell::new(Vec::new()) };
 }
 
-/// The sets the last update changed (taken once).
+thread_local! {
+    static JOB: RefCell<Option<Job>> = const { RefCell::new(None) };
+}
+
+/// The sets updates changed since the last call.
 pub fn take_changed() -> Vec<NativeSet> {
     CHANGED.with(|c| std::mem::take(&mut *c.borrow_mut()))
 }
@@ -121,11 +129,32 @@ fn diff(set: NativeSet, bundled: &[Group], new: Vec<Group>, inputs: Inputs) -> D
     Delta { format: DELTA_FORMAT, base: sources::snapshot_id(set), inputs, functions, removed, groups }
 }
 
-fn encode_delta(delta: &Delta) -> Option<String> {
-    let json = serde_json::to_vec(delta).ok()?;
-    let mut gz = GzEncoder::new(Vec::new(), Compression::best());
-    gz.write_all(&json).ok()?;
-    Some(base64_encode(&gz.finish().ok()?))
+struct Bounded {
+    bytes: Vec<u8>,
+    max: usize,
+}
+
+impl Write for Bounded {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if self.bytes.len() + buf.len() > self.max {
+            return Err(io::ErrorKind::FileTooLarge.into());
+        }
+        self.bytes.extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+// Gives up as soon as the text would exceed `max`: a delta too large to be stored costs no more than one that fits.
+fn encode_delta(delta: &Delta, max: usize) -> Option<String> {
+    let mut gz = GzEncoder::new(Bounded { bytes: Vec::new(), max: max / 4 * 3 }, Compression::best());
+    let mut json = BufWriter::new(&mut gz);
+    serde_json::to_writer(&mut json, delta).ok()?;
+    json.into_inner().ok()?;
+    Some(base64_encode(&gz.finish().ok()?.bytes))
 }
 
 fn decode_delta(text: &str) -> Option<Delta> {
@@ -205,7 +234,17 @@ struct Outcome {
 enum Content {
     Failed,
     Known(String),
-    Fetched { fingerprint: String, text: String },
+    Fetched { text: String, validators: Validators, parsed: bool },
+}
+
+impl Content {
+    fn fingerprint(&self) -> Option<&str> {
+        match self {
+            Self::Failed => None,
+            Self::Known(fp) => Some(fp),
+            Self::Fetched { validators, .. } => Some(&validators.fingerprint),
+        }
+    }
 }
 
 enum Answer {
@@ -238,46 +277,25 @@ fn download(db: Database, validators: Option<&Validators>) -> Result<Answer, Str
     }
 }
 
-fn obtain(db: Database, state: &mut State, errors: &mut Vec<String>, conditional: bool) -> Content {
-    let last = state.databases.get(db.id()).cloned();
-    match download(db, last.as_ref().filter(|_| conditional)) {
-        Ok(Answer::NotModified) => match last {
-            Some(v) if conditional => Content::Known(v.fingerprint),
-            _ => {
-                errors.push(format!("{}: HTTP 304 without a valid cached copy", db.id()));
-                Content::Failed
-            }
-        },
-        Ok(Answer::Body { bytes, etag, last_modified }) => {
-            let fingerprint = sources::fingerprint(&bytes);
-            let text = sources::decode(bytes);
-            let checked = last.is_some_and(|v| v.fingerprint == fingerprint) || fingerprint == db.bundled_fingerprint();
-            if !checked && let Err(e) = db.validate(&text) {
-                errors.push(format!("{}: invalid content ({e})", db.id()));
-                return Content::Failed;
-            }
-            let validators = Validators { etag, last_modified, fingerprint: fingerprint.clone() };
-            state.databases.insert(db.id().to_owned(), validators);
-            Content::Fetched { fingerprint, text }
-        }
-        Err(e) => {
-            errors.push(format!("{}: {e}", db.id()));
-            Content::Failed
-        }
-    }
+fn in_effect(set: NativeSet) -> Inputs {
+    effective(set).map_or_else(|| sources::bundled_inputs(set), |d| d.inputs.clone())
 }
 
-fn wanted(set: NativeSet, content: &[Content], in_effect: &Inputs) -> Inputs {
+fn wanted(set: NativeSet, content: &HashMap<Database, Content>, in_effect: &Inputs) -> Inputs {
     sources::databases(set)
         .iter()
         .filter_map(|&db| {
-            let fp = match &content[db as usize] {
-                Content::Known(fp) | Content::Fetched { fingerprint: fp, .. } => fp.clone(),
-                Content::Failed => in_effect.get(db.id())?.clone(),
-            };
-            Some((db.id().to_owned(), fp))
+            let fp = content
+                .get(&db)
+                .and_then(Content::fingerprint)
+                .or_else(|| in_effect.get(db.id()).map(String::as_str))?;
+            Some((db.id().to_owned(), fp.to_owned()))
         })
         .collect()
+}
+
+fn weight(inputs: &Inputs) -> usize {
+    inputs.values().map(|fp| sources::fingerprint_len(fp)).sum()
 }
 
 fn save(set: NativeSet, delta: Option<&Delta>, budget: usize) -> bool {
@@ -287,7 +305,15 @@ fn save(set: NativeSet, delta: Option<&Delta>, budget: usize) -> bool {
             let _ = host::storage::delete(&key);
             true
         }
-        Some(d) => encode_delta(d).is_some_and(|text| text.len() <= budget && host::storage::set(&key, &text).is_ok()),
+        Some(d) => encode_delta(d, budget).is_some_and(|text| host::storage::set(&key, &text).is_ok()),
+    }
+}
+
+fn save_state(state: &State) {
+    if let Ok(json) = serde_json::to_string(state)
+        && host::storage::set(STATE_KEY, &json).is_err()
+    {
+        host::log(LogLevel::Debug, "natives: the update state cannot be stored");
     }
 }
 
@@ -295,101 +321,289 @@ fn now_secs() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
 }
 
-fn update(task: &host::Task, natives: &Natives, manual: bool, budget: usize) -> Option<Outcome> {
-    let (mut state, storage) = match host::storage::get(STATE_KEY) {
-        Ok(raw) => (raw.and_then(|r| serde_json::from_str(&r).ok()).unwrap_or_default(), true),
-        Err(_) => (State::default(), false),
-    };
-    let steps = (Database::ALL.len() + NativeSet::ALL.len()) as u32;
-    let mut errors = Vec::new();
-    let mut content = Vec::with_capacity(Database::ALL.len());
-    for (i, db) in Database::ALL.into_iter().enumerate() {
-        if task.is_cancelled() {
-            return None;
+enum Piece {
+    Convert(NativeSet, Inputs),
+    Diff(NativeSet),
+    Count(NativeSet),
+}
+
+impl Piece {
+    fn set(&self) -> NativeSet {
+        match self {
+            Self::Convert(set, _) | Self::Diff(set) | Self::Count(set) => *set,
         }
-        task.report(i as u32, Some(steps), Some(db.file_name()));
-        content.push(obtain(db, &mut state, &mut errors, true));
     }
 
-    let mut outcome = Outcome {
-        changed: Vec::new(),
-        counts: [None; 3],
-        origin: Origin::Remote,
-        error: None,
-        unstored: Vec::new(),
-        storage,
-    };
-    for (i, set) in NativeSet::ALL.into_iter().enumerate() {
-        if task.is_cancelled() {
-            return None;
+    fn weight(&self) -> usize {
+        match self {
+            Self::Convert(_, wanted) => weight(wanted),
+            Self::Diff(set) | Self::Count(set) => weight(&sources::bundled_inputs(*set)),
         }
-        let in_effect = effective(set).map_or_else(|| sources::bundled_inputs(set), |d| d.inputs.clone());
-        if wanted(set, &content, &in_effect) == in_effect {
-            continue;
-        }
-        task.report((Database::ALL.len() + i) as u32, Some(steps), Some(set.display_name()));
-        // A 304 does not carry the content: download it again unless it is the bundled one.
-        for &db in sources::databases(set) {
-            if matches!(&content[db as usize], Content::Known(fp) if *fp != db.bundled_fingerprint()) {
-                content[db as usize] = obtain(db, &mut state, &mut errors, false);
+    }
+}
+
+struct Converted {
+    set: NativeSet,
+    inputs: Inputs,
+    groups: Vec<Group>,
+}
+
+// Spread over several calls and lost with the instance: what it saved stays, the rest waits for the next check.
+struct Job {
+    manual: bool,
+    budget: usize,
+    state: State,
+    content: HashMap<Database, Content>,
+    sets: Vec<NativeSet>,
+    todo: Vec<NativeSet>,
+    converted: Option<Converted>,
+    counted: Vec<NativeSet>,
+    errors: Vec<String>,
+    outcome: Outcome,
+    progress: u32,
+}
+
+impl Job {
+    fn start(task: &host::Task, games: &[Game], manual: bool, budget: usize) -> Option<Job> {
+        let (mut state, storage) = match host::storage::get(STATE_KEY) {
+            Ok(raw) => (raw.and_then(|r| serde_json::from_str(&r).ok()).unwrap_or_default(), true),
+            Err(_) => (State::default(), false),
+        };
+        state.checked = now_secs();
+        save_state(&state);
+        let mut sets: Vec<NativeSet> =
+            games.iter().map(|&g| NativeSet::for_game(g)).chain([NativeSet::Server]).collect();
+        sets.sort_by_key(|&s| (weight(&sources::bundled_inputs(s)), s));
+        sets.dedup();
+        let databases: Vec<Database> =
+            Database::ALL.into_iter().filter(|db| sets.iter().any(|&s| sources::databases(s).contains(db))).collect();
+        let outcome = Outcome {
+            changed: Vec::new(),
+            counts: [None; 3],
+            origin: Origin::Remote,
+            error: None,
+            unstored: Vec::new(),
+            storage,
+        };
+        let mut job = Job {
+            manual,
+            budget,
+            state,
+            content: HashMap::new(),
+            todo: sets.clone(),
+            sets,
+            converted: None,
+            counted: Vec::new(),
+            errors: Vec::new(),
+            outcome,
+            progress: 0,
+        };
+        for db in databases {
+            if task.is_cancelled() {
+                return None;
             }
+            job.report(task, db.file_name());
+            let content = job.obtain(db, true);
+            job.content.insert(db, content);
         }
-        let wanted = wanted(set, &content, &in_effect);
-        let texts: HashMap<Database, String> = sources::databases(set)
-            .iter()
-            .filter_map(|&db| {
-                let fp = wanted.get(db.id())?;
-                let text = match &content[db as usize] {
-                    Content::Fetched { fingerprint, text } if fingerprint == fp => text.clone(),
-                    _ if *fp == db.bundled_fingerprint() => db.bundled_text().ok()?,
-                    _ => return None,
-                };
-                Some((db, text))
-            })
-            .collect();
-        if wanted == in_effect || texts.len() < sources::databases(set).len() {
-            // Unchanged after all, or a database could not be obtained (reported).
-            continue;
-        }
-        let groups = match sources::groups(set, |db| texts.get(&db).cloned()) {
-            Ok(groups) => groups,
-            Err((db, e)) => {
-                errors.push(format!("{}: invalid content ({e})", db.id()));
+        for set in job.sets.clone() {
+            let in_effect = in_effect(set);
+            if wanted(set, &job.content, &in_effect) == in_effect {
                 continue;
             }
-        };
-        let functions = convert::functions(&groups);
-        let delta = (wanted != sources::bundled_inputs(set))
-            .then(|| Rc::new(diff(set, &sources::bundled_groups(set), groups, wanted)));
-        if !save(set, delta.as_deref(), budget) {
-            outcome.unstored.push(set);
+            // A 304 does not carry the content: download it again unless it is the bundled one.
+            for &db in sources::databases(set) {
+                if matches!(job.content.get(&db), Some(Content::Known(fp)) if *fp != db.bundled_fingerprint()) {
+                    if task.is_cancelled() {
+                        return None;
+                    }
+                    let content = job.obtain(db, false);
+                    job.content.insert(db, content);
+                }
+            }
         }
-        remember(set, delta);
-        outcome.changed.push(set);
-        outcome.counts[set as usize] = Some(functions);
+        Some(job)
     }
 
-    state.checked = now_secs();
-    if let Ok(json) = serde_json::to_string(&state)
-        && host::storage::set(STATE_KEY, &json).is_err()
-    {
-        host::log(LogLevel::Debug, "natives: the update state cannot be stored");
+    fn report(&mut self, task: &host::Task, step: &str) {
+        let steps = (Database::ALL.len() + 2 * self.sets.len()) as u32;
+        task.report(self.progress, Some(steps.max(self.progress + 1)), Some(step));
+        self.progress += 1;
     }
-    for (db, c) in Database::ALL.into_iter().zip(&content) {
-        if matches!(c, Content::Failed) {
-            let downloaded = state.databases.get(db.id()).is_some_and(|v| v.fingerprint != db.bundled_fingerprint());
-            outcome.origin = outcome.origin.max(if downloaded { Origin::Cache } else { Origin::Bundled });
+
+    fn obtain(&mut self, db: Database, conditional: bool) -> Content {
+        let last = self.state.databases.get(db.id()).cloned();
+        match download(db, last.as_ref().filter(|_| conditional)) {
+            Ok(Answer::NotModified) => match last {
+                Some(v) if conditional => Content::Known(v.fingerprint),
+                _ => {
+                    self.errors.push(format!("{}: HTTP 304 without a valid cached copy", db.id()));
+                    Content::Failed
+                }
+            },
+            Ok(Answer::Body { bytes, etag, last_modified }) => {
+                let fingerprint = sources::fingerprint(&bytes);
+                // Known to parse (last download, snapshot, input of an update in effect): no conversion to wait for.
+                let parsed = last.is_some_and(|v| v.fingerprint == fingerprint)
+                    || fingerprint == db.bundled_fingerprint()
+                    || self.sets.iter().any(|&s| in_effect(s).get(db.id()) == Some(&fingerprint));
+                let validators = Validators { etag, last_modified, fingerprint };
+                if parsed {
+                    self.state.databases.insert(db.id().to_owned(), validators.clone());
+                }
+                Content::Fetched { text: sources::decode(bytes), validators, parsed }
+            }
+            Err(e) => {
+                self.errors.push(format!("{}: {e}", db.id()));
+                Content::Failed
+            }
         }
     }
-    outcome.error = (!errors.is_empty()).then(|| errors.join("; "));
-    if manual && outcome.changed.is_empty() && outcome.error.is_none() {
-        // "N functions from …": every set counts.
-        for set in NativeSet::ALL {
-            let functions = effective(set).map_or_else(|| natives.catalog(set).len(), |d| d.functions);
-            outcome.counts[set as usize] = Some(functions);
+
+    fn fetched(&self, db: Database, fp: &str) -> Option<&str> {
+        match self.content.get(&db) {
+            Some(Content::Fetched { text, validators, .. }) if validators.fingerprint == fp => Some(text),
+            _ => None,
         }
     }
-    Some(outcome)
+
+    fn next(&mut self, natives: &Natives) -> Option<Piece> {
+        while let Some(&set) = self.todo.first() {
+            if self.converted.as_ref().is_some_and(|c| c.set == set) {
+                return Some(Piece::Diff(set));
+            }
+            let in_effect = in_effect(set);
+            let wanted = wanted(set, &self.content, &in_effect);
+            let available = sources::databases(set).iter().all(|&db| {
+                wanted.get(db.id()).is_some_and(|fp| self.fetched(db, fp).is_some() || *fp == db.bundled_fingerprint())
+            });
+            if wanted == in_effect || !available {
+                // Unchanged, or a database could not be obtained (reported).
+                self.todo.remove(0);
+                continue;
+            }
+            return Some(Piece::Convert(set, wanted));
+        }
+        if !self.manual || !self.outcome.changed.is_empty() || !self.errors.is_empty() {
+            return None;
+        }
+        // "N functions from …": loading a catalog is a conversion too.
+        let uncounted = |s: &NativeSet| !self.counted.contains(s) && effective(*s).is_none() && !natives.is_loaded(*s);
+        self.sets.iter().copied().find(uncounted).map(Piece::Count)
+    }
+
+    fn work(&mut self, task: &host::Task, natives: &Natives) -> Option<bool> {
+        let mut converted = 0;
+        while let Some(piece) = self.next(natives) {
+            let weight = piece.weight();
+            if converted > 0 && converted + weight > BYTES_PER_CALL {
+                return Some(true);
+            }
+            if task.is_cancelled() {
+                return None;
+            }
+            self.report(task, piece.set().display_name());
+            match piece {
+                Piece::Convert(set, wanted) => self.convert(set, wanted),
+                Piece::Diff(set) => self.compare(set),
+                Piece::Count(set) => {
+                    natives.catalog(set);
+                    self.counted.push(set);
+                }
+            }
+            converted += weight;
+        }
+        Some(false)
+    }
+
+    fn convert(&mut self, set: NativeSet, wanted: Inputs) {
+        let fp = |db: Database| wanted.get(db.id()).map_or("", String::as_str);
+        let bundled: HashMap<Database, String> = sources::databases(set)
+            .iter()
+            .filter(|&&db| self.fetched(db, fp(db)).is_none())
+            .filter_map(|&db| Some((db, db.bundled_text().ok()?)))
+            .collect();
+        let groups =
+            sources::groups(set, |db| self.fetched(db, fp(db)).or_else(|| bundled.get(&db).map(String::as_str)));
+        let groups = match groups {
+            Ok(groups) => groups,
+            Err((db, e)) => {
+                self.errors.push(format!("{}: invalid content ({e})", db.id()));
+                // A download is set aside and the set tried again without it; the snapshot has no fallback.
+                if !matches!(self.content.insert(db, Content::Failed), Some(Content::Fetched { .. })) {
+                    self.todo.remove(0);
+                }
+                return;
+            }
+        };
+        for &db in sources::databases(set) {
+            if let Some(Content::Fetched { validators, parsed, .. }) = self.content.get_mut(&db)
+                && !*parsed
+                && validators.fingerprint == fp(db)
+            {
+                *parsed = true;
+                self.state.databases.insert(db.id().to_owned(), validators.clone());
+            }
+        }
+        if wanted == sources::bundled_inputs(set) {
+            let functions = convert::functions(&groups);
+            self.complete(set, None, functions);
+        } else {
+            self.converted = Some(Converted { set, inputs: wanted, groups });
+        }
+    }
+
+    fn compare(&mut self, set: NativeSet) {
+        let Some(Converted { inputs, groups, .. }) = self.converted.take() else { return };
+        let delta = diff(set, &sources::bundled_groups(set), groups, inputs);
+        let functions = delta.functions;
+        self.complete(set, Some(Rc::new(delta)), functions);
+    }
+
+    fn complete(&mut self, set: NativeSet, delta: Option<Rc<Delta>>, functions: usize) {
+        if !save(set, delta.as_deref(), self.budget) {
+            self.outcome.unstored.push(set);
+        }
+        remember(set, delta);
+        CHANGED.with(|c| c.borrow_mut().push(set));
+        self.outcome.changed.push(set);
+        self.outcome.counts[set as usize] = Some(functions);
+        self.todo.remove(0);
+    }
+
+    fn finish(mut self, natives: &Natives) {
+        save_state(&self.state);
+        let o = &mut self.outcome;
+        for db in Database::ALL {
+            if matches!(self.content.get(&db), Some(Content::Failed)) {
+                let downloaded =
+                    self.state.databases.get(db.id()).is_some_and(|v| v.fingerprint != db.bundled_fingerprint());
+                o.origin = o.origin.max(if downloaded { Origin::Cache } else { Origin::Bundled });
+            }
+        }
+        o.error = (!self.errors.is_empty()).then(|| self.errors.join("; "));
+        if self.manual && o.changed.is_empty() && o.error.is_none() {
+            // "N functions from …": the sets of the project count.
+            for &set in &self.sets {
+                o.counts[set as usize] =
+                    Some(effective(set).map_or_else(|| natives.catalog(set).len(), |d| d.functions));
+            }
+        }
+        o.changed.sort();
+        o.unstored.sort();
+        let changed: Vec<&str> = o.changed.iter().map(|s| s.id()).collect();
+        host::log(
+            LogLevel::Info,
+            &format!(
+                "natives: origin={:?}, changed={changed:?}, error={}",
+                o.origin,
+                o.error.as_deref().unwrap_or("none")
+            ),
+        );
+        if let Some((level, title, body)) = notification(o, self.manual) {
+            host::notify(level, title, &body);
+        }
+    }
 }
 
 fn grouped(n: usize) -> String {
@@ -460,37 +674,49 @@ fn notification(o: &Outcome, manual: bool) -> Option<(NotificationLevel, &'stati
     Some((level, "CfxLua: natives are up to date", describe(o)))
 }
 
-fn run_with(natives: &Natives, manual: bool, budget: usize) -> CommandResult {
-    let outcome = {
-        let task = host::begin_task(TASK_TITLE, true);
-        update(&task, natives, manual, budget)
-    };
-    let Some(outcome) = outcome else {
-        host::log(LogLevel::Info, "natives: update cancelled");
-        return Ok(None);
-    };
-    CHANGED.with(|c| c.borrow_mut().extend(outcome.changed.iter().copied()));
-    let changed: Vec<&str> = outcome.changed.iter().map(|s| s.id()).collect();
-    host::log(
-        LogLevel::Info,
-        &format!(
-            "natives: origin={:?}, changed={changed:?}, error={}",
-            outcome.origin,
-            outcome.error.as_deref().unwrap_or("none")
-        ),
-    );
-    if let Some((level, title, body)) = notification(&outcome, manual) {
-        host::notify(level, title, &body);
+fn proceed(mut job: Job, task: &host::Task, natives: &Natives) {
+    match job.work(task, natives) {
+        Some(true) => JOB.with(|j| *j.borrow_mut() = Some(job)),
+        Some(false) => job.finish(natives),
+        None => host::log(LogLevel::Info, "natives: update cancelled"),
     }
-    Ok(None)
 }
 
-pub fn run(natives: &Natives) -> CommandResult {
-    run_with(natives, true, MAX_STORED_DELTA)
+fn start(natives: &Natives, games: &[Game], manual: bool, budget: usize) {
+    JOB.with(|j| j.borrow_mut().take());
+    let task = host::begin_task(TASK_TITLE, true);
+    match Job::start(&task, games, manual, budget) {
+        Some(job) => proceed(job, &task, natives),
+        None => host::log(LogLevel::Info, "natives: update cancelled"),
+    }
+}
+
+/// The next share of the update in progress: true when there was one, and it took this call's budget.
+/// At most one of run, scheduled, resume per call.
+pub fn resume(natives: &Natives) -> bool {
+    let Some(job) = JOB.with(|j| j.borrow_mut().take()) else { return false };
+    let task = host::begin_task(TASK_TITLE, true);
+    proceed(job, &task, natives);
+    true
+}
+
+// Nothing detected yet (manifests unread, or none declares a game): either game.
+fn games(cx: &CommandCx) -> Vec<Game> {
+    let detected = cx.ws.map(Workspace::detected_games).filter(|g| !g.is_empty()).unwrap_or_else(|| Game::ALL.to_vec());
+    project_games(cx.settings, &detected)
+}
+
+pub fn run(cx: &CommandCx) -> CommandResult {
+    start(cx.natives, &games(cx), true, MAX_STORED_DELTA);
+    Ok(None)
 }
 
 pub fn scheduled(cx: &CommandCx) -> CommandResult {
     if !cx.settings.enabled() || !cx.settings.bool(AUTO_UPDATE, true) {
+        return Ok(None);
+    }
+    if JOB.with(|j| j.borrow().is_some()) {
+        resume(cx.natives);
         return Ok(None);
     }
     let checked = match host::storage::get(STATE_KEY) {
@@ -501,10 +727,12 @@ pub fn scheduled(cx: &CommandCx) -> CommandResult {
             return Ok(None);
         }
     };
+    // Written when a check starts: one that could not finish waits for the next interval.
     if now_secs().checked_sub(checked).is_some_and(|elapsed| elapsed < CHECK_INTERVAL_SECS) {
         return Ok(None);
     }
-    run_with(cx.natives, false, MAX_STORED_DELTA)
+    start(cx.natives, &games(cx), false, MAX_STORED_DELTA);
+    Ok(None)
 }
 
 #[cfg(test)]
@@ -537,12 +765,49 @@ mod tests {
         mock.notifications().pop().expect("a notification")
     }
 
+    fn finish(natives: &Natives) -> usize {
+        let mut calls = 1;
+        while pending() {
+            resume(natives);
+            calls += 1;
+        }
+        calls
+    }
+
+    fn update(natives: &Natives) -> usize {
+        start(natives, &Game::ALL, true, MAX_STORED_DELTA);
+        finish(natives)
+    }
+
+    fn pending() -> bool {
+        JOB.with(|j| j.borrow().is_some())
+    }
+
     fn edited_gta5(d: Database, text: String) -> String {
         if d != Database::Gta5 {
             return text;
         }
         let text = text.replacen("This native gets the ground level", "UPDATED: this native gets the ground level", 1);
         text.replacen('{', r#"{"ZZZ":{"0x1234":{"name":"ZZ_NEW_NATIVE","params":[],"results":"void"}},"#, 1)
+    }
+
+    fn edited_everywhere(d: Database, text: String) -> String {
+        match d {
+            Database::Gta5 => edited_gta5(d, text),
+            Database::Cfx => text.replacen(
+                r#"{"CFX":{"#,
+                r#"{"CFX":{"0xAAAAAAAA":{"name":"ZZ_SHARED_NATIVE","params":[],"results":"void","description":"Added.","hash":"0xAAAAAAAA","ns":"CFX","apiset":"shared"},"#,
+                1,
+            ),
+            Database::Rdr3 => text.replacen(r#"Ped "ped""#, r#"Ped "targetPed""#, 1),
+            Database::Rdr3Docs => text.replacen(r#""comment": "Counts up."#, r#""comment": "UPDATED: counts up."#, 1),
+        }
+    }
+
+    fn command<R>(mock: &MockHost, natives: &Natives, ws: Option<&Workspace>, f: impl FnOnce(&CommandCx) -> R) -> R {
+        let inv = mock.invocation();
+        let settings = Settings::defaults();
+        f(&CommandCx { ws, settings: &settings, natives, doc: None, inv: &inv })
     }
 
     #[test]
@@ -575,8 +840,10 @@ mod tests {
         let changed: Vec<&str> = delta.groups.iter().map(|g| g.native.lua_name.as_str()).collect();
         assert_eq!(changed, ["AaNewNative", "RegisterCommand"]);
         assert_eq!(delta.functions, convert::functions(&new));
-        let encoded = encode_delta(&delta).unwrap();
+        let encoded = encode_delta(&delta, MAX_STORED_DELTA).unwrap();
         assert!(encoded.len() < 8 * 1024, "{} bytes", encoded.len());
+        assert_eq!(encode_delta(&delta, encoded.len()).as_ref(), Some(&encoded));
+        assert_eq!(encode_delta(&delta, encoded.len() - 1), None, "stops at the limit");
         let decoded = decode_delta(&encoded).unwrap();
         assert_eq!(decoded, delta);
         assert_eq!(apply(bundled, &decoded), new);
@@ -648,7 +915,7 @@ mod tests {
     fn without_network_the_bundled_natives_stay() {
         let mock = MockHost::install();
         let natives = Natives::bundled();
-        run(&natives).unwrap();
+        assert_eq!(update(&natives), 1);
         let n = last(&mock);
         assert_eq!((n.level, n.title.as_str()), (NotificationLevel::Warning, "CfxLua: natives could not be updated"));
         assert_eq!(
@@ -668,7 +935,7 @@ mod tests {
         let mock = MockHost::install().with_capabilities(NET);
         serve(&mock, databases(|_, t| t));
         let natives = Natives::bundled();
-        run(&natives).unwrap();
+        update(&natives);
         let n = last(&mock);
         assert_eq!((n.level, n.title.as_str()), (NotificationLevel::Info, "CfxLua: natives are up to date"));
         assert_eq!(n.body, "20,434 functions from the Cfx.re native database, already up to date.");
@@ -677,7 +944,7 @@ mod tests {
         assert_eq!(state.databases.len(), 4);
         assert!(now_secs() - state.checked < 60);
 
-        run(&natives).unwrap();
+        assert_eq!(update(&natives), 1, "the catalogs are loaded: nothing to convert");
         let second = &mock.requests()[4..];
         assert_eq!(second.len(), 4, "a 304 for the bundled content needs no second download");
         for r in second {
@@ -693,10 +960,11 @@ mod tests {
         let mock = MockHost::install().with_capabilities(NET);
         serve(&mock, databases(edited_gta5));
         let natives = Natives::bundled();
-        run(&natives).unwrap();
+        update(&natives);
         let n = last(&mock);
         assert_eq!((n.level, n.title.as_str()), (NotificationLevel::Info, "CfxLua: natives updated"));
         assert_eq!(n.body, "FiveM client natives (GTA V): 9,931 functions", "only the set of natives.json");
+        assert_eq!(take_changed(), [NativeSet::Gta5]);
         let stored = mock.storage();
         assert_eq!(
             stored.keys().filter(|k| k.starts_with("natives.delta.")).collect::<Vec<_>>(),
@@ -716,12 +984,104 @@ mod tests {
         assert!(gta5.get("GetGroundZFor_3dCoord").is_some_and(|n| n.description.starts_with("UPDATED: ")));
         assert!(fresh.catalog(NativeSet::Server).get("ZzNewNative").is_none());
 
-        // The database goes back to the bundled content: so does the set.
+        // The database goes back to the bundled content: so does the set, in one conversion.
         serve(&mock, databases(|_, t| t));
-        run(&natives).unwrap();
+        assert_eq!(update(&natives), 1);
         assert_eq!(last(&mock).body, "FiveM client natives (GTA V): 9,930 functions");
         assert!(!mock.storage().contains_key("natives.delta.gta5"));
         assert_eq!(current_delta(NativeSet::Gta5), None);
+    }
+
+    #[test]
+    fn an_update_split_over_calls_stores_what_one_pass_would() {
+        let mock = MockHost::install().with_capabilities(NET);
+        let bodies = databases(edited_everywhere);
+        serve(&mock, bodies.clone());
+        let natives = Natives::bundled();
+        start(&natives, &Game::ALL, true, MAX_STORED_DELTA);
+        assert!(pending() && mock.notifications().is_empty(), "one summary, at the end");
+        let calls = finish(&natives);
+        assert!(calls >= 3, "{calls} calls");
+        assert_eq!(mock.tasks().len(), calls);
+        assert_eq!(mock.notifications().len(), 1);
+        assert_eq!(
+            last(&mock).body,
+            "FiveM client natives (GTA V): 9,932 functions\nRedM client natives (RDR3): 10,111 functions\n\
+             Server natives (FXServer): 395 functions"
+        );
+        let mut changed = take_changed();
+        changed.sort();
+        assert_eq!(changed, NativeSet::ALL);
+        let texts: HashMap<Database, &str> = Database::ALL.into_iter().map(|d| (d, bodies[d.url()].as_str())).collect();
+        for set in NativeSet::ALL {
+            let inputs = sources::databases(set)
+                .iter()
+                .map(|d| (d.id().to_owned(), sources::fingerprint(texts[d].as_bytes())))
+                .collect();
+            let new = sources::groups(set, |d| texts.get(&d).copied()).unwrap();
+            let expected = diff(set, &sources::bundled_groups(set), new, inputs);
+            assert!(!expected.groups.is_empty(), "{set:?}");
+            assert_eq!(read_stored(set).as_ref(), Some(&expected), "{set:?}");
+        }
+    }
+
+    #[test]
+    fn only_the_sets_of_the_project_are_updated() {
+        let mock = MockHost::install();
+        let natives = Natives::bundled();
+        let mut ws = Workspace::new("/srv");
+        let games_of = |ws: Option<&Workspace>| command(&mock, &natives, ws, games);
+        assert_eq!(games_of(None), Game::ALL);
+        assert_eq!(games_of(Some(&ws)), Game::ALL, "no manifest read yet");
+        ws.set("/srv/res/fxmanifest.lua", Some("fx_version 'cerulean'\ngame 'rdr3'\n"));
+        assert_eq!(games_of(Some(&ws)), [Game::Rdr3]);
+
+        let mock = MockHost::install().with_capabilities(NET);
+        serve(&mock, databases(edited_everywhere));
+        ws.set("/srv/res/fxmanifest.lua", Some("fx_version 'cerulean'\ngame 'gta5'\n"));
+        command(&mock, &natives, Some(&ws), run).unwrap();
+        finish(&natives);
+        let urls: Vec<String> = mock.requests().into_iter().map(|r| r.url).collect();
+        assert_eq!(urls, [Database::Gta5.url(), Database::Cfx.url()]);
+        assert_eq!(
+            last(&mock).body,
+            "FiveM client natives (GTA V): 9,932 functions\nServer natives (FXServer): 395 functions"
+        );
+        assert!(!mock.storage().contains_key("natives.delta.rdr3") && known(NativeSet::Rdr3).is_none());
+    }
+
+    #[test]
+    fn the_update_goes_on_in_later_calls() {
+        let mock = MockHost::install().with_capabilities(NET);
+        serve(&mock, databases(edited_gta5));
+        let natives = Natives::bundled();
+        command(&mock, &natives, None, scheduled).unwrap();
+        assert!(pending() && mock.notifications().is_empty());
+        let state: State = serde_json::from_str(&mock.storage()[STATE_KEY]).unwrap();
+        assert!(now_secs() - state.checked < 60, "the check is recorded before the work");
+        command(&mock, &natives, None, scheduled).unwrap();
+        assert!(!pending());
+        assert_eq!(mock.requests().len(), 4, "continued, not started again");
+        assert_eq!(last(&mock).body, "FiveM client natives (GTA V): 9,931 functions");
+        assert!(mock.storage().contains_key("natives.delta.gta5"));
+    }
+
+    #[test]
+    fn an_interrupted_update_waits_for_the_next_check() {
+        let mock = MockHost::install().with_capabilities(NET);
+        serve(&mock, databases(edited_gta5));
+        let natives = Natives::bundled();
+        command(&mock, &natives, None, scheduled).unwrap();
+        assert!(pending());
+        // The instance is reclaimed in between.
+        JOB.with(|j| j.borrow_mut().take());
+        command(&mock, &natives, None, scheduled).unwrap();
+        assert!(!resume(&natives));
+        assert_eq!(mock.requests().len(), 4, "no new check before the interval");
+        assert!(mock.notifications().is_empty() && !mock.storage().contains_key("natives.delta.gta5"));
+
+        update(&natives);
+        assert_eq!(last(&mock).body, "FiveM client natives (GTA V): 9,931 functions");
     }
 
     #[test]
@@ -729,7 +1089,8 @@ mod tests {
         let mock = MockHost::install().with_capabilities(NET);
         serve(&mock, databases(edited_gta5));
         let natives = Natives::bundled();
-        run_with(&natives, true, 16).unwrap();
+        start(&natives, &Game::ALL, true, 16);
+        finish(&natives);
         assert_eq!(
             last(&mock).body,
             "FiveM client natives (GTA V): 9,931 functions\n\
@@ -744,11 +1105,12 @@ mod tests {
         let mock = MockHost::install().with_capabilities(NET);
         serve(&mock, databases(|d, t| if d == Database::Cfx { "<html><body>502</body></html>".into() } else { t }));
         let natives = Natives::bundled();
-        run(&natives).unwrap();
+        update(&natives);
         let n = last(&mock);
         assert_eq!((n.level, n.title.as_str()), (NotificationLevel::Warning, "CfxLua: natives could not be updated"));
         assert!(n.body.starts_with("cfx: invalid content (invalid JSON: "), "{}", n.body);
         assert!(n.body.ends_with(": the natives bundled with the plugin are used."), "{}", n.body);
+        assert_eq!(n.body.matches("cfx:").count(), 1, "reported once: {}", n.body);
         let state: State = serde_json::from_str(&mock.storage()[STATE_KEY]).unwrap();
         assert!(!state.databases.contains_key("cfx") && state.databases.contains_key("gta5"));
     }
@@ -768,6 +1130,7 @@ mod tests {
         scheduled_with(&Settings::defaults());
         assert_eq!(mock.requests().len(), 4);
         assert!(mock.notifications().is_empty(), "unchanged: silent");
+        assert!(!pending());
         scheduled_with(&Settings::defaults());
         assert_eq!(mock.requests().len(), 4, "checked less than a day ago");
 

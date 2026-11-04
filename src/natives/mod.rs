@@ -6,7 +6,7 @@ mod sources;
 mod update;
 
 pub use feature::{NativesFeature, WRONG_SIDE, markdown};
-pub use update::{AUTO_UPDATE, SCHEDULED_UPDATE, UPDATE, take_changed};
+pub use update::{AUTO_UPDATE, SCHEDULED_UPDATE, UPDATE, resume, take_changed};
 
 pub use model::{Native, NativeSet, Param, Return};
 
