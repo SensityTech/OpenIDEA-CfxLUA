@@ -14,7 +14,8 @@ $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
 if (-not ((rustup target list --installed) -contains 'wasm32-wasip2')) { rustup target add wasm32-wasip2 }
-cargo build --release --locked --target wasm32-wasip2
+# Through cmd: Windows PowerShell turns a native command's stderr (cargo's progress) into errors.
+cmd /c "cargo build --release --locked --target wasm32-wasip2 2>&1"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 New-Item -ItemType Directory -Force dist | Out-Null
 Copy-Item target\wasm32-wasip2\release\openidea_cfxlua.wasm dist\plugin.wasm -Force
@@ -29,7 +30,7 @@ if ($Pack) {
   New-Item -ItemType Directory -Force (Join-Path $stage 'dist') | Out-Null
   Copy-Item plugin.toml, settings.schema.json, LICENSE, NOTICE $stage
   Copy-Item dist\plugin.wasm (Join-Path $stage 'dist')
-  Copy-Item icons, templates, web $stage -Recurse
+  foreach ($d in 'icons', 'templates', 'web') { if (Test-Path $d) { Copy-Item $d $stage -Recurse } }
   # Entries named with forward slashes (Compress-Archive on Windows PowerShell writes backslashes).
   Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
   $out = Join-Path $root "dist\$id-$version.oiplugin"

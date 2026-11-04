@@ -1,0 +1,43 @@
+{
+  "properties": {
+    "enabled": {
+      "type": "boolean",
+      "title": "Enable FiveM / RedM support",
+      "description": "Master switch: natives, the Cfx runtime API and every CfxLua feature. Turn it off in projects that are not FiveM or RedM resources.",
+      "default": true
+    },
+    "game": {
+      "type": "string",
+      "title": "Game",
+      "description": "Whose client natives scripts see. Auto reads the game / games directives of the project's fxmanifest.lua files (FiveM when none says).",
+      "enum": ["auto", "fivem", "redm", "both"],
+      "default": "auto"
+    },
+    "clientNatives": {
+      "type": "boolean",
+      "title": "Client natives and client runtime API",
+      "default": true
+    },
+    "serverNatives": {
+      "type": "boolean",
+      "title": "Server natives and server runtime API",
+      "default": true
+    },
+    "runtimeApi": {
+      "type": "boolean",
+      "title": "Cfx runtime API (Citizen, events, exports, state bags, json, msgpack, ...)",
+      "default": true
+    },
+    "showDeprecatedAliasesInCompletion": {
+      "type": "boolean",
+      "title": "Show deprecated native aliases (old names) in completion",
+      "default": false
+    },
+    "showUnnamedNativesInCompletion": {
+      "type": "boolean",
+      "title": "Show unnamed natives (N_0x...) in completion",
+      "description": "Hidden natives are still recognised: existing scripts are not flagged.",
+      "default": false
+    }
+  }
+}

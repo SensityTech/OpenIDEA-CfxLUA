@@ -1,0 +1,47 @@
+id = "sensity.cfxlua"
+name = "OpenIDEA-CfxLUA"
+version = "0.1.0"
+description = "FiveM and RedM (CfxLua) support: natives of the right game and side, client/server awareness, the Cfx runtime API, state bags, events, fxmanifest, NUI, magic values, CfxLua syntax checks, Asset Escrow and built-in documentation."
+authors = ["SensityTech"]
+homepage = "https://github.com/SensityTech/OpenIDEA-CfxLUA"
+license = "Apache-2.0"
+change-notes = "0.1.0 — first release: the OpenIDEA port of Sensity DevKit."
+engines.openidea = "^1.0"
+wasm = "dist/plugin.wasm"
+activation = ["on-language:lua", "on-view:docs", "on-schedule:21600"]
+
+[capabilities]
+# project.read: index the resources (manifests, scripts, NUI pages) and publish problems.
+# editor.read / editor.write: commands and the tool window act on the focused editor.
+# storage: natives updates and tool window preferences. events: saved files, focused editor.
+required = ["project.read", "editor.read", "editor.write", "storage", "events"]
+# Natives updates (the Cfx.re database and the RDR3 NativeDB); copy buttons of the tool window.
+optional = ["net:static.cfx.re", "net:raw.githubusercontent.com", "clipboard"]
+
+[[contributes.providers]]
+kinds = ["completion", "definition", "line-markers", "code-actions"]
+languages = ["lua"]
+
+[[contributes.views]]
+id = "docs"
+title = "CfxLua"
+icon = "file-lua"
+location = "left"
+web = "web/index.html"
+
+[[contributes.statusBar]]
+id = "side"
+text = "CfxLua"
+tooltip = "OpenIDEA-CfxLUA"
+command = "show-docs"
+align = "right"
+priority = 100
+
+[[contributes.commands]]
+id = "show-docs"
+title = "CfxLua: Show Documentation"
+category = "CfxLua"
+
+[contributes.settings]
+title = "OpenIDEA-CfxLUA"
+schema = "settings.schema.json"
