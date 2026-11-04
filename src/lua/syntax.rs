@@ -79,6 +79,16 @@ impl Source {
         self.toks.get(i).is_some_and(|t| t.is_op(&self.text, op))
     }
 
+    /// The `?` of safe navigation, followed by `.`, `:`, `[` or call arguments (spaces allowed).
+    pub fn is_safe_nav(&self, i: usize) -> bool {
+        self.is_op(i, "?")
+            && self.toks.get(i + 1).is_some_and(|t| match t.kind {
+                Tok::Op => matches!(t.text(&self.text), "." | ":" | "[" | "(" | "{"),
+                Tok::Str { .. } | Tok::LongStr | Tok::Hash { .. } => true,
+                _ => false,
+            })
+    }
+
     pub fn is_kw(&self, i: usize, kw: &str) -> bool {
         self.toks.get(i).is_some_and(|t| t.is_kw(&self.text, kw))
     }
@@ -132,7 +142,7 @@ impl Source {
             // Not a chain start when it continues one (`a.b`, `a:b`, `a?.b`), or names a field in a table constructor.
             if i > 0 {
                 let p = self.toks[i - 1];
-                if p.kind == Tok::Op && matches!(p.text(&self.text), "." | ":" | "?." | "?:" | "::") {
+                if p.kind == Tok::Op && matches!(p.text(&self.text), "." | ":" | "::") {
                     continue;
                 }
             }
@@ -149,15 +159,17 @@ impl Source {
             let t = self.toks[i];
             let text = t.text(&self.text);
             match (t.kind, text) {
-                (Tok::Op, "." | "?.") if self.is_name(i + 1) => {
-                    segs.push(Seg::Field { name: self.tok_text(i + 1).to_owned(), tok: i + 1, safe: text == "?." });
+                (Tok::Op, "?") if self.is_safe_nav(i) => i += 1,
+                (Tok::Op, ".") if self.is_name(i + 1) => {
+                    let safe = self.is_op(i - 1, "?");
+                    segs.push(Seg::Field { name: self.tok_text(i + 1).to_owned(), tok: i + 1, safe });
                     i += 2;
                 }
-                (Tok::Op, ":" | "?:") if self.is_name(i + 1) => {
+                (Tok::Op, ":") if self.is_name(i + 1) => {
                     segs.push(Seg::Method { name: self.tok_text(i + 1).to_owned(), tok: i + 1 });
                     i += 2;
                 }
-                (Tok::Op, "[" | "?[") => {
+                (Tok::Op, "[") => {
                     let close = self.pair[i];
                     segs.push(Seg::Index { open: i, close });
                     match close {
@@ -218,7 +230,7 @@ impl Source {
             }
             if t.kind == Tok::Op {
                 match t.text(&self.text) {
-                    "(" | "[" | "{" | "?[" => {
+                    "(" | "[" | "{" => {
                         if let Some(c) = self.pair[i] {
                             i = c.min(to);
                         } else {
@@ -322,7 +334,7 @@ fn match_brackets(src: &str, toks: &[Token]) -> Vec<Option<usize>> {
                 stack.push((i, b')'));
                 continue;
             }
-            "[" | "?[" => {
+            "[" => {
                 stack.push((i, b']'));
                 continue;
             }
@@ -361,6 +373,18 @@ mod tests {
         let set = &calls[1];
         assert_eq!(set.args.len(), 3);
         assert_eq!(s.string_at(s.string_arg(set.args[0]).unwrap()).as_deref(), Some("job"));
+    }
+
+    #[test]
+    fn safe_navigation_allows_spaces_after_the_question_mark() {
+        let s = Source::new("local j = LocalPlayer ? . state ? : get('job')\ncb?[[text]]\nlocal y = x ? 1 : 2");
+        let chains = s.chains();
+        let calls = s.calls(&chains);
+        let callees: Vec<&str> = calls.iter().map(|c| c.callee.as_str()).collect();
+        assert_eq!(callees, ["LocalPlayer.state:get", "cb"]);
+        let player = chains.iter().find(|c| c.head == "LocalPlayer").unwrap();
+        assert!(matches!(&player.segs[0], Seg::Field { name, safe: true, .. } if name == "state"));
+        assert!(!s.is_safe_nav(s.toks.iter().rposition(|t| t.is_op(&s.text, "?")).unwrap()), "`x ? 1` is not");
     }
 
     #[test]

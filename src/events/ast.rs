@@ -841,7 +841,7 @@ impl<'a> Parser<'a> {
         while self.i < self.limit {
             let t = self.src.toks[self.i];
             match (t.kind, self.text_at(self.i)) {
-                (Tok::Op, "." | "?.") => {
+                (Tok::Op, ".") => {
                     if self.name_at(self.i + 1) {
                         self.i += 2;
                         e = self.push_expr(ExprKind::Index(e, Key::Field(Some(self.i as u32 - 1))), first);
@@ -851,7 +851,7 @@ impl<'a> Parser<'a> {
                         break;
                     }
                 }
-                (Tok::Op, ":" | "?:") => {
+                (Tok::Op, ":") => {
                     if !self.name_at(self.i + 1) {
                         self.i += 1;
                         e = self.push_expr(ExprKind::Index(e, Key::Method(None)), first);
@@ -866,14 +866,13 @@ impl<'a> Parser<'a> {
                     let args = self.args();
                     e = self.push_expr(ExprKind::Call(callee, args), first);
                 }
-                (Tok::Op, "[" | "?[") => {
+                (Tok::Op, "[") => {
                     let close = self.src.pair[self.i];
                     self.i += 1;
                     let key = self.within(close, |p| p.expr());
                     e = self.push_expr(ExprKind::Index(e, Key::Bracket(key)), first);
                 }
-                // `f?(…)`
-                (Tok::Unknown, "?") if self.op_at(self.i + 1, "(") => self.i += 1,
+                (Tok::Op, "?") if self.src.is_safe_nav(self.i) => self.i += 1,
                 _ if self.args_start() => {
                     let args = self.args();
                     e = self.push_expr(ExprKind::Call(e, args), first);

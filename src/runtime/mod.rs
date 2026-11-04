@@ -43,8 +43,8 @@ impl Feature for RuntimeFeature {
         let src = &doc.src;
         let prev = src.tok_before(start).filter(|&p| src.toks[p].end <= start);
         match prev.map(|p| (p, src.tok_text(p))) {
-            Some((p, "." | "?.")) => member_items(rt, &parts, src, p, false),
-            Some((p, ":" | "?:")) => member_items(rt, &parts, src, p, true),
+            Some((p, ".")) => member_items(rt, &parts, src, p, false),
+            Some((p, ":")) => member_items(rt, &parts, src, p, true),
             Some((_, "local" | "function" | "goto" | "::")) => Vec::new(),
             _ => global_items(rt, &parts, prefix),
         }
@@ -108,10 +108,13 @@ fn expression_type<'a>(rt: &'a Runtime, parts: &[Part], src: &Source, op: usize)
     let mut segs = Vec::new();
     let mut k = op.checked_sub(1)?;
     let head = loop {
+        if src.is_op(k, "?") {
+            k = k.checked_sub(1)?;
+        }
         if src.is_name(k) {
             let name = src.tok_text(k);
             match k.checked_sub(1).map(|p| src.tok_text(p)) {
-                Some("." | "?." | ":" | "?:") => {
+                Some("." | ":") => {
                     segs.push(Seg::Member(name));
                     k = k.checked_sub(2)?;
                 }

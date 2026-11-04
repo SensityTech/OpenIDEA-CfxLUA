@@ -110,7 +110,7 @@ fn word_start(src: &Source, at: usize) -> Option<usize> {
     if let Some(t) = src.tok_before(start).map(|i| src.toks[i]) {
         let s = t.text(text);
         let blocked = match t.kind {
-            Tok::Op => matches!(s, "." | ":" | "?." | "?:" | "::"),
+            Tok::Op => matches!(s, "." | ":" | "::"),
             Tok::Keyword => matches!(s, "local" | "function" | "goto"),
             Tok::Number => s.ends_with('.'),
             _ => false,

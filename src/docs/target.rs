@@ -48,8 +48,7 @@ pub fn find<'a>(doc: &Doc, at: usize, natives: &'a Natives, sets: &[NativeSet]) 
             (!event.is_pattern()).then_some(Target::Event(event))
         }
         Tok::Name => {
-            let member = i > 0 && matches!(src.tok_text(i - 1), "." | ":" | "?." | "?:")
-                || i > 0 && src.is_kw(i - 1, "function");
+            let member = i > 0 && matches!(src.tok_text(i - 1), "." | ":") || i > 0 && src.is_kw(i - 1, "function");
             if member {
                 return None;
             }

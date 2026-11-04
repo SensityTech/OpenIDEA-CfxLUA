@@ -482,19 +482,10 @@ impl Parser<'_> {
         };
         while let Some(t) = self.src.toks.get(j) {
             match (t.kind, t.text(&self.src.text)) {
-                (Tok::Op, "." | "?." | ":" | "?:") if self.name(j + 1) => j += 2,
-                (Tok::Op, "[" | "?[" | "(" | "{") => j = self.group(j),
+                (Tok::Op, "." | ":") if self.name(j + 1) => j += 2,
+                (Tok::Op, "[" | "(" | "{") => j = self.group(j),
                 (Tok::Str { .. } | Tok::LongStr | Tok::Hash { .. }, _) => j += 1,
-                // `f?(x)`, `f?{…}`, `f?'s'`: the lexer leaves a lone `?` unknown.
-                (Tok::Unknown, "?")
-                    if self.op(j + 1, "(")
-                        || self.op(j + 1, "{")
-                        || self
-                            .kind(j + 1)
-                            .is_some_and(|k| matches!(k, Tok::Str { .. } | Tok::LongStr | Tok::Hash { .. })) =>
-                {
-                    j += 1
-                }
+                (Tok::Op, "?") if self.src.is_safe_nav(j) => j += 1,
                 _ => break,
             }
         }
@@ -604,10 +595,8 @@ pub fn is_var(src: &Source, (a, b): Span) -> bool {
     }
     let last = src.toks[b - 1];
     match last.kind {
-        Tok::Name => src.is_op(b - 2, ".") || src.is_op(b - 2, "?."),
-        Tok::Op if last.text(&src.text) == "]" => {
-            src.pair[b - 1].is_some_and(|o| src.is_op(o, "[") || src.is_op(o, "?["))
-        }
+        Tok::Name => src.is_op(b - 2, "."),
+        Tok::Op if last.text(&src.text) == "]" => src.pair[b - 1].is_some_and(|o| src.is_op(o, "[")),
         _ => false,
     }
 }

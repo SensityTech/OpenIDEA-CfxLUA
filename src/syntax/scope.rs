@@ -242,7 +242,7 @@ impl<'a> Walker<'a> {
 fn is_reference(src: &Source, i: usize) -> bool {
     if i > 0 {
         let p = src.toks[i - 1];
-        if p.kind == Tok::Op && matches!(p.text(&src.text), "." | ":" | "?." | "?:" | "::") {
+        if p.kind == Tok::Op && matches!(p.text(&src.text), "." | ":" | "::") {
             return false;
         }
         if p.is_kw(&src.text, "goto") {

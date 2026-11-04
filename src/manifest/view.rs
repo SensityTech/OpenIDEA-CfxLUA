@@ -116,7 +116,7 @@ fn depths(src: &Source) -> Vec<u32> {
                 return depth;
             }
             match t.text(&src.text) {
-                "(" | "[" | "{" | "?[" => {
+                "(" | "[" | "{" => {
                     depth += 1;
                     depth - 1
                 }
@@ -146,7 +146,7 @@ pub fn at_depth_zero(src: &Source, at: usize) -> bool {
     for t in src.toks.iter().take_while(|t| t.start < at) {
         if t.kind == Tok::Op {
             match t.text(&src.text) {
-                "(" | "[" | "{" | "?[" => depth += 1,
+                "(" | "[" | "{" => depth += 1,
                 ")" | "]" | "}" => depth -= 1,
                 _ => {}
             }

@@ -180,8 +180,8 @@ pub const KEYWORDS: &[&str] = &[
 
 const OPS: &[&str] = &[
     "...", "<<=", ">>=", "//=", "..=", "==", "~=", "<=", ">=", "//", "::", "..", "<<", ">>", "+=", "-=", "*=", "/=",
-    "%=", "&=", "|=", "^=", "!=", "?.", "?[", "?:", "++", "+", "-", "*", "/", "%", "^", "#", "&", "~", "|", "<", ">",
-    "=", "(", ")", "{", "}", "[", "]", ";", ":", ",", ".", "!",
+    "%=", "&=", "|=", "^=", "!=", "?", "++", "+", "-", "*", "/", "%", "^", "#", "&", "~", "|", "<", ">", "=", "(", ")",
+    "{", "}", "[", "]", ";", ":", ",", ".", "!",
 ];
 
 pub fn is_keyword(s: &str) -> bool {
@@ -350,7 +350,14 @@ mod tests {
         assert!(k.contains(&(Tok::Op, "&=")));
         assert!(k.contains(&(Tok::Number, "0x4")));
         assert!(k.contains(&(Tok::CComment, "/* c */")));
-        assert_eq!(k.iter().filter(|(t, s)| *t == Tok::Op && *s == "?.").count(), 2);
+        assert_eq!(k.iter().filter(|(t, s)| *t == Tok::Op && *s == "?").count(), 2);
+    }
+
+    #[test]
+    fn question_mark_is_its_own_token() {
+        assert_eq!(kinds("x ? . y"), [(Tok::Name, "x"), (Tok::Op, "?"), (Tok::Op, "."), (Tok::Name, "y")]);
+        assert_eq!(kinds("x?[[s]]"), [(Tok::Name, "x"), (Tok::Op, "?"), (Tok::LongStr, "[[s]]")]);
+        assert_eq!(kinds("a??b")[1..3], [(Tok::Op, "?"), (Tok::Op, "?")]);
     }
 
     #[test]

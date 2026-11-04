@@ -1148,18 +1148,20 @@ impl<'a> Parser<'a> {
         for _ in 0..MAX_DEPTH {
             let i = self.pos;
             match (self.kind(i), self.text(i)) {
-                (Some(Tok::Op), "." | "?.") if self.kind(i + 1) == Some(Tok::Name) => {
+                (Some(Tok::Op), "?") if self.src.is_safe_nav(i) => self.pos += 1,
+                (Some(Tok::Op), ".") if self.kind(i + 1) == Some(Tok::Name) => {
                     let name = self.text(i + 1).to_owned();
                     self.pos += 2;
-                    e = self.push(ExprKind::Field { obj: e, name, safe: self.text(i) == "?." }, first);
+                    let safe = self.src.is_op(i - 1, "?");
+                    e = self.push(ExprKind::Field { obj: e, name, safe }, first);
                 }
-                (Some(Tok::Op), "[" | "?[") => {
+                (Some(Tok::Op), "[") => {
                     let close = self.src.pair[i].filter(|&c| c < self.limit);
                     self.pos += 1;
                     let key = self.bounded_index(close);
                     e = self.push(ExprKind::Index { obj: e, key }, first);
                 }
-                (Some(Tok::Op), ":" | "?:") if self.kind(i + 1) == Some(Tok::Name) => {
+                (Some(Tok::Op), ":") if self.kind(i + 1) == Some(Tok::Name) => {
                     let method = self.text(i + 1).to_owned();
                     self.pos += 2;
                     let args = self.call_args();

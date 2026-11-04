@@ -131,11 +131,11 @@ fn needs_parens(src: &Source, (a, b): Span) -> bool {
         let t = src.toks[i];
         match t.kind {
             Tok::Op => match t.text(&src.text) {
-                "(" | "[" | "{" | "?[" => {
+                "(" | "[" | "{" => {
                     i = src.pair[i].map_or(b, |c| c + 1);
                     continue;
                 }
-                "." | ":" | "?." | "?:" => {}
+                "." | ":" | "?" => {}
                 _ => return true,
             },
             Tok::Keyword if matches!(t.text(&src.text), "and" | "or" | "not") => return true,
@@ -173,12 +173,12 @@ fn decrements(src: &Source, scopes: &Scopes, stmts: &[&Stmt], out: &mut Vec<Prob
                 !declared && !label
             }
             Tok::Op if p.text(&src.text) == "]" => src.pair[k].is_some_and(|o| {
-                src.is_op(o, "?[")
-                    || (o > 0
-                        && src.is_op(o, "[")
-                        && (matches!(src.toks[o - 1].kind, Tok::Name | Tok::Str { .. } | Tok::LongStr)
-                            || src.is_op(o - 1, ")")
-                            || src.is_op(o - 1, "]")))
+                o > 0
+                    && src.is_op(o, "[")
+                    && (matches!(src.toks[o - 1].kind, Tok::Name | Tok::Str { .. } | Tok::LongStr)
+                        || src.is_op(o - 1, ")")
+                        || src.is_op(o - 1, "]")
+                        || src.is_op(o - 1, "?"))
             }),
             _ => false,
         };

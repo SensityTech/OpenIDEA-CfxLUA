@@ -151,7 +151,7 @@ pub fn syntax_error(src: &Source) -> Option<(usize, String)> {
         let text = t.text(&src.text);
         let next = src.toks.get(i + 1);
         match text {
-            "(" | "[" | "{" | "?[" if src.pair[i].is_none() && unclosed.is_none() => {
+            "(" | "[" | "{" if src.pair[i].is_none() && unclosed.is_none() => {
                 let close = match text {
                     "(" => ")",
                     "{" => "}",
