@@ -89,19 +89,19 @@ iconDark = "icons/fxmanifest_dark.svg"
 
 [[contributes.fileIcons]]
 id = "lua-client"
-patterns = ["client.lua", "cl_*.lua"]
+patterns = ["client.lua", "cl_*.lua", "client_*.lua", "*_client.lua", "*_cl.lua"]
 icon = "icons/luaClient.svg"
 iconDark = "icons/luaClient_dark.svg"
 
 [[contributes.fileIcons]]
 id = "lua-server"
-patterns = ["server.lua", "sv_*.lua"]
+patterns = ["server.lua", "sv_*.lua", "server_*.lua", "*_server.lua", "*_sv.lua"]
 icon = "icons/luaServer.svg"
 iconDark = "icons/luaServer_dark.svg"
 
 [[contributes.fileIcons]]
 id = "lua-shared"
-patterns = ["shared.lua", "sh_*.lua"]
+patterns = ["shared.lua", "sh_*.lua", "shared_*.lua", "*_shared.lua", "*_sh.lua"]
 icon = "icons/luaShared.svg"
 iconDark = "icons/luaShared_dark.svg"
 

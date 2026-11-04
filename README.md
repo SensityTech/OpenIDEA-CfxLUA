@@ -325,6 +325,7 @@ the closest equivalent:
 | Rename and Find Usages | Go to Definition lists every match |
 | Creating files (New Resource) | One **New** template per file |
 | Opening links from the tool window | URLs are shown with a copy button |
+| File icons by side (a plugin's file icons match file names only) | `client.lua`, `cl_*.lua`, `*_client.lua`… (and the server and shared equivalents) get the side icons; a `client/main.lua` keeps the Lua icon, and the status bar shows its side |
 
 ## Building from source
 
