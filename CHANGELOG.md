@@ -5,11 +5,24 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-04
+
+### Changed
+
+- **Built on the final shape of plugin API 1.0.** OpenIDEA changed plugin API 1.0 types before releasing it
+  ([l0ng-ai/openidea#1245](https://github.com/l0ng-ai/openidea/pull/1245)): 0.1.1 installs in OpenIDEA builds from
+  that change on but does not start ("expected `string` found `enum`"). 0.1.2 is built against OpenIDEA
+  [`859f634`](https://github.com/l0ng-ai/openidea/commit/859f63454eed53ae97eb5881d5f076504848a6aa), and needs an
+  OpenIDEA built at that revision until a release ships plugin API 1.0.
+- The manifest declares its marketplace categories: frameworks, linters, tools.
+
 ### Added
 
+- Deprecated manifest directives (`lua54`, `resource_manifest_version` in an fxmanifest, `before_level_meta`,
+  `after_level_meta`) are struck through.
 - **A signed marketplace.** Every release is also published, signed by the `sensity` publisher, with the `index.json`
-  OpenIDEA reads in **Settings › Plugins › Available**: installs from there are checked against the publisher's key,
-  and new versions are offered as updates. The package file of a release stays unsigned. The marketplace copy is
+  OpenIDEA reads from **Settings › Plugins** › gear menu › **Plugin Repository…**: installs from there are checked
+  against the publisher's key, and new versions are offered as updates. The package file of a release stays unsigned. The marketplace copy is
   signed on Windows: on Linux and macOS OpenIDEA refuses it until
   [l0ng-ai/openidea#1258](https://github.com/l0ng-ai/openidea/issues/1258) is fixed.
 - A daily workflow installs the latest release of the plugin with every new OpenIDEA release (its own
@@ -19,9 +32,8 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
 ### Fixed
 
 - **The OpenIDEA requirement.** The plugin needs plugin API 1.0, which no OpenIDEA release has yet (0.1.35 ships
-  plugin API 0.1): OpenIDEA must be built from source at `4c5b6de`, not "0.1.35 or newer"
-  ([#1](https://github.com/SensityTech/OpenIDEA-CfxLUA/issues/1)). Later revisions changed plugin API 1.0 before its
-  release and do not run 0.1.1.
+  plugin API 0.1), not "OpenIDEA 0.1.35 or newer" ([#1](https://github.com/SensityTech/OpenIDEA-CfxLUA/issues/1)).
+- `change-notes` of the manifest still described 0.1.0.
 
 ## [0.1.1] - 2026-11-04
 
@@ -80,6 +92,7 @@ First preview release.
 - **Asset Escrow**: per-file encryption status, checks and a pre-upload checklist.
 - **The CfxLua tool window**: natives browser, runtime API, events, manifest directives, syntax features and guides.
 
-[Unreleased]: https://github.com/SensityTech/OpenIDEA-CfxLUA/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/SensityTech/OpenIDEA-CfxLUA/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/SensityTech/OpenIDEA-CfxLUA/releases/tag/v0.1.2
 [0.1.1]: https://github.com/SensityTech/OpenIDEA-CfxLUA/releases/tag/v0.1.1
 [0.1.0]: https://github.com/SensityTech/OpenIDEA-CfxLUA/releases/tag/v0.1.0
