@@ -36,6 +36,10 @@ use workspace::Workspace;
 
 pub const STATUS_SIDE: &str = "side";
 const SCAN_BUDGET_MS: u128 = 40_000;
+// Indexing slices: at activation, per event batch, and on the editing path (shared 50 ms budget).
+const ACTIVATION_INDEX_MS: u128 = 1_000;
+const EVENT_INDEX_MS: u128 = 1_500;
+const EDIT_INDEX_MS: u128 = 4;
 
 pub fn all_features() -> Vec<Box<dyn Feature>> {
     vec![
@@ -60,6 +64,7 @@ pub struct DevKit {
     natives: Natives,
     workspaces: Vec<Workspace>,
     last: Option<(Doc, Option<Vec<Problem>>)>,
+    pending: Vec<(usize, String)>,
 }
 
 impl Default for DevKit {
@@ -71,6 +76,7 @@ impl Default for DevKit {
             natives: Natives::bundled(),
             workspaces: Vec::new(),
             last: None,
+            pending: Vec::new(),
         }
     }
 }
@@ -145,23 +151,51 @@ impl DevKit {
             }
         }
         ws.scanned = true;
-        let ws = &self.workspaces[i];
-        for f in ws.files() {
+        let readable: Vec<String> = ws.files().filter(|f| f.text.is_some()).map(|f| f.path.clone()).collect();
+        self.pending.extend(readable.into_iter().map(|p| (i, p)));
+        let games = natives::project_games(&self.settings, &self.workspaces[i].detected_games());
+        for set in games.into_iter().map(natives::NativeSet::for_game).chain([natives::NativeSet::Server]) {
+            self.natives.catalog(set);
+        }
+        self.index_pending(ACTIVATION_INDEX_MS);
+        host::log(
+            LogLevel::Info,
+            &format!(
+                "read {total} files of {root} in {} ms, {} left to index",
+                start.elapsed().as_millis(),
+                self.pending.len()
+            ),
+        );
+    }
+
+    // A call has a fixed CPU budget (fuel): big projects are indexed in slices over several calls.
+    fn index_pending(&mut self, budget_ms: u128) {
+        if self.pending.is_empty() {
+            return;
+        }
+        let start = std::time::Instant::now();
+        let mut touched: Vec<usize> = Vec::new();
+        while start.elapsed().as_millis() < budget_ms {
+            let Some((i, path)) = self.pending.pop() else { break };
+            let ws = &self.workspaces[i];
+            let Some(f) = ws.file(&path) else { continue };
             let Some(text) = f.text.as_deref() else { continue };
             let src = parse(f.kind, text);
             for feature in &self.features {
                 feature.index_file(ws, &f.path, f.kind, &src);
             }
+            if !touched.contains(&i) {
+                touched.push(i);
+            }
         }
-        for feature in &self.features {
-            feature.indexed(ws);
+        for i in touched {
+            for feature in &self.features {
+                feature.indexed(&self.workspaces[i]);
+            }
         }
-        // Parse the natives the project uses now, not on the first keystroke.
-        let games = natives::project_games(&self.settings, &ws.detected_games());
-        for set in games.into_iter().map(natives::NativeSet::for_game).chain([natives::NativeSet::Server]) {
-            self.natives.catalog(set);
+        if self.pending.is_empty() {
+            self.last = None;
         }
-        host::log(LogLevel::Info, &format!("indexed {} files of {root} in {} ms", total, start.elapsed().as_millis()));
     }
 
     fn reread(&mut self, path: &str) {
@@ -202,6 +236,7 @@ impl DevKit {
         if !self.settings.enabled() {
             return None;
         }
+        self.index_pending(EDIT_INDEX_MS);
         let i = self.workspace_for(&d.path);
         let path = slash(&d.path);
         if let Some((doc, _)) = &self.last
@@ -386,6 +421,7 @@ impl Plugin for DevKit {
     }
 
     fn handle_events(&mut self, events: &[Event], ctx: &Invocation) {
+        self.index_pending(EVENT_INDEX_MS);
         for e in events {
             match e {
                 Event::FileSaved(path) => {
@@ -534,6 +570,47 @@ mod tests {
                 out.push((slash(&path.strip_prefix(root).unwrap().to_string_lossy()), text));
             }
         }
+    }
+
+    #[test]
+    #[ignore = "measurement: cargo test --release --lib index_cost_of_a_large_project -- --ignored --nocapture"]
+    fn index_cost_of_a_large_project() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut lua = Vec::new();
+        demo_files(&root.join("data/runtime"), &root.join("data/runtime"), &mut lua);
+        demo_files(&root.join("examples"), &root.join("examples"), &mut lua);
+        let bodies: Vec<String> = lua.into_iter().filter(|(p, _)| p.ends_with(".lua")).map(|(_, t)| t).collect();
+        let mut files = Vec::new();
+        for r in 0..150 {
+            let manifest =
+                "fx_version 'cerulean'\ngame 'gta5'\nclient_script 'client/*.lua'\nserver_script 'server/*.lua'\n";
+            files.push((format!("res{r}/fxmanifest.lua"), manifest.to_owned()));
+            for (i, body) in bodies.iter().enumerate() {
+                let side = if i % 2 == 0 { "client" } else { "server" };
+                files.push((format!("res{r}/{side}/f{i}.lua"), body.replace("shop:", &format!("res{r}:"))));
+            }
+        }
+        let lines: usize = files.iter().map(|(_, t)| t.lines().count()).sum();
+        let refs: Vec<(&str, &str)> = files.iter().map(|(p, t)| (p.as_str(), t.as_str())).collect();
+        let ws = Workspace::from_files("/big", &refs);
+        let features = all_features();
+        let start = std::time::Instant::now();
+        for f in ws.files() {
+            let Some(text) = f.text.as_deref() else { continue };
+            let src = parse(f.kind, text);
+            for feature in &features {
+                feature.index_file(&ws, &f.path, f.kind, &src);
+            }
+        }
+        let indexed = start.elapsed();
+        for feature in &features {
+            feature.indexed(&ws);
+        }
+        eprintln!(
+            "{} files, {lines} lines: index_file {indexed:?}, indexed {:?}",
+            files.len(),
+            start.elapsed() - indexed
+        );
     }
 
     #[test]
