@@ -17,9 +17,16 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   5,000-file project with the tool window open, no call uses more than 36% of the budget.
 - **lua-language-server stalled** (one core at 100%, empty completion) while the generated definitions file was open:
   about 40,000 of its lines ended with a space, and lua-language-server's trailing-space check is very slow on a file
-  that size. Run **CfxLua: Generate lua-language-server Definitions** again to rewrite the file.
+  that size, so its semantic colors never came either. Run **CfxLua: Generate lua-language-server Definitions** again
+  to rewrite the file: natives and the Cfx runtime API then take the library color, apart from your own functions,
+  parameters and fields.
 - Ctrl+click on a native said "Cannot find declaration to go to": native declarations now come from
   lua-language-server and the generated definitions, without reading that file on every hover.
+- **Natives listed up to four times in completion, and "Choose Declaration (3 found)" on Ctrl+click,** once the
+  generated definitions were loaded: this plugin listed the native, and lua-language-server once per game signature.
+  A native of several games now has one signature in the definitions (parameters some games lack are optional), and
+  this plugin leaves the natives and runtime API lua-language-server loads to it. The file's header says which games
+  and runtime parts it holds; this plugin still completes the natives of a game it lacks.
 - The status bar shows the side of the first file opened.
 - **CfxLua: Convert Coordinates** stays enabled when run from Find Action.
 

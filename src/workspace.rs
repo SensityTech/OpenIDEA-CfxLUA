@@ -1,3 +1,4 @@
+use crate::luals::{self, Contents, LUARC};
 use crate::project::{self, FileKind, Resource, Side};
 use crate::text::{parent, slash};
 use std::collections::BTreeMap;
@@ -35,6 +36,9 @@ pub struct Workspace {
     /// The first scan is still reading and indexing files.
     pub indexing: bool,
     pub native_backslashes: bool,
+    definitions: BTreeMap<String, Contents>,
+    /// What lua-language-server loads of the definitions this plugin wrote, and completes itself.
+    pub luals: Contents,
 }
 
 impl Workspace {
@@ -72,10 +76,17 @@ impl Workspace {
     pub fn set(&mut self, path: &str, text: Option<&str>) {
         let path = slash(path);
         let kind = project::file_kind(&path);
+        let definitions = match text.and_then(Contents::of) {
+            Some(contents) => self.definitions.insert(path.clone(), contents.clone()) != Some(contents),
+            None => self.definitions.remove(&path).is_some(),
+        };
         let text = text.filter(|t| t.len() <= MAX_FILE).map(Arc::from);
         if let Some(old) = self.files.get(&path)
             && old.text.as_deref() == text.as_deref()
         {
+            if definitions {
+                self.refresh_luals();
+            }
             return;
         }
         let manifest = kind == FileKind::Manifest;
@@ -85,7 +96,18 @@ impl Workspace {
         if manifest {
             self.reload_resource(parent(&path).to_owned());
         }
+        if definitions || self.is_luarc(&path) {
+            self.refresh_luals();
+        }
         self.generation += 1;
+    }
+
+    fn is_luarc(&self, path: &str) -> bool {
+        path.strip_prefix(self.root.as_str()).and_then(|r| r.strip_prefix('/')) == Some(LUARC)
+    }
+
+    fn refresh_luals(&mut self) {
+        self.luals = luals::loaded(self, self.definitions.iter());
     }
 
     fn reload_resource(&mut self, dir: String) {
@@ -109,6 +131,9 @@ impl Workspace {
             self.listing = LISTINGS.fetch_add(1, Ordering::Relaxed);
             if project::file_kind(&path) == FileKind::Manifest {
                 self.reload_resource(parent(&path).to_owned());
+            }
+            if self.definitions.remove(&path).is_some() || self.is_luarc(&path) {
+                self.refresh_luals();
             }
             self.generation += 1;
         }

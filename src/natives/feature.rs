@@ -38,7 +38,9 @@ impl Feature for NativesFeature {
         let Some(start) = word_start(&cx.doc.src, at) else { return Vec::new() };
         let query = cx.doc.text()[start..at].to_ascii_lowercase();
         let compact: Vec<u8> = query.bytes().filter(|&b| b != b'_').collect();
-        let sets = visible_sets(cx.settings, &cx.ws.detected_games(), cx.doc.side, resource_games(cx));
+        let mut sets = visible_sets(cx.settings, &cx.ws.detected_games(), cx.doc.side, resource_games(cx));
+        // lua-language-server completes the natives of its definitions: listed twice otherwise.
+        sets.retain(|s| !cx.ws.luals.sets.contains(s));
         let show_aliases = cx.settings.bool(keys::SHOW_DEPRECATED, false);
         let show_unnamed = cx.settings.bool(keys::SHOW_UNNAMED, false);
         let mut seen: HashSet<&str> = HashSet::new();
@@ -419,6 +421,26 @@ mod tests {
         let fx = fixture("res/client/main.lua", "Get<caret>")
             .with_settings(Settings::defaults().with("enabled", Value::from(false)));
         assert!(labels(&fx, "res/client/main.lua").is_empty());
+    }
+
+    #[test]
+    fn natives_of_lua_language_server_definitions_are_left_to_it() {
+        let only_gta = crate::luals::definitions(
+            &crate::natives::Natives::from_natives(Vec::new()),
+            &[NativeSet::Gta5],
+            &[crate::runtime::Part::Shared],
+        )
+        .0;
+        let mut fx = Fixture::new(&[
+            ("res/fxmanifest.lua", "fx_version 'cerulean'\ngames { 'gta5', 'rdr3' }\nclient_script 'client/*.lua'\n"),
+            ("res/client/main.lua", "local c = Get<caret>"),
+            (".cfxlua/natives.lua", &only_gta),
+        ])
+        .with_natives(natives());
+        assert!(labels(&fx, "res/client/main.lua").contains(&"GetEntityCoords".to_owned()), "no .luarc.json yet");
+        let luarc = fx.ws.absolute(crate::luals::LUARC);
+        fx.ws.set(&luarc, Some(include_str!("../../templates/luarc.json")));
+        assert_eq!(labels(&fx, "res/client/main.lua"), ["GetRdrOnly"], "only the game the definitions lack");
     }
 
     #[test]

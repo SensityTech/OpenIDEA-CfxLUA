@@ -29,7 +29,8 @@ pub fn visible_parts(settings: &Settings, side: Side) -> Vec<Part> {
 impl Feature for RuntimeFeature {
     fn completion(&self, cx: &Ctx, at: usize, _trigger: Option<&str>) -> Vec<CompletionItem> {
         let doc = cx.doc;
-        let parts = visible_parts(cx.settings, doc.side);
+        let mut parts = visible_parts(cx.settings, doc.side);
+        parts.retain(|p| !cx.ws.luals.parts.contains(p));
         if !doc.is_lua() || parts.is_empty() || in_literal(&doc.src, at) {
             return Vec::new();
         }

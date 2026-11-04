@@ -170,6 +170,10 @@ impl DevKit {
                 ws.set(&path, Some(&text));
             }
         }
+        let luarc = ws.absolute(luals::LUARC);
+        if let Ok(text) = project.read_file(&luarc) {
+            ws.set(&luarc, Some(&text));
+        }
         ws.scanned = true;
         ws.indexing = true;
         // Read last, popped first: manifests say which resource and side every other file belongs to.
@@ -383,6 +387,13 @@ impl DevKit {
             .unwrap_or_else(|| Err(Error::NotFound(format!("command {id}"))));
         if matches!(id, natives::UPDATE | natives::SCHEDULED_UPDATE) {
             self.natives_changed();
+        }
+        // A .luarc.json just made from the New template is not saved yet: no event told us about it.
+        if id == luals::DEFINITIONS
+            && let Some(i) = ws
+        {
+            let luarc = self.workspaces[i].absolute(luals::LUARC);
+            self.reread(&luarc);
         }
         result
     }

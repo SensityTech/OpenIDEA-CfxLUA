@@ -215,6 +215,11 @@ lua-language-server then checks calls to natives: a missing argument, a wrong ty
 reported, and hover shows the native's documentation. Trailing flags may be left out, as the runtime allows. Run the
 command again after **CfxLua: Update Natives** or a change of game; the folder can stay out of version control.
 
+Once lua-language-server loads the file, it completes those natives and the runtime API itself (one entry each),
+Ctrl+click goes to their declaration and they are colored as library functions. This plugin then stops listing them,
+so that nothing shows twice, but still offers the natives of a game the file lacks and still reports a native called
+from the wrong side.
+
 ## Running FXServer
 
 In a `server-data` folder (a `server.cfg` at the root of the project), the run configurations offer **FXServer

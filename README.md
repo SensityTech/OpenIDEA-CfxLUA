@@ -298,9 +298,15 @@ annotations, hover, signature help, references. On its own it does not know CfxL
    server — documentation, parameters, returns, a signature per game — and the Cfx runtime API.
 
 lua-language-server then checks calls to natives — a missing argument, a wrong type, one argument too many — and its
-hover shows their documentation. Trailing flags may be left out, as the runtime allows. Run the command again after
-**CfxLua: Update Natives** or a change of game; `.cfxlua/` can stay out of version control. See the
+hover shows their documentation. Trailing flags may be left out, as the runtime allows. A native of several games has
+one signature: parameters some games lack are optional. Run the command again after **CfxLua: Update Natives** or a
+change of game; `.cfxlua/` can stay out of version control. See the
 [lua-language-server settings](https://luals.github.io/wiki/settings/) for the rest.
+
+Once lua-language-server loads the file, it is the one that completes those natives and the Cfx runtime API (one
+entry each), goes to their declaration and colors them as library functions: OpenIDEA-CfxLUA stops listing them
+itself, which would show each one twice. It still completes the natives of a game the file lacks, and still reports a
+client native called from a server script, and the reverse.
 
 ## Running FXServer
 
