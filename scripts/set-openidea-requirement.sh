@@ -13,9 +13,9 @@ if [ "$target" = source ]; then
   rev="$(sed -n 's|^source = "git+https://github.com/l0ng-ai/openidea?rev=\([0-9a-f]*\)#.*|\1|p' Cargo.lock | head -1)"
   [ -n "$rev" ] || { echo "set-openidea-requirement: no OpenIDEA SDK revision in Cargo.lock" >&2; exit 1; }
   short="${rev:0:7}"
-  readme="| [OpenIDEA]($repo) built from source at [\`$short\`]($repo/commit/$rev) or later | The IDE with plugin API 1.0, which no OpenIDEA release has yet. Clone it at that revision or later, then \`pnpm install\` and \`pnpm tauri build\` (Rust, Node 22.18+, pnpm). |"
-  contributing="- [OpenIDEA]($repo) built from source at \`$short\` or later (plugin API 1.0, in no release yet) to try the plugin."
-  guide="- OpenIDEA built from source at revision \`$short\` or later: the plugin needs plugin API 1.0, which no OpenIDEA release has yet;"
+  readme="| [OpenIDEA]($repo) built from source at [\`$short\`]($repo/commit/$rev) | The IDE with plugin API 1.0, which no OpenIDEA release has yet and later revisions may still change. Check out that revision, then \`pnpm install\` and \`pnpm tauri build\` (Rust, Node 22.18+, pnpm). |"
+  contributing="- [OpenIDEA]($repo) built from source at \`$short\` (plugin API 1.0 is in no release yet, and later revisions may change it) to try the plugin."
+  guide="- OpenIDEA built from source at revision \`$short\`: the plugin needs plugin API 1.0, which no OpenIDEA release has yet and later revisions may still change;"
 else
   [[ "$target" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "set-openidea-requirement: $target is not a version" >&2; exit 1; }
   readme="| [OpenIDEA]($repo/releases/latest) $target or newer | The IDE (plugin API 1.0). |"

@@ -19,7 +19,7 @@ Security issues: see [SECURITY.md](SECURITY.md), not a public issue.
 - Rust stable (edition 2024) with the WebAssembly target: `rustup target add wasm32-wasip2`
   (Windows without Visual Studio Build Tools: the `stable-x86_64-pc-windows-gnu` toolchain works).
 - `clippy` and `rustfmt`: `rustup component add clippy rustfmt`.
-- [OpenIDEA](https://github.com/l0ng-ai/openidea) built from source at `4c5b6de` or later (plugin API 1.0, in no release yet) to try the plugin.
+- [OpenIDEA](https://github.com/l0ng-ai/openidea) built from source at `4c5b6de` (plugin API 1.0 is in no release yet, and later revisions may change it) to try the plugin.
 
 | Command | |
 |---|---|
@@ -93,9 +93,10 @@ The plugin is built against OpenIDEA's plugin SDK at the revision pinned in `Car
 `scripts/set-openidea-requirement.sh` writes the OpenIDEA it needs into the README, this file and the user guide:
 `source` while no OpenIDEA release has the plugin API (OpenIDEA built from the SDK revision in `Cargo.lock`), or the
 first release that installs the plugin. The [OpenIDEA compatibility](.github/workflows/openidea-compat.yml) workflow
-keeps it true every day: it runs the latest OpenIDEA release's own `openidea-plugin check` on the latest package,
-switches the requirement to the first release that passes, follows the SDK revision until then, and opens an issue
-when a later release cannot install the plugin.
+keeps it true every day: with the latest OpenIDEA release, it runs `openidea-plugin check` on the latest package,
+then installs it and runs a command with that release's plugin host (`scripts/openidea-start-check.rs`, since `check`
+does not compare interface types). It switches the requirement to the first release that passes, follows the SDK
+revision until then, and opens an issue when a release cannot run the plugin.
 
 ## Releasing
 
