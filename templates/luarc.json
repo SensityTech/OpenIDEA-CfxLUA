@@ -3,6 +3,7 @@
   "runtime.version": "Lua 5.4",
   "runtime.nonstandardSymbol": ["+=", "-=", "*=", "/=", "<<=", ">>=", "&=", "|=", "^=", "/**/", "`"],
   "workspace.library": [".cfxlua"],
-  "workspace.ignoreDir": [".vscode", "node_modules", "fxmanifest.lua", "__resource.lua"],
-  "diagnostics.ignoredFiles": "Disable"
+  "workspace.ignoreDir": [".vscode", "node_modules", "fxmanifest.lua", "__resource.lua", ".cfxlua"],
+  "diagnostics.ignoredFiles": "Disable",
+  "completion.maxSuggestCount": 1000
 }

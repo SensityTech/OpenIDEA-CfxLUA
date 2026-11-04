@@ -5,6 +5,39 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
 
 ## [Unreleased]
 
+### Fixed
+
+- **No natives in completion on big projects.** The catalogs were loaded once the manifests were read, which a big
+  project now does over several calls, and every natives update check dropped them. They are loaded at activation and
+  kept until an update changes them.
+- **The remaining "exceeded its CPU budget" crashes** on big projects: opening a `fxmanifest.lua`, the **Escrow** tab
+  and its check, **CfxLua: Update Natives** when the database changed, and edits that rebuilt project-wide indexes.
+  Calls made while you type never load a catalog or rebuild an index, natives updates are spread over several calls
+  and convert only the project's games, and escrow reports are built from facts gathered while indexing. On a
+  5,000-file project with the tool window open, no call uses more than 36% of the budget.
+- **lua-language-server stalled** (one core at 100%, empty completion) while the generated definitions file was open:
+  about 40,000 of its lines ended with a space, and lua-language-server's trailing-space check is very slow on a file
+  that size. Run **CfxLua: Generate lua-language-server Definitions** again to rewrite the file.
+- Ctrl+click on a native said "Cannot find declaration to go to": native declarations now come from
+  lua-language-server and the generated definitions, without reading that file on every hover.
+- The status bar shows the side of the first file opened.
+- **CfxLua: Convert Coordinates** stays enabled when run from Find Action.
+
+### Changed
+
+- The **lua-language-server config (.luarc.json)** template ignores `.cfxlua` as project code (it stays a library)
+  and lets completion list up to 1,000 items: lua-language-server stops at 100, which could hide the native you type.
+  In an existing `.luarc.json`, add `".cfxlua"` to `workspace.ignoreDir` and `"completion.maxSuggestCount": 1000`.
+- **CfxLua: Generate lua-language-server Definitions** warns when no `.luarc.json` at the root of the project loads
+  the file's folder: lua-language-server would then see the natives only while the file is open.
+- The **Escrow** tab checks the resource you pick, not the first one listed. While the project is still being read,
+  a report says which files are not checked yet.
+
+### Added
+
+- Messages chosen by `and` / `or` (`action = bOpen and 'open' or 'close'`) link Lua and the NUI page both ways.
+- Side icons for `client_*.lua`, `*_client.lua`, `*_cl.lua` and their server and shared equivalents.
+
 ## [0.1.3] - 2026-11-04
 
 ### Fixed

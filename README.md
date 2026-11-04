@@ -284,12 +284,15 @@ annotations, hover, signature help, references. On its own it does not know CfxL
      "runtime.version": "Lua 5.4",
      "runtime.nonstandardSymbol": ["+=", "-=", "*=", "/=", "<<=", ">>=", "&=", "|=", "^=", "/**/", "`"],
      "workspace.library": [".cfxlua"],
-     "workspace.ignoreDir": [".vscode", "node_modules", "fxmanifest.lua", "__resource.lua"],
-     "diagnostics.ignoredFiles": "Disable"
+     "workspace.ignoreDir": [".vscode", "node_modules", "fxmanifest.lua", "__resource.lua", ".cfxlua"],
+     "diagnostics.ignoredFiles": "Disable",
+     "completion.maxSuggestCount": 1000
    }
    ```
 
-   It enables the CfxLua syntax, loads the `.cfxlua` folder as a library and leaves manifests to OpenIDEA-CfxLUA.
+   It enables the CfxLua syntax, loads the `.cfxlua` folder as a library without checking it as project code, leaves
+   manifests to OpenIDEA-CfxLUA and lets completion list every native matching what you type (lua-language-server
+   stops at 100 by default, which can hide the one you want).
 2. **The definitions.** Create an empty `.cfxlua/natives.lua`, keep it focused and run **CfxLua: Generate
    lua-language-server Definitions**, then save. The file receives every native of your games and of the
    server — documentation, parameters, returns, a signature per game — and the Cfx runtime API.

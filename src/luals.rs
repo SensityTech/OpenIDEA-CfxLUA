@@ -2,7 +2,8 @@ use crate::feature::{CommandCx, CommandResult, Feature};
 use crate::natives::{Native, NativeSet, Natives, Param, project_games};
 use crate::runtime::Part;
 use crate::settings::{Settings, keys};
-use crate::text::LineIndex;
+use crate::text::{LineIndex, parent, slash};
+use crate::workspace::Workspace;
 use openidea_plugin::{Error, NotificationLevel, Range, TextEdit, host};
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
@@ -10,6 +11,7 @@ use std::fmt::Write;
 
 pub const DEFINITIONS: &str = "luals.definitions";
 const HEADER: &str = "---@meta\n";
+const LUARC: &str = ".luarc.json";
 const NEEDS_EMPTY_FILE: &str = "Open an empty .lua file (for example .cfxlua/natives.lua) and run the command again: \
                                 its content is replaced by the definitions.";
 const STATE_BAG_CLASS: &str = "---@class StateBag\n";
@@ -42,16 +44,52 @@ fn write_definitions(cx: &CommandCx) -> CommandResult {
     let end = lines.position(&doc.text, doc.text.len());
     editor.apply_edits(doc.version, &[TextEdit { range: Range::new(Default::default(), end), text }])?;
     let names: Vec<&str> = sets.iter().map(|s| s.display_name()).collect();
-    host::notify(
-        NotificationLevel::Info,
-        "CfxLua: lua-language-server definitions written",
-        &format!(
-            "{count} natives ({}) and the Cfx runtime API. Save the file: lua-language-server reads it as a definition \
-             file (---@meta). Run the command again after a natives update.",
-            names.join(", ")
+    let written = format!("{count} natives ({}) and the Cfx runtime API.", names.join(", "));
+    match cx.ws.and_then(|ws| library_problem(ws, &editor.path())) {
+        Some(problem) => host::notify(
+            NotificationLevel::Warning,
+            "CfxLua: definitions written, but lua-language-server will not keep them",
+            &format!("{written} {problem}"),
         ),
-    );
+        None => host::notify(
+            NotificationLevel::Info,
+            "CfxLua: lua-language-server definitions written",
+            &format!(
+                "{written} Save the file; you may then close it, lua-language-server loads it as a library. Run the \
+                 command again after a natives update."
+            ),
+        ),
+    }
     Ok(None)
+}
+
+/// Why lua-language-server would only see the definitions while their file is open.
+fn library_problem(ws: &Workspace, path: &str) -> Option<String> {
+    let path = slash(path);
+    if !ws.contains(&path) {
+        return None;
+    }
+    let dir = parent(ws.relative(&path));
+    let config = host::projects().ok()?.into_iter().find_map(|p| p.read_file(&ws.absolute(LUARC)).ok());
+    let Some(config) = config else {
+        return Some(format!(
+            "There is no {LUARC} at the root of the project: lua-language-server sees the natives only while this \
+             file is open. Create one with New › lua-language-server config (.luarc.json)."
+        ));
+    };
+    let config: serde_json::Value = serde_json::from_str(&config).ok()?;
+    let library = config.get("workspace.library").or_else(|| config.get("workspace")?.get("library"));
+    let entries = library.and_then(|l| l.as_array()).map(Vec::as_slice).unwrap_or_default();
+    let listed = entries.iter().filter_map(|e| e.as_str()).map(slash).any(|e| {
+        let e = e.trim_start_matches("./").trim_end_matches('/');
+        e == dir || e == ws.absolute(dir)
+    });
+    (!listed).then(|| {
+        format!(
+            "The {LUARC} at the root of the project does not list \"{dir}\" in workspace.library: lua-language-server \
+             sees the natives only while this file is open."
+        )
+    })
 }
 
 fn sets_for(settings: &Settings, detected: &[crate::project::Game]) -> Vec<NativeSet> {
@@ -217,7 +255,8 @@ mod tests {
     use super::*;
     use crate::natives::Return;
     use crate::project::Side;
-    use crate::testing::native;
+    use crate::testing::{Fixture, ROOT, native};
+    use openidea_plugin::mock::{MockHost, Notification};
 
     fn param(name: &str, lua_type: &str) -> Param {
         Param { name: name.into(), lua_type: lua_type.into(), native_type: lua_type.into(), ..Default::default() }
@@ -256,6 +295,38 @@ mod tests {
         assert!(text.contains("Citizen"), "the shared runtime API is appended");
         assert!(text.contains("---@class StateBag\n---@field [string] any\n"));
         assert!(!text.contains("Licensed under the Apache License"));
+    }
+
+    fn generate(luarc: Option<&str>) -> (CommandResult, Notification, String) {
+        let mock = MockHost::install();
+        mock.set_project_root(Some(ROOT));
+        if let Some(luarc) = luarc {
+            mock.add_file(LUARC, luarc);
+        }
+        mock.open_editor(&Fixture::path(".cfxlua/natives.lua"), "lua", "", &[]);
+        let fx = Fixture::new(&[("res/fxmanifest.lua", "fx_version 'cerulean'\ngame 'gta5'\n")])
+            .with_natives(vec![native(NativeSet::Gta5, "PlayerPedId", Side::Client)]);
+        let inv = mock.invocation();
+        let cx = CommandCx { ws: Some(&fx.ws), settings: &fx.settings, natives: &fx.natives, doc: None, inv: &inv };
+        let result = LualsFeature.command(&cx, DEFINITIONS, None).expect("handled");
+        (result, mock.notifications().pop().expect("a notification"), mock.editor_text())
+    }
+
+    #[test]
+    fn warns_when_lua_language_server_would_not_load_the_definitions() {
+        let template = include_str!("../templates/luarc.json");
+        let (result, note, text) = generate(Some(template));
+        assert_eq!(result, Ok(None));
+        assert!(text.contains("function PlayerPedId() end"));
+        assert!(matches!(note.level, NotificationLevel::Info), "{}", note.body);
+        let nested = r#"{ "workspace": { "library": ["./.cfxlua/"] } }"#;
+        assert!(matches!(generate(Some(nested)).1.level, NotificationLevel::Info));
+        let note = generate(None).1;
+        assert!(matches!(note.level, NotificationLevel::Warning));
+        assert!(note.body.contains("There is no .luarc.json"), "{}", note.body);
+        let note = generate(Some(r#"{ "workspace.library": ["types"] }"#)).1;
+        assert!(matches!(note.level, NotificationLevel::Warning));
+        assert!(note.body.contains("does not list \".cfxlua\""), "{}", note.body);
     }
 
     #[test]

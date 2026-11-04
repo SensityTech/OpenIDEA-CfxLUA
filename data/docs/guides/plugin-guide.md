@@ -203,8 +203,9 @@ annotations, hover, signature help, references. On its own it does not know CfxL
 `+=`, backtick hashes and every native as errors. Two steps teach it:
 
 1. **The configuration.** At the root of the project, **New › lua-language-server config (.luarc.json)**, named
-   `.luarc`. It enables the CfxLua syntax (`+=`, `` `hash` ``, `/* */`), loads the `.cfxlua` folder as a library and
-   leaves `fxmanifest.lua` files to this plugin.
+   `.luarc`. It enables the CfxLua syntax (`+=`, `` `hash` ``, `/* */`), loads the `.cfxlua` folder as a library
+   without checking it as project code, leaves `fxmanifest.lua` files to this plugin and lets completion list every
+   matching native.
 2. **The definitions.** Create an empty `.cfxlua/natives.lua`, keep it focused and run **CfxLua: Generate
    lua-language-server Definitions**, then save. The file receives every native of your games and of the server,
    with their documentation, parameters, returns and per-game signatures, and the Cfx runtime API (`Citizen`, events,
