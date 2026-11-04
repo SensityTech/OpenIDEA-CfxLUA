@@ -1,4 +1,4 @@
-use crate::luals::{self, Contents, LUARC};
+use crate::luals::{self, Contents, LUARC_FILES};
 use crate::project::{self, FileKind, Resource, Side};
 use crate::text::{parent, slash};
 use std::collections::BTreeMap;
@@ -103,7 +103,9 @@ impl Workspace {
     }
 
     fn is_luarc(&self, path: &str) -> bool {
-        path.strip_prefix(self.root.as_str()).and_then(|r| r.strip_prefix('/')) == Some(LUARC)
+        path.strip_prefix(self.root.as_str())
+            .and_then(|r| r.strip_prefix('/'))
+            .is_some_and(|name| LUARC_FILES.contains(&name))
     }
 
     fn refresh_luals(&mut self) {

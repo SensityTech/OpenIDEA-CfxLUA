@@ -170,16 +170,13 @@ impl DevKit {
                 ws.set(&path, Some(&text));
             }
         }
-        let luarc = ws.absolute(luals::LUARC);
-        if let Ok(text) = project.read_file(&luarc) {
-            ws.set(&luarc, Some(&text));
-        }
         ws.scanned = true;
         ws.indexing = true;
         // Read last, popped first: manifests say which resource and side every other file belongs to.
         self.unread.sort_by_key(|(_, p)| project::file_kind(p) == FileKind::Manifest);
         self.catalogs.push(i);
         self.indexing = true;
+        self.read_luals(i);
         host::log(LogLevel::Info, &format!("{} files of {root} to read", self.unread.len()));
     }
 
@@ -344,32 +341,47 @@ impl DevKit {
         if !self.workspaces[i].scanned {
             return;
         }
-        let text = match host::projects() {
-            Ok(ps) => ps.into_iter().find_map(|p| p.read_file(path).ok()),
-            Err(_) => None,
-        };
         let key = slash(path);
-        let ws = &mut self.workspaces[i];
-        if ws.text(&key) == text.as_deref() {
-            return;
-        }
-        match text {
-            Some(t) => {
+        match read_disk(path) {
+            Disk::Text(t) => {
+                let ws = &mut self.workspaces[i];
+                if ws.text(&key) == Some(t.as_str()) {
+                    return;
+                }
                 ws.set(path, Some(&t));
                 // Indexed by the next slice, under its budget.
                 if ws.text(&key).is_some() {
                     self.pending.push((i, key));
                 }
             }
-            None => {
-                ws.remove(path);
+            Disk::Missing => {
+                if !self.workspaces[i].exists(&key) {
+                    return;
+                }
+                self.workspaces[i].remove(path);
                 for f in &self.features {
                     f.forget_file(&key);
                 }
                 self.mark_derive(i);
             }
+            Disk::Unreadable => return,
         }
         self.last = None;
+    }
+
+    // Hidden folders (`.cfxlua`) are not listed by the host: the definitions are read by name.
+    fn read_luals(&mut self, i: usize) {
+        self.reread_luarc(i);
+        for path in luals::candidates(&self.workspaces[i]) {
+            self.reread(&path);
+        }
+    }
+
+    fn reread_luarc(&mut self, i: usize) {
+        for name in luals::LUARC_FILES {
+            let path = self.workspaces[i].absolute(name);
+            self.reread(&path);
+        }
     }
 
     fn command(&mut self, id: &str, ctx: &Invocation, arg: Option<&str>) -> Result<Option<String>, Error> {
@@ -392,8 +404,7 @@ impl DevKit {
         if id == luals::DEFINITIONS
             && let Some(i) = ws
         {
-            let luarc = self.workspaces[i].absolute(luals::LUARC);
-            self.reread(&luarc);
+            self.read_luals(i);
         }
         result
     }
@@ -567,6 +578,27 @@ pub fn status_text(ws: &Workspace, settings: &Settings, path: &str) -> (String, 
     (text, format!("CfxLua: {} ({why}). Click for the documentation.", side.label()))
 }
 
+enum Disk {
+    Text(String),
+    Missing,
+    Unreadable,
+}
+
+fn read_disk(path: &str) -> Disk {
+    let Ok(projects) = host::projects() else { return Disk::Unreadable };
+    let mut missing = false;
+    for p in projects {
+        match p.read_file(path) {
+            Ok(text) => return Disk::Text(text),
+            // OpenIDEA reports a missing file as invalid ("<path>: no such file"), the SDK mock as not found.
+            Err(Error::NotFound(_)) => missing = true,
+            Err(Error::Invalid(m)) if m.ends_with("no such file") => missing = true,
+            Err(_) => {}
+        }
+    }
+    if missing { Disk::Missing } else { Disk::Unreadable }
+}
+
 fn parse(kind: FileKind, text: &str) -> Source {
     if matches!(kind, FileKind::Lua | FileKind::Manifest) && !project::is_escrowed(text) {
         Source::new(text)
@@ -578,7 +610,13 @@ fn parse(kind: FileKind, text: &str) -> Source {
 impl Plugin for DevKit {
     fn activate(&mut self, _ctx: &Context) -> Result<(), Error> {
         self.natives.freeze(false);
-        for kind in [EventKind::FileOpened, EventKind::FileSaved, EventKind::EditorFocused, EventKind::Scheduled] {
+        for kind in [
+            EventKind::FileOpened,
+            EventKind::FileSaved,
+            EventKind::EditorFocused,
+            EventKind::VcsChanged,
+            EventKind::Scheduled,
+        ] {
             if let Err(e) = host::subscribe(kind) {
                 host::log(LogLevel::Warn, &format!("events: {e}"));
             }
@@ -620,8 +658,21 @@ impl Plugin for DevKit {
                 Event::EditorFocused(path) => {
                     if let Some(path) = path {
                         self.focus_on(path);
+                        // An edit outside the IDE sends no event: lua-language-server would see it, not us.
+                        if let Some(i) = self.workspaces.iter().position(|w| w.scanned && w.contains(path)) {
+                            self.reread_luarc(i);
+                        }
                     }
                     self.update_status(path.as_deref());
+                }
+                Event::VcsChanged(repo) => {
+                    let repo = slash(repo).trim_end_matches('/').to_owned();
+                    for i in 0..self.workspaces.len() {
+                        let ws = &self.workspaces[i];
+                        if ws.scanned && (ws.contains(&repo) || ws.root.starts_with(&format!("{repo}/"))) {
+                            self.read_luals(i);
+                        }
+                    }
                 }
                 Event::Scheduled => {
                     let _ = self.command(natives::SCHEDULED_UPDATE, ctx, None);
@@ -858,6 +909,37 @@ mod tests {
         let mut kit = DevKit::default();
         kit.activate(&host.context("sensity.cfxlua")).unwrap();
         (kit, r"C:\srv\res\src\api\core\SMain.lua".to_owned(), body)
+    }
+
+    #[test]
+    fn definitions_the_host_does_not_list_are_read_by_name_and_followed() {
+        let host = openidea_plugin::mock::MockHost::install();
+        host.add_file("res/fxmanifest.lua", "fx_version 'cerulean'\ngame 'gta5'\nclient_script 'client/*.lua'\n");
+        host.add_file("res/client/main.lua", "local x = 1\n");
+        host.add_file(luals::LUARC, include_str!("../templates/luarc.json"));
+        let sets = [natives::NativeSet::Gta5, natives::NativeSet::Server];
+        let (text, _) = luals::definitions(&Natives::bundled(), &sets, &[runtime::Part::Shared]);
+        // Not a `.lua` name: the scan lists it without reading it, as the host does with hidden folders.
+        let hidden = "/project/.cfxlua/natives.meta";
+        host.add_file(".cfxlua/natives.meta", &text);
+        host::storage::set("luals.definitions", &serde_json::to_string(&[hidden]).unwrap()).unwrap();
+        let mut kit = DevKit::default();
+        kit.activate(&host.context("sensity.cfxlua")).unwrap();
+        assert_eq!(kit.workspaces[0].luals.sets, sets, "read at activation");
+        let path = "/project/res/client/main.lua".to_owned();
+        let doc = Document { path: path.clone(), language: "lua".into(), version: 2, text: "GetEntityCo".into() };
+        let coords = |kit: &mut DevKit| {
+            kit.completion(&doc, Position::new(0, 11), None).iter().any(|i| i.label == "GetEntityCoords")
+        };
+        assert!(!coords(&mut kit), "left to lua-language-server");
+        host.add_file(luals::LUARC, r#"{ "workspace.library": ["types"] }"#);
+        kit.handle_events(&[Event::EditorFocused(Some(path.clone()))], &host.invocation());
+        assert!(kit.workspaces[0].luals.sets.is_empty(), "a .luarc.json edited outside the IDE");
+        assert!(coords(&mut kit));
+        host.add_file(luals::LUARC, r#"{ "Lua.workspace.library": ["${workspaceFolder}/.cfxlua"], }"#);
+        kit.handle_events(&[Event::VcsChanged("/project".into())], &host.invocation());
+        assert_eq!(kit.workspaces[0].luals.sets, sets, "after a checkout");
+        assert!(host.subscriptions().contains(&EventKind::VcsChanged));
     }
 
     #[test]

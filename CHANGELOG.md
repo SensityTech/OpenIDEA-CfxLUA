@@ -27,6 +27,13 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   A native of several games now has one signature in the definitions (parameters some games lack are optional), and
   this plugin leaves the natives and runtime API lua-language-server loads to it. The file's header says which games
   and runtime parts it holds; this plugin still completes the natives of a game it lacks.
+- **Natives listed twice again after a restart.** OpenIDEA does not list hidden folders such as `.cfxlua/`, so the
+  plugin only knew the definitions once their file was saved. It now reads them by name when it starts (the files the
+  command wrote, and `natives.lua` in each library folder) and after a repository change, and reads `.luarc.json`
+  again when you switch editor, so an edit made outside the IDE is followed.
+- A native of FiveM and RedM could get two parameters of the same name in the definitions (four of them, when both
+  games are generated together): lua-language-server then reported valid calls as type errors.
+- Server natives whose client name is an alias (`GetVehicleDashboardColour`…) were marked deprecated.
 - The status bar shows the side of the first file opened.
 - **CfxLua: Convert Coordinates** stays enabled when run from Find Action.
 
@@ -36,7 +43,9 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   and lets completion list up to 1,000 items: lua-language-server stops at 100, which could hide the native you type.
   In an existing `.luarc.json`, add `".cfxlua"` to `workspace.ignoreDir` and `"completion.maxSuggestCount": 1000`.
 - **CfxLua: Generate lua-language-server Definitions** warns when no `.luarc.json` at the root of the project loads
-  the file's folder: lua-language-server would then see the natives only while the file is open.
+  the file's folder: lua-language-server would then see the natives only while the file is open. The `.luarc.json`
+  is read in every form lua-language-server accepts: `Lua.`-prefixed or nested keys, comments and trailing commas,
+  `.luarc.jsonc`, `${workspaceFolder}`, a nested folder or the file itself.
 - The **Escrow** tab checks the resource you pick, not the first one listed. While the project is still being read,
   a report says which files are not checked yet.
 
