@@ -3,16 +3,9 @@ Copyright 2026 SensityTech
 
 This product is licensed under the Apache License, Version 2.0 (see LICENSE).
 
-It is the OpenIDEA port of Sensity DevKit for JetBrains IDEs, the FiveM / RedM
-(CfxLua) plugin by SensityTech
-(https://github.com/SensityTech/Intellij-Devkit), a fork of IntelliJ-EmmyLua
-(https://github.com/EmmyLua/IntelliJ-EmmyLua, Apache License 2.0). The port is a
-rewrite in Rust: it contains none of EmmyLua's code. The documentation guides,
-runtime API stubs, event catalog and manifest directives in data/ come from
-Sensity DevKit.
-
 It is built with the OpenIDEA plugin SDK (https://github.com/l0ng-ai/openidea,
-Apache License 2.0).
+Apache License 2.0). The documentation guides, runtime API stubs, event catalog
+and manifest directives in data/ are written by SensityTech.
 
 Bundled data:
 - data/natives/natives.json.gz, natives_cfx.json.gz, natives_rdr3.lua.gz:
@@ -28,4 +21,4 @@ Bundled data:
 
 FiveM, RedM and Cfx.re are trademarks of their respective owners. Grand Theft
 Auto V and Red Dead Redemption 2 are trademarks of Take-Two Interactive. This
-project is not affiliated with or endorsed by them, nor with JetBrains.
+project is not affiliated with or endorsed by them.

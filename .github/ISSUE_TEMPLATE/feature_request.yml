@@ -1,0 +1,18 @@
+name: Feature request
+description: Suggest something that would help FiveM or RedM development.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What is hard or slow today? Show the code you write.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you would like
+      description: How the plugin could help (completion, a check, navigation, documentation…).
+    validations:
+      required: true
