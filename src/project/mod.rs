@@ -22,6 +22,11 @@ pub fn is_manifest_name(name: &str) -> bool {
     MANIFESTS.iter().any(|m| m.eq_ignore_ascii_case(name))
 }
 
+/// A file encrypted by Cfx Asset Escrow (binary `FXAP` header): never parsed as Lua.
+pub fn is_escrowed(text: &str) -> bool {
+    text.starts_with("FXAP")
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum FileKind {
     Manifest,

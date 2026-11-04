@@ -347,7 +347,11 @@ pub fn status_text(ws: &Workspace, settings: &Settings, path: &str) -> (String, 
 }
 
 fn parse(kind: FileKind, text: &str) -> Source {
-    if matches!(kind, FileKind::Lua | FileKind::Manifest) { Source::new(text) } else { Source::plain(text) }
+    if matches!(kind, FileKind::Lua | FileKind::Manifest) && !project::is_escrowed(text) {
+        Source::new(text)
+    } else {
+        Source::plain(text)
+    }
 }
 
 impl Plugin for DevKit {

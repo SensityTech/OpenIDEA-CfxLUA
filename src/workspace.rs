@@ -7,7 +7,7 @@
 //! they are unit-tested with an in-memory one ([`Workspace::from_files`]).
 
 use crate::project::{self, FileKind, Resource, Side};
-use crate::text::{file_name, parent, slash};
+use crate::text::{parent, slash};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -16,7 +16,8 @@ pub const SCAN: &[(&str, u32)] = &[
     ("**/*.lua", 20_000),
     ("**/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts,vue,svelte,html,htm}", 8_000),
     ("**/{vite,webpack}.config.*", 200),
-    ("**/*.{dll,net.dll}", 500),
+    // Every other file, listed without reading it: manifest and escrow checks need to know they exist.
+    ("**/*", 60_000),
 ];
 
 /// Files larger than this are listed but not kept (minified bundles, data dumps).
@@ -93,24 +94,32 @@ impl Workspace {
         let manifest = kind == FileKind::Manifest;
         self.files.insert(path.clone(), WsFile { path: path.clone(), kind, text: text.clone() });
         if manifest {
-            let dir = parent(&path).to_owned();
-            match text {
-                Some(t) => {
-                    self.resources.insert(dir.clone(), Resource::parse(&dir, file_name(&path), &t));
-                }
-                None => {
-                    self.resources.remove(&dir);
-                }
-            }
+            self.reload_resource(parent(&path).to_owned());
         }
         self.generation += 1;
+    }
+
+    /// FXServer reads `fxmanifest.lua` and ignores a `__resource.lua` next to it.
+    fn reload_resource(&mut self, dir: String) {
+        let manifest = project::MANIFESTS.iter().find_map(|name| {
+            let file = self.files.get(&format!("{dir}/{name}"))?;
+            Some((*name, file.text.clone()?))
+        });
+        match manifest {
+            Some((name, text)) => {
+                self.resources.insert(dir.clone(), Resource::parse(&dir, name, &text));
+            }
+            None => {
+                self.resources.remove(&dir);
+            }
+        }
     }
 
     pub fn remove(&mut self, path: &str) {
         let path = slash(path);
         if self.files.remove(&path).is_some() {
             if project::file_kind(&path) == FileKind::Manifest {
-                self.resources.remove(parent(&path));
+                self.reload_resource(parent(&path).to_owned());
             }
             self.generation += 1;
         }
@@ -216,5 +225,18 @@ mod tests {
         assert!(ws.resource_of("C:/srv/loose.lua").is_none());
         assert_eq!(ws.files_under("C:/srv/resources/[core]/shop").count(), 2);
         assert_eq!(ws.relative("C:/srv/loose.lua"), "loose.lua");
+    }
+
+    #[test]
+    fn fxmanifest_wins_over_resource_lua() {
+        let mut ws = Workspace::from_files(
+            "/p",
+            &[("res/fxmanifest.lua", "client_script 'a.lua'"), ("res/__resource.lua", "server_script 'a.lua'")],
+        );
+        assert_eq!(ws.resource("/p/res").unwrap().manifest, "fxmanifest.lua");
+        assert_eq!(ws.side_of("/p/res/a.lua"), crate::project::Side::Client);
+        ws.remove("/p/res/fxmanifest.lua");
+        assert_eq!(ws.resource("/p/res").unwrap().manifest, "__resource.lua");
+        assert_eq!(ws.side_of("/p/res/a.lua"), crate::project::Side::Server);
     }
 }

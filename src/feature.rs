@@ -35,7 +35,8 @@ impl Doc {
     pub fn new(ws: &Workspace, path: &str, language: &str, version: u64, text: &str) -> Self {
         let path = crate::text::slash(path);
         let kind = crate::project::file_kind(&path);
-        let lua = language == "lua" || matches!(kind, FileKind::Lua | FileKind::Manifest);
+        let lua = (language == "lua" || matches!(kind, FileKind::Lua | FileKind::Manifest))
+            && !crate::project::is_escrowed(text);
         let src = if lua { Source::new(text) } else { Source::plain(text) };
         let side = if lua { ws.side_of(&path) } else { Side::Unknown };
         let resource = ws.resource_of(&path).map(|r| r.dir.clone());

@@ -69,11 +69,8 @@ impl Fixture {
     pub fn index(&self, feature: &dyn Feature) {
         for f in self.ws.files() {
             let Some(text) = f.text.as_deref() else { continue };
-            let src = if matches!(f.kind, FileKind::Lua | FileKind::Manifest) {
-                Source::new(text)
-            } else {
-                Source::plain(text)
-            };
+            let lua = matches!(f.kind, FileKind::Lua | FileKind::Manifest) && !crate::project::is_escrowed(text);
+            let src = if lua { Source::new(text) } else { Source::plain(text) };
             feature.index_file(&self.ws, &f.path, f.kind, &src);
         }
         feature.indexed(&self.ws);
