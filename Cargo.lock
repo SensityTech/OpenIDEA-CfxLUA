@@ -149,7 +149,7 @@ dependencies = [
 [[package]]
 name = "openidea-plugin"
 version = "0.1.0"
-source = "git+https://github.com/l0ng-ai/openidea?rev=4c5b6de9ada902ffc74b429b7ae3c3384c23a5b3#4c5b6de9ada902ffc74b429b7ae3c3384c23a5b3"
+source = "git+https://github.com/l0ng-ai/openidea?rev=859f63454eed53ae97eb5881d5f076504848a6aa#859f63454eed53ae97eb5881d5f076504848a6aa"
 dependencies = [
  "wit-bindgen",
 ]

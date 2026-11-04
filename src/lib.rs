@@ -295,12 +295,7 @@ impl DevKit {
         let Some((doc, _)) = &self.last else { return };
         let items: Vec<Diagnostic> = problems
             .iter()
-            .map(|p| Diagnostic {
-                range: doc.range(p.start, p.end),
-                severity: p.severity,
-                message: p.message.clone(),
-                code: Some(p.code.to_owned()),
-            })
+            .map(|p| Diagnostic::new(doc.range(p.start, p.end), p.severity, p.message.clone()).code(p.code))
             .collect();
         if let Err(e) = host::publish_diagnostics(&self.native_path(ws, path), &items) {
             host::log(LogLevel::Debug, &format!("diagnostics of {path}: {e}"));
@@ -511,7 +506,13 @@ impl Providers for DevKit {
                 for (p, e) in fix.other {
                     edits.push((self.native_path(ws, &p), e));
                 }
-                CodeAction { title: fix.title, kind: Some(kind.to_owned()), preferred: fix.preferred, edits }
+                CodeAction {
+                    title: fix.title,
+                    kind: Some(kind.to_owned()),
+                    preferred: fix.preferred,
+                    edits,
+                    data: None,
+                }
             })
             .collect()
     }

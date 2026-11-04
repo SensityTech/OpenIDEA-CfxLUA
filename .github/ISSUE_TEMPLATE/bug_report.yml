@@ -7,7 +7,7 @@ body:
     attributes:
       label: Versions
       description: OpenIDEA version, or the revision you built it from, and plugin version (Settings › Plugins).
-      placeholder: OpenIDEA built at 4c5b6de, OpenIDEA-CfxLUA 0.1.1
+      placeholder: OpenIDEA built at 859f634, OpenIDEA-CfxLUA 0.1.2
     validations:
       required: true
   - type: textarea

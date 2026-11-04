@@ -19,7 +19,7 @@ Security issues: see [SECURITY.md](SECURITY.md), not a public issue.
 - Rust stable (edition 2024) with the WebAssembly target: `rustup target add wasm32-wasip2`
   (Windows without Visual Studio Build Tools: the `stable-x86_64-pc-windows-gnu` toolchain works).
 - `clippy` and `rustfmt`: `rustup component add clippy rustfmt`.
-- [OpenIDEA](https://github.com/l0ng-ai/openidea) built from source at `4c5b6de` (plugin API 1.0 is in no release yet, and later revisions may change it) to try the plugin.
+- [OpenIDEA](https://github.com/l0ng-ai/openidea) built from source at `859f634` (plugin API 1.0 is in no release yet, and later revisions may change it) to try the plugin.
 
 | Command | |
 |---|---|
