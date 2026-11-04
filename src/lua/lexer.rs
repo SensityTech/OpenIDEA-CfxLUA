@@ -186,7 +186,11 @@ pub fn tokenize(src: &str) -> Vec<Token> {
                     match bytes[i] {
                         b'\\' if c != b'`' => {
                             // `\z` skips the following whitespace, newlines included.
-                            i += if bytes.get(i + 1) == Some(&b'\r') && bytes.get(i + 2) == Some(&b'\n') { 3 } else { 2 };
+                            i += if bytes.get(i + 1) == Some(&b'\r') && bytes.get(i + 2) == Some(&b'\n') {
+                                3
+                            } else {
+                                2
+                            };
                         }
                         b'\n' => break,
                         b if b == c => {

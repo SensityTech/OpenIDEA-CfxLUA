@@ -194,7 +194,9 @@ pub fn event(name: &str) -> Option<&'static BuiltinEvent> {
 /// Manifest directives, documentation order.
 pub fn directives() -> &'static [Directive] {
     static DIRECTIVES: OnceLock<Vec<Directive>> = OnceLock::new();
-    DIRECTIVES.get_or_init(|| parse_list("manifest/directives.json", include_str!("../../data/docs/manifest/directives.json")))
+    DIRECTIVES.get_or_init(|| {
+        parse_list("manifest/directives.json", include_str!("../../data/docs/manifest/directives.json"))
+    })
 }
 
 pub fn directive(name: &str) -> Option<&'static Directive> {

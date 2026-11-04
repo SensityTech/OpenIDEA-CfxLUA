@@ -44,7 +44,9 @@ pub fn file_kind(path: &str) -> FileKind {
     let ext = name.rsplit_once('.').map_or("", |(_, e)| e);
     match ext {
         "lua" => FileKind::Lua,
-        "js" | "jsx" | "mjs" | "cjs" | "ts" | "tsx" | "mts" | "cts" | "vue" | "svelte" | "html" | "htm" => FileKind::Web,
+        "js" | "jsx" | "mjs" | "cjs" | "ts" | "tsx" | "mts" | "cts" | "vue" | "svelte" | "html" | "htm" => {
+            FileKind::Web
+        }
         _ => FileKind::Other,
     }
 }

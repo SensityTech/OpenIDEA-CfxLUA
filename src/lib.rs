@@ -52,17 +52,17 @@ const SCAN_BUDGET_MS: u128 = 40_000;
 
 pub fn all_features() -> Vec<Box<dyn Feature>> {
     vec![
-        Box::new(natives::NativesFeature::default()),
-        Box::new(runtime::RuntimeFeature::default()),
-        Box::new(manifest::ManifestFeature::default()),
-        Box::new(statebags::StateBagsFeature::default()),
-        Box::new(events::EventsFeature::default()),
-        Box::new(nui::NuiFeature::default()),
-        Box::new(values::ValuesFeature::default()),
-        Box::new(coords::CoordsFeature::default()),
-        Box::new(perf::PerfFeature::default()),
-        Box::new(syntax::SyntaxFeature::default()),
-        Box::new(escrow::EscrowFeature::default()),
+        Box::<natives::NativesFeature>::default(),
+        Box::<runtime::RuntimeFeature>::default(),
+        Box::<manifest::ManifestFeature>::default(),
+        Box::<statebags::StateBagsFeature>::default(),
+        Box::<events::EventsFeature>::default(),
+        Box::<nui::NuiFeature>::default(),
+        Box::<values::ValuesFeature>::default(),
+        Box::<coords::CoordsFeature>::default(),
+        Box::<perf::PerfFeature>::default(),
+        Box::<syntax::SyntaxFeature>::default(),
+        Box::<escrow::EscrowFeature>::default(),
     ]
 }
 
@@ -81,7 +81,7 @@ impl Default for DevKit {
     fn default() -> Self {
         Self {
             features: all_features(),
-            docs: docs::Docs::default(),
+            docs: docs::Docs,
             settings: Settings::live(),
             natives: Natives::bundled(),
             workspaces: Vec::new(),
@@ -254,7 +254,8 @@ impl DevKit {
         if let Some((_, Some(problems))) = &self.last {
             return problems.clone();
         }
-        let problems = self.with_ctx(ws, |cx, features| features.iter().flat_map(|f| f.problems(cx)).collect::<Vec<_>>());
+        let problems =
+            self.with_ctx(ws, |cx, features| features.iter().flat_map(|f| f.problems(cx)).collect::<Vec<_>>());
         let problems = problems.unwrap_or_default();
         if let Some((_, p)) = &mut self.last {
             *p = Some(problems.clone());
@@ -280,7 +281,8 @@ impl DevKit {
 
     /// The workspace and parsed document of a command's window.
     fn command_doc(&mut self, inv: &Invocation) -> (Option<usize>, Option<Doc>) {
-        let ws = inv.project().and_then(|p| p.root().ok()).map(|root| self.workspace_for(&format!("{}/", slash(&root))));
+        let ws =
+            inv.project().and_then(|p| p.root().ok()).map(|root| self.workspace_for(&format!("{}/", slash(&root))));
         let doc = inv.editor().and_then(|e| {
             let d = e.document().ok()?;
             let path = e.path();
@@ -303,7 +305,11 @@ impl DevKit {
         });
         let item = match text {
             Some((text, tooltip)) => StatusItem { text, tooltip: Some(tooltip), command: Some("show-docs".into()) },
-            None => StatusItem { text: "CfxLua".into(), tooltip: Some("OpenIDEA-CfxLUA".into()), command: Some("show-docs".into()) },
+            None => StatusItem {
+                text: "CfxLua".into(),
+                tooltip: Some("OpenIDEA-CfxLUA".into()),
+                command: Some("show-docs".into()),
+            },
         };
         host::set_status_item(STATUS_SIDE, &item);
     }
@@ -436,7 +442,8 @@ impl Providers for DevKit {
         // Asked once per document version: the moment to publish its problems too.
         let problems = self.problems(ws);
         self.publish(ws, &slash(&d.path), &problems);
-        let markers = self.with_ctx(ws, |cx, features| features.iter().flat_map(|f| f.line_markers(cx)).collect::<Vec<_>>());
+        let markers =
+            self.with_ctx(ws, |cx, features| features.iter().flat_map(|f| f.line_markers(cx)).collect::<Vec<_>>());
         markers
             .unwrap_or_default()
             .into_iter()
@@ -457,8 +464,8 @@ impl Providers for DevKit {
             .filter(|p| p.start <= end && start <= p.end)
             .flat_map(|p| p.fixes.iter().cloned().map(|f| (f, "quickfix")))
             .collect();
-        if let Some(intentions) =
-            self.with_ctx(ws, |cx, features| features.iter().flat_map(|f| f.intentions(cx, start, end)).collect::<Vec<_>>())
+        if let Some(intentions) = self
+            .with_ctx(ws, |cx, features| features.iter().flat_map(|f| f.intentions(cx, start, end)).collect::<Vec<_>>())
         {
             fixes.extend(intentions.into_iter().map(|i| (i.fix, i.kind)));
         }
@@ -483,14 +490,26 @@ impl Providers for DevKit {
 impl Views for DevKit {
     fn render(&mut self, view: &str, viewport: Option<Viewport>, ctx: &Invocation) -> Result<View, Error> {
         let (ws, doc) = self.command_doc(ctx);
-        let cx = CommandCx { ws: ws.map(|i| &self.workspaces[i]), settings: &self.settings, natives: &self.natives, doc: doc.as_ref(), inv: ctx };
+        let cx = CommandCx {
+            ws: ws.map(|i| &self.workspaces[i]),
+            settings: &self.settings,
+            natives: &self.natives,
+            doc: doc.as_ref(),
+            inv: ctx,
+        };
         self.docs.render(&cx, view, viewport)
     }
 
     fn handle(&mut self, view: &str, event: ViewEvent, ctx: &Invocation) -> Result<(), Error> {
         self.settings.reset();
         let (ws, doc) = self.command_doc(ctx);
-        let cx = CommandCx { ws: ws.map(|i| &self.workspaces[i]), settings: &self.settings, natives: &self.natives, doc: doc.as_ref(), inv: ctx };
+        let cx = CommandCx {
+            ws: ws.map(|i| &self.workspaces[i]),
+            settings: &self.settings,
+            natives: &self.natives,
+            doc: doc.as_ref(),
+            inv: ctx,
+        };
         self.docs.handle(&cx, view, event)
     }
 }

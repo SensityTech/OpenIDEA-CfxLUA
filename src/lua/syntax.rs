@@ -274,7 +274,9 @@ impl Source {
                 let (open, close, args) = match s {
                     Seg::Call { open, close, args } => (*open, *close, args.clone()),
                     Seg::StrCall { tok } => (*tok, Some(*tok), vec![(*tok, *tok + 1)]),
-                    Seg::TableCall { open, close } => (*open, *close, vec![(*open, close.map_or(*open + 1, |c| c + 1))]),
+                    Seg::TableCall { open, close } => {
+                        (*open, *close, vec![(*open, close.map_or(*open + 1, |c| c + 1))])
+                    }
                     _ => continue,
                 };
                 let name_tok = match si.checked_sub(1).map(|p| &c.segs[p]) {

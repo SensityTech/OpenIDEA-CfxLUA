@@ -138,10 +138,10 @@ fn collect_table(src: &Source, open: usize, close: usize, e: &mut Entry) {
         }
         if b == a + 1 {
             push_string(src, a, true, &mut e.values);
-        } else if src.is_op(a, "{") {
-            if let Some(c) = src.pair[a] {
-                collect_table(src, a, c, e);
-            }
+        } else if src.is_op(a, "{")
+            && let Some(c) = src.pair[a]
+        {
+            collect_table(src, a, c, e);
         }
     }
 }
@@ -173,11 +173,17 @@ mod tests {
         );
         let e = entries(&src);
         let names: Vec<&str> = e.iter().map(|e| e.name.as_str()).collect();
-        assert_eq!(names, ["fx_version", "game", "client_script", "client_scripts", "server_scripts", "data_file", "convar_category"]);
+        assert_eq!(
+            names,
+            ["fx_version", "game", "client_script", "client_scripts", "server_scripts", "data_file", "convar_category"]
+        );
         assert_eq!(e[3].values.iter().map(|v| v.text.as_str()).collect::<Vec<_>>(), ["client/*.lua", "ui/**.lua"]);
         assert!(e[3].values[0].in_table);
         assert_eq!(e[4].values.len(), 2);
-        assert_eq!(e[5].values.iter().map(|v| v.text.as_str()).collect::<Vec<_>>(), ["DLC_ITYP_REQUEST", "stream/x.ytyp"]);
+        assert_eq!(
+            e[5].values.iter().map(|v| v.text.as_str()).collect::<Vec<_>>(),
+            ["DLC_ITYP_REQUEST", "stream/x.ytyp"]
+        );
         assert_eq!(e[6].values.len(), 6, "convar_category: name, description and nested positional fields");
     }
 }

@@ -126,7 +126,12 @@ pub fn project_games(settings: &Settings, detected: &[Game]) -> Vec<Game> {
 /// The natives sets a script may call: client sets of the project's games
 /// (narrowed to its resource's `game` in auto mode), the server set, as the
 /// script's side and the settings allow. Manifests see none.
-pub fn visible_sets(settings: &Settings, detected: &[Game], side: Side, resource_games: Option<&[Game]>) -> Vec<NativeSet> {
+pub fn visible_sets(
+    settings: &Settings,
+    detected: &[Game],
+    side: Side,
+    resource_games: Option<&[Game]>,
+) -> Vec<NativeSet> {
     if !settings.enabled() {
         return Vec::new();
     }
@@ -163,7 +168,11 @@ mod tests {
         assert_eq!(visible_sets(&s, &[], Side::Manifest, None), []);
         let both = [Game::Gta5, Game::Rdr3];
         assert_eq!(visible_sets(&s, &both, Side::Client, Some(&[Game::Rdr3])), [NativeSet::Rdr3]);
-        assert_eq!(visible_sets(&s, &both, Side::Client, Some(&[])), [NativeSet::Gta5, NativeSet::Rdr3], "game 'common'");
+        assert_eq!(
+            visible_sets(&s, &both, Side::Client, Some(&[])),
+            [NativeSet::Gta5, NativeSet::Rdr3],
+            "game 'common'"
+        );
         let s = Settings::defaults().with("game", Value::from("redm")).with("serverNatives", Value::from(false));
         assert_eq!(visible_sets(&s, &[], Side::Unknown, Some(&[Game::Gta5])), [NativeSet::Rdr3]);
     }

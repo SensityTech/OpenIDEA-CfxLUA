@@ -43,7 +43,12 @@ impl Fixture {
             })
             .collect();
         let refs: Vec<(&str, &str)> = stripped.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
-        Self { ws: Workspace::from_files(ROOT, &refs), settings: Settings::defaults(), natives: Natives::from_natives(Vec::new()), carets }
+        Self {
+            ws: Workspace::from_files(ROOT, &refs),
+            settings: Settings::defaults(),
+            natives: Natives::from_natives(Vec::new()),
+            carets,
+        }
     }
 
     pub fn with_settings(mut self, settings: Settings) -> Self {
@@ -64,7 +69,11 @@ impl Fixture {
     pub fn index(&self, feature: &dyn Feature) {
         for f in self.ws.files() {
             let Some(text) = f.text.as_deref() else { continue };
-            let src = if matches!(f.kind, FileKind::Lua | FileKind::Manifest) { Source::new(text) } else { Source::plain(text) };
+            let src = if matches!(f.kind, FileKind::Lua | FileKind::Manifest) {
+                Source::new(text)
+            } else {
+                Source::plain(text)
+            };
             feature.index_file(&self.ws, &f.path, f.kind, &src);
         }
         feature.indexed(&self.ws);

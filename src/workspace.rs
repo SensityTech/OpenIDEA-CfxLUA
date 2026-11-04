@@ -47,7 +47,11 @@ pub struct Workspace {
 
 impl Workspace {
     pub fn new(root: &str) -> Self {
-        Self { root: slash(root).trim_end_matches('/').to_owned(), native_backslashes: root.contains('\\'), ..Self::default() }
+        Self {
+            root: slash(root).trim_end_matches('/').to_owned(),
+            native_backslashes: root.contains('\\'),
+            ..Self::default()
+        }
     }
 
     /// An in-memory workspace (tests): `(project-relative path, text)`.
@@ -199,7 +203,10 @@ mod tests {
         let ws = Workspace::from_files(
             "C:/srv",
             &[
-                ("resources/[core]/shop/fxmanifest.lua", "fx_version 'cerulean'\ngame 'gta5'\nclient_script 'client/*.lua'\n"),
+                (
+                    "resources/[core]/shop/fxmanifest.lua",
+                    "fx_version 'cerulean'\ngame 'gta5'\nclient_script 'client/*.lua'\n",
+                ),
                 ("resources/[core]/shop/client/main.lua", "print(1)"),
                 ("loose.lua", "print(2)"),
             ],

@@ -42,7 +42,11 @@ impl Settings {
         if let Some(v) = self.values.borrow().get(key) {
             return v.clone();
         }
-        let v = if self.live { openidea_plugin::host::setting(key).and_then(|s| serde_json::from_str(&s).ok()) } else { None };
+        let v = if self.live {
+            openidea_plugin::host::setting(key).and_then(|s| serde_json::from_str(&s).ok())
+        } else {
+            None
+        };
         self.values.borrow_mut().insert(key.to_owned(), v.clone());
         v
     }

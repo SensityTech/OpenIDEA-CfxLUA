@@ -62,8 +62,11 @@ impl Glob {
 
     /// Whether the resource-relative path `rel` (forward slashes) matches.
     pub fn matches(&self, rel: &str) -> bool {
-        let s: Vec<char> =
-            if self.case_sensitive { rel.chars().collect() } else { rel.chars().map(|c| c.to_ascii_lowercase()).collect() };
+        let s: Vec<char> = if self.case_sensitive {
+            rel.chars().collect()
+        } else {
+            rel.chars().map(|c| c.to_ascii_lowercase()).collect()
+        };
         matches_at(&self.parts, &s)
     }
 
