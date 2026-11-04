@@ -260,7 +260,7 @@ Natives get renamed as research progresses. Old names stay callable:
 - old names, usually starting with `_` (for example `_GET_RAYCAST_RESULT`, now `GET_SHAPE_TEST_RESULT`, so `GetRaycastResult` still works);
 - hash aliases, callable as `N_0x...`.
 
-The IDE resolves both, shows them struck through, and its quick documentation names the current native. Prefer the current name in new code.
+OpenIDEA-CfxLUA hides them from completion unless you ask for them, and their documentation names the current native. Prefer the current name in new code.
 
 ## Client, server and RPC natives
 

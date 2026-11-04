@@ -1,5 +1,5 @@
 {
-  "_comment": "Lua types the Cfx.re native databases cannot express. Keys are native names (natives_cfx.json) and parameter names as written in the database. Read by com.tang.intellij.lua.cfx.natives.CfxNativeOverrides; any change regenerates the stubs.",
+  "_comment": "Lua types the Cfx.re native databases cannot express. Keys are native names (natives_cfx.json) and parameter names as written in the database. Read by src/natives; any change applies on the next load.",
   "returnTypes": {
     "DOOR_SYSTEM_GET_ACTIVE": "integer[][]",
     "GET_ACTIVE_PLAYERS": "integer[]",

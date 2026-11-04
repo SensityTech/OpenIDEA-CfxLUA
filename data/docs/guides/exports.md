@@ -123,7 +123,7 @@ end)
 
 ## Typing exports for the IDE
 
-Annotate the function you export, so that callers in the same project get completion and parameter info:
+Annotate the function you export, so that callers in the same project get completion and signature help from lua-language-server:
 
 ```lua
 ---@param playerId integer

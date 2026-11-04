@@ -25,7 +25,7 @@ pub const SHOW_DOCS: &str = "show-docs";
 const PREFS: &str = "docs.prefs";
 const PREFS_MAX: usize = 64 * 1024;
 const PENDING: Duration = Duration::from_secs(120);
-const WHERE: &str = "The documentation is in the CfxLua tool window (View > Tool Windows > CfxLua). \
+const WHERE: &str = "The documentation is in the CfxLua tool window (its button is on the left tool window bar). \
                      Put the caret on a native, a hash literal, a built-in event or a manifest directive to show its page there.";
 
 #[derive(Default)]

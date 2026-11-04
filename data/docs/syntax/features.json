@@ -11,7 +11,7 @@
       "Single target only: `a, b += 1, 1` is a syntax error.",
       "It is a statement, not an expression: `print(a += 1)` does not compile.",
       "The operator must be written without spaces: `a + = 1` is a syntax error.",
-      "The runtime does not protect `<const>` locals: `c += 1` on a constant is either ignored or really modifies it. Sensity DevKit reports it as an error."
+      "The runtime does not protect `<const>` locals: `c += 1` on a constant is either ignored or really modifies it. OpenIDEA-CfxLUA reports it as an error."
     ]
   },
   {
@@ -84,7 +84,7 @@
     "example": "local MAX_PLAYERS <const> = 48\nlocal SHOP <const> = vector3(25.7, -1347.3, 29.5)",
     "description": "Standard Lua 5.4: a constant local cannot be assigned after its declaration. Assigning it with `=` is a compile error.",
     "pitfalls": [
-      "Compound assignment (`+=`, `-=`, ...) on a `<const>` local is not rejected by the runtime and behaves unpredictably. Sensity DevKit reports it.",
+      "Compound assignment (`+=`, `-=`, ...) on a `<const>` local is not rejected by the runtime and behaves unpredictably. OpenIDEA-CfxLUA reports it.",
       "Only the variable is constant: a `<const>` table can still have its fields modified."
     ]
   },

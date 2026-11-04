@@ -67,7 +67,7 @@ if hasWeapon then
 end
 ```
 
-With the project's game set correctly, parameter info (`Ctrl+P`) and quick documentation show the signature of the game the file targets.
+With the project's game set correctly, completion and its documentation show the signature of the game the file targets.
 
 ### Platform natives that differ
 
