@@ -58,6 +58,7 @@ jobs:
           src="$RUNNER_TEMP/openidea"
           git clone --quiet --filter=blob:none https://github.com/l0ng-ai/openidea "$src"
           git -C "$src" checkout --quiet "$REF"
+          mkdir -p "$src/crates/ide-host/examples"
           cp scripts/openidea-start-check.rs "$src/crates/ide-host/examples/cfxlua_start_check.rs"
           cargo build --release --locked --manifest-path "$src/Cargo.toml" -p ide-host \
             --bin openidea-plugin --example cfxlua_start_check

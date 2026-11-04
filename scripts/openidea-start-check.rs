@@ -2,6 +2,7 @@
 // activates the component: `openidea-plugin check` only compares interface names and versions, not their types.
 // Built as an example of OpenIDEA's `ide-host` crate by .github/workflows/openidea-compat.yml:
 //
+//   mkdir -p <openidea>/crates/ide-host/examples
 //   cp scripts/openidea-start-check.rs <openidea>/crates/ide-host/examples/cfxlua_start_check.rs
 //   cargo run --release --locked -p ide-host --example cfxlua_start_check -- <package.oiplugin> <command>
 
