@@ -324,7 +324,12 @@ impl Source {
         let p = self.toks[i - 1];
         let ptext = p.text(&self.text);
         match p.kind {
-            Tok::Keyword => matches!(ptext, "do" | "then" | "else" | "end" | "repeat" | "break" | "return"),
+            Tok::Keyword => {
+                matches!(
+                    ptext,
+                    "do" | "then" | "else" | "end" | "repeat" | "break" | "return" | "nil" | "true" | "false"
+                )
+            }
             Tok::Op => matches!(ptext, ";" | ")" | "]" | "}"),
             Tok::Name | Tok::Number | Tok::Str { .. } | Tok::LongStr | Tok::Hash { .. } => true,
             _ => true,
