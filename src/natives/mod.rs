@@ -6,7 +6,7 @@ mod sources;
 mod update;
 
 pub use feature::{NativesFeature, WRONG_SIDE, markdown};
-pub use update::{AUTO_UPDATE, SCHEDULED_UPDATE, UPDATE};
+pub use update::{AUTO_UPDATE, SCHEDULED_UPDATE, UPDATE, take_changed};
 
 pub use model::{Native, NativeSet, Param, Return};
 
@@ -84,8 +84,10 @@ impl Natives {
         self.sets[set as usize].get().is_some()
     }
 
-    pub fn invalidate(&mut self) {
-        self.sets = Default::default();
+    pub fn invalidate(&mut self, sets: &[NativeSet]) {
+        for &set in sets {
+            self.sets[set as usize] = OnceCell::new();
+        }
     }
 
     pub fn find(&self, lua_name: &str, sets: &[NativeSet]) -> Option<&Native> {

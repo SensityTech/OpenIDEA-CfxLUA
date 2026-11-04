@@ -188,8 +188,8 @@ impl DevKit {
             }
             return;
         }
-        self.load_catalogs();
         if self.deriving || !self.derive.is_empty() && (left == 0 || self.slices >= DERIVE_EVERY) {
+            self.load_catalogs();
             self.deriving = !self.derive_slice();
             if !self.deriving {
                 self.slices = 0;
@@ -197,9 +197,13 @@ impl DevKit {
         } else if left > 0 {
             let task = host::begin_task("CfxLua: indexing resources", false);
             self.read_slice(slice.reads);
-            self.index_pending(slice);
+            // Catalogs as soon as the manifests are read: loading one in an editor call overruns its 50 ms.
+            let bytes = if self.load_catalogs() { slice.bytes / 4 } else { slice.bytes };
+            self.index_pending(Slice { bytes, ..slice });
             self.slices += 1;
             task.report(0, Some((self.unread.len() + self.pending.len()) as u32), None);
+        } else {
+            self.load_catalogs();
         }
         if self.indexing && self.unread.is_empty() && self.pending.is_empty() && self.derive.is_empty() {
             self.indexing = false;
@@ -247,7 +251,7 @@ impl DevKit {
         }
     }
 
-    fn load_catalogs(&mut self) {
+    fn load_catalogs(&mut self) -> bool {
         let ready: Vec<usize> = self
             .catalogs
             .iter()
@@ -255,12 +259,15 @@ impl DevKit {
             .filter(|i| !self.unread.iter().any(|(j, p)| j == i && project::file_kind(p) == FileKind::Manifest))
             .collect();
         self.catalogs.retain(|i| !ready.contains(i));
+        let mut loaded = false;
         for i in ready {
             let games = natives::project_games(&self.settings, &self.workspaces[i].detected_games());
             for set in games.into_iter().map(natives::NativeSet::for_game).chain([natives::NativeSet::Server]) {
+                loaded |= !self.natives.is_loaded(set);
                 self.natives.catalog(set);
             }
         }
+        loaded
     }
 
     fn index_pending(&mut self, slice: Slice) {
@@ -531,9 +538,16 @@ impl Plugin for DevKit {
             .find_map(|f| f.command(&cx, id, arg))
             .unwrap_or_else(|| Err(Error::NotFound(format!("command {id}"))));
         if matches!(id, natives::UPDATE | natives::SCHEDULED_UPDATE) {
-            // The catalogs reload with the stored update on next use.
-            self.natives.invalidate();
-            self.last = None;
+            let changed = natives::take_changed();
+            if !changed.is_empty() {
+                // Reloaded here, under the command's budget: an editor call loading a catalog overruns its 50 ms.
+                let reload: Vec<_> = changed.iter().copied().filter(|&s| self.natives.is_loaded(s)).collect();
+                self.natives.invalidate(&changed);
+                for set in reload {
+                    self.natives.catalog(set);
+                }
+                self.last = None;
+            }
         }
         result
     }
@@ -768,6 +782,61 @@ mod tests {
         assert!(tooltip.contains("listed in fxmanifest.lua"), "{tooltip}");
         let (text, _) = status_text(&ws, &Settings::defaults(), "/p/shop/fxmanifest.lua");
         assert_eq!(text, "Resource manifest · shop · FiveM");
+    }
+
+    fn windows_server_resource(host: &openidea_plugin::mock::MockHost) -> (DevKit, String, String) {
+        host.set_project_root(Some(r"C:\srv\res"));
+        host.add_file(
+            "fxmanifest.lua",
+            "fx_version 'cerulean'\r\ngames { 'gta5', 'gta5enhanced' }\r\n\
+             server_scripts {\r\n    '@mysql-async/lib/MySQL.lua',\r\n    \"src/api/core/S*.lua\",\r\n}\r\n",
+        );
+        let body = "local SMain = {}\r\nfunction SMain.Start() end\r\n".to_owned();
+        host.add_file("src/api/core/SMain.lua", &body);
+        let mut kit = DevKit::default();
+        kit.activate(&host.context("sensity.cfxlua")).unwrap();
+        (kit, r"C:\srv\res\src\api\core\SMain.lua".to_owned(), body)
+    }
+
+    #[test]
+    fn natives_are_loaded_at_activation_and_survive_update_checks() {
+        let host = openidea_plugin::mock::MockHost::install();
+        let (mut kit, path, body) = windows_server_resource(&host);
+        assert!(kit.natives.is_loaded(natives::NativeSet::Server), "loaded by the activation, not by an editor call");
+        let inv = host.invocation();
+        kit.handle_events(&[Event::FileOpened(path.clone()), Event::EditorFocused(Some(path.clone()))], &inv);
+        let doc = Document { path, language: "lua".into(), version: 2, text: format!("{body}\nGetEntityCo") };
+        let coords = |kit: &mut DevKit| {
+            kit.completion(&doc, Position::new(3, 11), None).iter().any(|i| i.label == "GetEntityCoords")
+        };
+        assert!(coords(&mut kit));
+        kit.handle_events(&[Event::Scheduled], &inv);
+        let _ = kit.run_command(natives::UPDATE, &inv, None);
+        assert!(kit.natives.is_loaded(natives::NativeSet::Server), "an update that changed nothing keeps the catalogs");
+        assert!(coords(&mut kit));
+    }
+
+    #[test]
+    fn go_to_definition_of_a_native_opens_its_generated_declaration() {
+        let host = openidea_plugin::mock::MockHost::install();
+        let (mut kit, path, body) = windows_server_resource(&host);
+        let text = format!("{body}local c = GetEntityCoords(ped)\r\n");
+        let doc = Document { path, language: "lua".into(), version: 2, text };
+        let at = Position::new(2, 14);
+        assert!(kit.definition(&doc, at).is_empty());
+        let told = host.notifications();
+        assert_eq!(told.len(), 1, "{told:?}");
+        assert!(told[0].body.contains(natives::feature::STUBS), "{told:?}");
+        assert!(kit.definition(&doc, at).is_empty());
+        assert_eq!(host.notifications().len(), 1, "told once");
+        host.add_file(
+            natives::feature::STUBS,
+            "---@meta\n\n---Gets the coordinates.\nfunction GetEntityCoords(entity, alive) end\n",
+        );
+        let found = kit.definition(&doc, at);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(found[0].path.ends_with(r".cfxlua\natives.lua"), "{}", found[0].path);
+        assert_eq!((found[0].range.start.line, found[0].range.start.character), (3, 9));
     }
 
     fn demo_files(dir: &std::path::Path, root: &std::path::Path, out: &mut Vec<(String, String)>) {

@@ -53,6 +53,15 @@ thread_local! {
     static IN_EFFECT: RefCell<[Option<Option<Rc<Delta>>>; 3]> = const { RefCell::new([None, None, None]) };
 }
 
+thread_local! {
+    static CHANGED: RefCell<Vec<NativeSet>> = const { RefCell::new(Vec::new()) };
+}
+
+/// The sets the last update changed (taken once).
+pub fn take_changed() -> Vec<NativeSet> {
+    CHANGED.with(|c| std::mem::take(&mut *c.borrow_mut()))
+}
+
 fn known(set: NativeSet) -> Option<Option<Rc<Delta>>> {
     IN_EFFECT.with(|m| m.borrow()[set as usize].clone())
 }
@@ -460,6 +469,7 @@ fn run_with(natives: &Natives, manual: bool, budget: usize) -> CommandResult {
         host::log(LogLevel::Info, "natives: update cancelled");
         return Ok(None);
     };
+    CHANGED.with(|c| c.borrow_mut().extend(outcome.changed.iter().copied()));
     let changed: Vec<&str> = outcome.changed.iter().map(|s| s.id()).collect();
     host::log(
         LogLevel::Info,
