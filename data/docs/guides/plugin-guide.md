@@ -9,7 +9,7 @@ report. This guide describes what it does and where to find it.
 
 OpenIDEA-CfxLUA needs two things:
 
-- OpenIDEA built from source at revision `859f634`: the plugin needs plugin API 1.0, which no OpenIDEA release has yet and later revisions may still change;
+- OpenIDEA 0.1.37 or newer;
 - [lua-language-server](https://luals.github.io/#install) on your `PATH` (restart OpenIDEA after installing it).
 
 The plugin brings the Cfx.re knowledge; lua-language-server brings the Lua engine (see *Working with

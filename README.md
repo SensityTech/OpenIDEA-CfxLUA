@@ -176,7 +176,7 @@ The tool window follows the IDE theme ([light theme](assets/screenshots/tool-win
 
 | | |
 |---|---|
-| [OpenIDEA](https://github.com/l0ng-ai/openidea) built from source at [`859f634`](https://github.com/l0ng-ai/openidea/commit/859f63454eed53ae97eb5881d5f076504848a6aa) | The IDE with plugin API 1.0, which no OpenIDEA release has yet and later revisions may still change. Check out that revision, then `pnpm install` and `pnpm tauri build` (Rust, Node 22.18+, pnpm). |
+| [OpenIDEA](https://github.com/l0ng-ai/openidea/releases/latest) 0.1.37 or newer | The IDE (plugin API 1.0). |
 | [lua-language-server](https://luals.github.io/#install) on your `PATH` | OpenIDEA's Lua support: types of your own code, hover, signature help, references. OpenIDEA-CfxLUA feeds it the natives and the runtime API ([see below](#working-with-lua-language-server)). |
 
 Install lua-language-server with `winget install LuaLS.lua-language-server`, `brew install lua-language-server`, your
