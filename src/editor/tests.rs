@@ -239,6 +239,60 @@ fn outlined(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// The fixture of the JetBrains plugin's structure view, whose comments say what each line gives.
+#[test]
+fn the_structure_of_the_intellij_fixture() {
+    assert_eq!(
+        outlined(include_str!("testdata/structure.lua")),
+        [
+            "0 Emmy2 class",
+            "1 name field",
+            "1 age field",
+            "1 doit() method",
+            "1 sayHello() method",
+            "1 baz() method",
+            "0 f variable",
+            "0 a variable",
+            "0 globalFunc() function",
+            "0 globalFuncWithArgs(a, b, c) function",
+            "0 localFunc() function",
+            "0 localFunc2() function",
+            "1 localFuncNestedInLocalFunc2() function",
+            "1 bobby variable",
+            "0 d variable",
+            "1 foo() function",
+            "1 bar(a, b) function",
+            "0 g variable",
+            // The last line of the fixture is not Lua: what follows `local F` reads as `A.x = function`.
+            "0 A variable",
+            "1 B.C field",
+            "2 doit() method",
+            "2 doitAgain() function",
+            "2 var field",
+            "1 x() function",
+            "2 x variable",
+            "0 globalVar variable",
+            "0 globalFunc2() function",
+            "1 j variable",
+            "0 globalTable variable",
+            "1 a() function",
+            "0 globalC2 variable",
+            "0 xyz variable",
+            "0 <anonymous>() function",
+            "1 a variable",
+            "1 F variable",
+        ]
+    );
+    assert_eq!(
+        outlined(
+            "function A.B.C.doit() end
+A.B.C.again = function() end"
+        ),
+        ["0 A.B.C variable", "1 doit() method", "1 again() function"]
+    );
+    assert_eq!(outlined("---@class A\nlocal m = {}\nfunction m:method()end"), ["0 A class", "1 method() method"]);
+}
+
 #[test]
 fn the_structure_lists_declarations_with_what_they_hold() {
     let text = "local M = { name = 1, run = function(a) end }\nlocal function helper(x, ...)\n  local inner = 2\nend\n\

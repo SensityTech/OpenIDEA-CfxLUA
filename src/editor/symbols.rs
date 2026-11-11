@@ -17,6 +17,8 @@ pub struct Symbol {
 enum Kind {
     GlobalVar,
     LocalVar,
+    /// A local that a `---@class` comment names: it is listed under the name of the class.
+    Class,
     GlobalFunction,
     LocalFunction,
     Method,
@@ -59,6 +61,19 @@ fn name_of<'a>(expr: Node<'a>) -> Option<&'a str> {
     }
 }
 
+/// The classes the documentation comment above `statement` declares with `---@class`, in order.
+fn classes<'a>(statement: Node<'a>) -> Vec<&'a str> {
+    let leading = statement.all_tokens().take_while(|token| token.kind().is_trivia());
+    let Some(doc) = leading.filter(|token| token.is(T::DocComment)).last() else { return Vec::new() };
+    let named = |line: &'a str| {
+        let rest = line.trim_start().trim_start_matches('-').trim_start().strip_prefix("@class")?.trim_start();
+        let rest = if rest.starts_with('(') { rest.split_once(')')?.1.trim_start() } else { rest };
+        let end = rest.find(|c: char| !(c.is_alphanumeric() || c == '_' || c == '.')).unwrap_or(rest.len());
+        (end > 0).then(|| &rest[..end])
+    };
+    doc.text().lines().filter_map(named).collect()
+}
+
 fn selection(node: Node) -> (usize, usize) {
     node.token(T::Id).map_or(node.code_range(), |id| id.range())
 }
@@ -79,6 +94,11 @@ impl Outline {
     /// Adds `element` where the walk stands; a name already listed there is replaced in place.
     fn add(&mut self, element: usize) {
         let name = self.elements[element].name.clone();
+        self.add_as(element, name);
+    }
+
+    /// Adds `element` under the name the code knows it by.
+    fn add_as(&mut self, element: usize, name: String) {
         let Some(context) = self.contexts.last_mut() else { return };
         match context.names.iter_mut().find(|(known, _)| *known == name) {
             Some(slot) => slot.1 = element,
@@ -144,7 +164,9 @@ impl Outline {
             let Some(name) = field.token(T::Id) else { continue };
             let value = field.expr();
             let closure = value.filter(|value| value.is(N::ClosureExpr));
+            let class = self.elements[owner].kind == Kind::Class;
             let child = match closure {
+                Some(closure) if class => self.create(Kind::Method, name.text(), params(closure), field),
                 Some(closure) => self.create(Kind::LocalFunction, name.text(), params(closure), field),
                 None => self.create(Kind::LocalVar, name.text(), String::new(), field),
             };
@@ -168,14 +190,17 @@ impl Outline {
                 },
                 None => None,
             };
-            let local = owner.is_some_and(|owner| self.elements[owner].kind == Kind::LocalVar);
+            let held = owner.map(|owner| self.elements[owner].kind);
             let value = values.get(i).copied();
             let closure = value.filter(|value| value.is(N::ClosureExpr));
-            let child = match (closure, local) {
-                (Some(closure), true) => self.create(Kind::LocalFunction, name, params(closure), target),
-                (Some(closure), false) => self.create(Kind::GlobalFunction, name, params(closure), target),
-                (None, true) => self.create(Kind::LocalVar, name, String::new(), target),
-                (None, false) => self.create(Kind::GlobalVar, name, String::new(), target),
+            let child = match (closure, held) {
+                (Some(closure), Some(Kind::Class)) => self.create(Kind::Method, name, params(closure), target),
+                (Some(closure), Some(Kind::LocalVar)) => {
+                    self.create(Kind::LocalFunction, name, params(closure), target)
+                }
+                (Some(closure), _) => self.create(Kind::GlobalFunction, name, params(closure), target),
+                (None, Some(Kind::Class | Kind::LocalVar)) => self.create(Kind::LocalVar, name, String::new(), target),
+                (None, _) => self.create(Kind::GlobalVar, name, String::new(), target),
             };
             match owner {
                 Some(owner) => self.elements[owner].children.push(child),
@@ -194,9 +219,13 @@ impl Outline {
             N::LocalDef => {
                 let values: Vec<Node> = node.child(N::ExprList).into_iter().flat_map(Node::exprs).collect();
                 let names = node.child(N::NameList).into_iter().flat_map(|list| list.children_of(N::NameDef));
+                let declared = classes(node);
                 for (i, name) in names.enumerate() {
-                    let element = self.create(Kind::LocalVar, name.code(), String::new(), name);
-                    self.add(element);
+                    let element = match declared.get(i) {
+                        Some(class) => self.create(Kind::Class, class, String::new(), name),
+                        None => self.create(Kind::LocalVar, name.code(), String::new(), name),
+                    };
+                    self.add_as(element, name.code().to_owned());
                     if let Some(table) = values.get(i).filter(|value| value.is(N::TableExpr)) {
                         self.table(*table, element);
                     }
@@ -246,7 +275,7 @@ impl Outline {
     /// `a` holding only `b` holding only `c` is shown as `a.b.c`.
     fn compress(&mut self, element: usize) {
         loop {
-            let variable = |kind: Kind| matches!(kind, Kind::GlobalVar | Kind::LocalVar);
+            let variable = |kind: Kind| matches!(kind, Kind::GlobalVar | Kind::LocalVar | Kind::Class);
             let only = match self.elements[element].children.as_slice() {
                 [only] if variable(self.elements[element].kind) && variable(self.elements[*only].kind) => *only,
                 _ => break,
@@ -265,6 +294,7 @@ impl Outline {
         let kind = match e.kind {
             Kind::GlobalFunction | Kind::LocalFunction => "function",
             Kind::Method => "method",
+            Kind::Class => "class",
             Kind::LocalVar if nested => "field",
             Kind::GlobalVar | Kind::LocalVar => "variable",
         };
