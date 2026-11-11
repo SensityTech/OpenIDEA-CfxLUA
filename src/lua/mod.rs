@@ -3,6 +3,7 @@ pub mod joaat;
 pub mod lexer;
 pub mod parser;
 pub mod scope;
+pub mod std;
 pub mod syntax;
 pub mod token;
 pub mod tree;
