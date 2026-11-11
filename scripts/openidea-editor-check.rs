@@ -1,28 +1,39 @@
 // Asks a plugin package what the editor would receive for a file, through OpenIDEA's own plugin host and without
-// the editor: semantic tokens, folds, structure and the occurrences of a word. The calls run under the host's limits
-// for editor calls, so a provider that is too slow answers nothing here as it would in the IDE.
+// the editor: semantic tokens, folds, structure and the occurrences of a word, then what the editor asks after an
+// edit, at its own delays. The calls run under the host's limits for editor calls, so a provider that is too slow
+// answers nothing here as it would in the IDE. The host then stops waiting at its deadline and the time printed is
+// its wait, not what the provider costs: `--patient` lifts the deadline to show that cost.
+// No project is open in this host, so the plugin loads no native catalog: natives come back as unknown globals and
+// completion lists none. What is timed is the reading of the file itself.
 // Built like scripts/openidea-start-check.rs, as an example of OpenIDEA's `ide-host` crate:
 //
 //   cp scripts/openidea-editor-check.rs <openidea>/crates/ide-host/examples/cfxlua_editor_check.rs
-//   cargo run --release --locked -p ide-host --example cfxlua_editor_check -- <package.oiplugin> <file.lua> [word]
+//   cargo run --release --locked -p ide-host --example cfxlua_editor_check -- \
+//       [--patient] <package.oiplugin> <file.lua> [word]
 
-use ide_core::Pos;
+use ide_core::{Pos, Range};
 use ide_host::plugins::{Consent, PluginHost};
 use ide_plugin::{Limits, ProviderDocument};
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::ExitCode;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    let patient = args.iter().position(|a| a == "--patient").map(|at| args.remove(at)).is_some();
     let (Some(package), Some(file)) = (args.first(), args.get(1)) else {
-        eprintln!("usage: cfxlua_editor_check <package.oiplugin> <file.lua> [word]");
+        eprintln!("usage: cfxlua_editor_check [--patient] <package.oiplugin> <file.lua> [word]");
         return ExitCode::from(2);
     };
+    let limits = if patient {
+        Limits { edit_soft: Duration::from_secs(30), edit_hard: Duration::from_secs(30), ..Limits::default() }
+    } else {
+        Limits::default()
+    };
     let dir = std::env::temp_dir().join(format!("cfxlua-editor-check-{}", std::process::id()));
-    let result = check(&dir, Path::new(package), Path::new(file), args.get(2).map(String::as_str));
+    let result = check(&dir, limits, Path::new(package), Path::new(file), args.get(2).map(String::as_str));
     let _ = std::fs::remove_dir_all(&dir);
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -40,19 +51,23 @@ fn slice(lines: &[&str], line: u32, from: u32, to: u32) -> String {
     String::from_utf16_lossy(&units[from..to.max(from)])
 }
 
-fn check(dir: &Path, package: &Path, file: &Path, word: Option<&str>) -> Result<(), String> {
-    let host = PluginHost::new(dir.to_path_buf(), Arc::new(|_: Option<&str>, _| {}), Limits::default())
-        .map_err(|e| e.to_string())?;
+fn check(dir: &Path, limits: Limits, package: &Path, file: &Path, word: Option<&str>) -> Result<(), String> {
+    let host =
+        PluginHost::new(dir.to_path_buf(), Arc::new(|_: Option<&str>, _| {}), limits).map_err(|e| e.to_string())?;
     let unpacked = host.unpack_package(package).map_err(|e| e.to_string())?;
     let installed = host.install_from_dir(&unpacked, &Consent::all()).map_err(|e| e.to_string())?;
     let text = std::fs::read_to_string(file).map_err(|e| format!("{}: {e}", file.display()))?.replace("\r\n", "\n");
     let lines: Vec<&str> = text.split('\n').collect();
     let doc = ProviderDocument { path: file.to_path_buf(), language: "lua".into(), version: 1, text: text.clone() };
 
-    // The first call starts the plugin and parses the file: the second one is what an edit costs.
+    // The first call starts the plugin and reads the file; the calls after it find the file read. A first call past
+    // the deadline runs on after the host gave up: it is left to end, so that the next times are each provider's own.
     let start = Instant::now();
     let first = host.provide_semantic_tokens(&doc).len();
     let cold = start.elapsed();
+    if first == 0 {
+        std::thread::sleep(Limits::default().edit_hard);
+    }
     let start = Instant::now();
     let tokens = host.provide_semantic_tokens(&doc);
     println!("tokens: {} ({first} on the first call, {cold:?}; then {:?})", tokens.len(), start.elapsed());
@@ -102,7 +117,33 @@ fn check(dir: &Path, package: &Path, file: &Path, word: Option<&str>) -> Result<
         println!("occurrences of `{word}`: {} ({:?}): {}", highlights.len(), start.elapsed(), listed.join(", "));
     }
 
+    // What the editor asks after an edit, at the delays of OpenIDEA 0.1.40: completion while typing, occurrences
+    // 300 ms after the edit, line markers at 400, code actions at 500, semantic tokens at 600. Each call finds the
+    // plugin as the one before left it, still busy when that one was late.
+    let typed = ProviderDocument { version: 2, text: format!("{text}\nGetEnt"), ..doc.clone() };
+    let at = Pos::new(lines.len() as u32, 6);
+    let edit = Instant::now();
+    let ask = |delay: u64, what: &str, call: &dyn Fn() -> usize| {
+        std::thread::sleep(Duration::from_millis(delay).saturating_sub(edit.elapsed()));
+        let start = Instant::now();
+        let count = call();
+        println!("  +{delay} ms {what}: {count} ({:?})", start.elapsed());
+        count
+    };
+    println!("after an edit:");
+    ask(100, "completion", &|| host.provide_completion(&typed, at, None).len());
+    ask(300, "occurrences", &|| host.language_document_highlights(&typed, at).len());
+    ask(400, "line markers", &|| host.provide_line_markers(&typed).len());
+    ask(500, "code actions", &|| host.provide_code_actions(&typed, Range::point(at)).len());
+    let coloured = ask(600, "tokens", &|| host.provide_semantic_tokens(&typed).len());
+
     let info = host.info_of(&installed.id).map_err(|e| e.to_string())?;
     println!("{} {}: {:?}", info.id, info.version, info.status);
-    if tokens.is_empty() { Err("no semantic token came back".to_owned()) } else { Ok(()) }
+    if tokens.is_empty() {
+        return Err("no semantic token came back".to_owned());
+    }
+    if coloured == 0 {
+        return Err("no semantic token came back after the edit".to_owned());
+    }
+    Ok(())
 }
