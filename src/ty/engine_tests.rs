@@ -551,3 +551,63 @@ bank.rate = 2
     let table = project.main().1.text.find("local bank = ").expect("the table") + "local bank = ".len();
     assert_eq!(bank.alias, Some(format!("0@({table})table").into()), "the table the class annotates");
 }
+
+#[test]
+#[ignore = "measurement: CFXLUA_PROJECT=<dir> (or CFXLUA_FILES=<file>;<file>) cargo test --release --lib declare_cost_of_real_files -- --ignored --nocapture"]
+fn declare_cost_of_real_files() {
+    let files: Vec<(String, String)> = match std::env::var("CFXLUA_FILES") {
+        Ok(list) => {
+            let paths = list.split(';').filter(|path| !path.is_empty());
+            paths.map(|path| (path.to_owned(), std::fs::read_to_string(path).expect("a readable file"))).collect()
+        }
+        Err(_) => crate::testing::real_project().into_iter().filter(|(path, _)| path.ends_with(".lua")).collect(),
+    };
+    let listed = std::env::var("CFXLUA_FILES").is_ok();
+    let mut project =
+        Project { names: Vec::new(), sources: Vec::new(), index: Index::default(), options: Options::default() };
+    let (mut bytes, mut parsing, mut declaring) = (0, std::time::Duration::ZERO, std::time::Duration::ZERO);
+    let mut kinds: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    let (mut members, mut classes, mut aliases, mut owners, mut slowest) = (0, 0, 0, 0, std::time::Duration::ZERO);
+    for (file, (_, text)) in files.iter().enumerate() {
+        if text.len() > crate::workspace::MAX_FILE {
+            continue;
+        }
+        bytes += text.len();
+        let start = std::time::Instant::now();
+        let src = Rc::new(Source::new(text));
+        src.root();
+        src.docs();
+        src.scopes();
+        let parsed = start.elapsed();
+        project.sources.push(src.clone());
+        project.names.push(format!("{file}.lua"));
+        let file = project.sources.len() as FileId - 1;
+        let start = std::time::Instant::now();
+        let declared = declare(&project.cx(), file, &src);
+        let spent = start.elapsed();
+        parsing += parsed;
+        declaring += spent;
+        slowest = slowest.max(spent);
+        members += declared.members.len();
+        classes += declared.classes.len();
+        aliases += declared.aliases.len();
+        owners += declared.members.iter().map(|member| member.owners.len()).sum::<usize>();
+        for member in &declared.members {
+            *kinds.entry(format!("{:?}", member.kind)).or_default() += 1;
+        }
+        if listed {
+            eprintln!(
+                "{} bytes: parsed in {parsed:?}, declared in {spent:?}: {} members, {} classes",
+                text.len(),
+                declared.members.len(),
+                declared.classes.len()
+            );
+        }
+        project.index.set(file, declared);
+    }
+    eprintln!(
+        "{} files, {bytes} bytes: parsed in {parsing:?}, declared in {declaring:?} (slowest file {slowest:?})",
+        project.sources.len()
+    );
+    eprintln!("{members} members under {owners} class names, {classes} classes, {aliases} aliases: {kinds:?}");
+}
