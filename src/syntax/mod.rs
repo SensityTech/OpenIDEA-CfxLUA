@@ -1,3 +1,4 @@
+pub mod errors;
 pub mod scope;
 pub mod tree;
 
@@ -51,6 +52,8 @@ pub fn check(src: &Source) -> Vec<Problem> {
     decrements(src, &scopes, &stmts, &mut out);
     increments(src, &stmts, &mut out);
     operators(src, &mut out);
+    let unread = errors::errors(src, &out);
+    out.extend(unread);
     out.sort_by_key(|p| p.start);
     out
 }
@@ -324,6 +327,32 @@ mod tests {
     const CONST: &str = "CfxLua does not reject it but ignores or corrupts the assignment";
 
     #[test]
+    fn what_the_parser_cannot_read() {
+        assert_eq!(problems("local x ="), ["=: Expression expected"]);
+        assert_eq!(problems("if a then\n  f()\n"), ["): 'end' expected"]);
+        assert_eq!(problems("x = 1 )\nlocal ok = 1"), ["): Unexpected symbol ')'"]);
+        assert_eq!(problems("t = { 1 2 }"), ["1: , or ; expected"]);
+        assert_eq!(problems("f(a, )"), [",: Expression expected"]);
+        assert!(problems("local t <const> = { .a, [k] = `h` }\nt.x += 1\nlocal a, b in t\n/* c */ f(t?.x)").is_empty());
+    }
+
+    #[test]
+    fn statements_that_are_not_statements() {
+        assert_eq!(problems("foo"), ["foo: syntax error"]);
+        assert_eq!(problems("a.b.c\nf()"), ["a.b.c: syntax error"]);
+        assert_eq!(problems("x = a:b"), ["a:b: Arguments expected"]);
+        assert!(problems("a:b()\n(f)()\nf{}\nf'x'").is_empty());
+    }
+
+    #[test]
+    fn a_named_operator_is_reported_once() {
+        assert_eq!(problems("i++").len(), 1);
+        assert_eq!(problems("if a != b then f() end").len(), 1);
+        assert_eq!(problems("x //= 2").len(), 1);
+        assert_eq!(problems("if a && b then f() end").len(), 1);
+    }
+
+    #[test]
     fn compound_assignment_to_const_and_close() {
         assert_eq!(
             problems(
@@ -370,7 +399,8 @@ mod tests {
                 "local i, t = 1, { n = 1 }\nlocal x = i-- garbage\nt.n--\nt[1]-- note\nlocal y = i -- a comment\n\
                  print(i)--comment after a call\nlocal z = 1--comment after a number\nlocal w--\ni---doc\ni--region x\na--=1\na:m--"
             ),
-            [warn; 5]
+            // Before a documentation or region comment the name is only a statement that is not one.
+            [warn, warn, warn, "i: syntax error", "i: syntax error", warn, warn]
         );
         assert_eq!(
             fixed("local i = 1\nlocal t = { n = 1 }\nt.n-- count down", "Replace with 't.n -= 1'"),
