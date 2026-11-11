@@ -400,23 +400,112 @@ fn comments_are_parsed_apart() {
     assert!(Source::plain("--- not Lua").docs().children().next().is_none());
 }
 
+/// The tokens of the documentation tree cover the text end to end, each one at least a byte long.
+fn covered(src: &Source) -> bool {
+    let root = src.docs();
+    let tokens = root.tree().tokens();
+    let ends = (0..tokens.len()).all(|i| tokens.start(i) < tokens.end(i));
+    tokens.start(0) == 0 && tokens.end(tokens.len() - 1) == src.text.len() && (ends || src.text.is_empty())
+}
+
+#[test]
+fn a_file_being_typed_is_read_at_every_keystroke() {
+    for end in (0..=LIBRARY.len()).filter(|end| LIBRARY.is_char_boundary(*end)) {
+        let src = Source::new(&LIBRARY[..end]);
+        assert!(covered(&src), "the first {end} bytes");
+    }
+    // The same comments with what a keyboard leaves behind: unclosed quotes and brackets, stray signs.
+    let comments = Source::new(LIBRARY).docs().children_of(N::DocComment).count();
+    for junk in ["'", "\"", "(", "{", "[", "<", "|", "@", "`", "\\ ", "\t", "é", "---", "]]"] {
+        let text = LIBRARY.replace("---@", &format!("---{junk}@")).replace(" string", &format!(" {junk}string"));
+        let src = Source::new(&text);
+        assert!(covered(&src), "with {junk:?}");
+        assert_eq!(src.docs().children_of(N::DocComment).count(), comments, "with {junk:?}");
+    }
+}
+
+fn lua_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            lua_files(&path, out);
+        } else if path.extension().is_some_and(|extension| extension == "lua") {
+            out.push(path);
+        }
+    }
+}
+
+#[test]
+#[ignore = "measurement: CFXLUA_PROJECT=<dir> cargo test --release --lib documentation_of_a_real_project -- --ignored --nocapture"]
+fn documentation_of_a_real_project() {
+    let root = std::path::PathBuf::from(std::env::var("CFXLUA_PROJECT").expect("CFXLUA_PROJECT"));
+    let mut paths = Vec::new();
+    lua_files(&root, &mut paths);
+    let (mut files, mut documented, mut comments, mut tags, mut flagged) = (0, 0, 0, 0, 0);
+    let mut by_message: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    let mut by_tag: std::collections::BTreeMap<&'static str, usize> = std::collections::BTreeMap::new();
+    let mut shapes: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    let mut spent = std::time::Duration::ZERO;
+    for path in &paths {
+        let Ok(text) = std::fs::read_to_string(path) else { continue };
+        if text.len() > crate::workspace::MAX_FILE {
+            continue;
+        }
+        files += 1;
+        let src = Source::new(&text);
+        let start = std::time::Instant::now();
+        let root = src.docs();
+        spent += start.elapsed();
+        assert!(covered(&src));
+        let found = root.children_of(N::DocComment).count();
+        if found == 0 {
+            continue;
+        }
+        documented += 1;
+        comments += found;
+        for node in root.descendants().filter(|node| node.kind().name().starts_with("TAG_")) {
+            tags += 1;
+            *by_tag.entry(node.kind().name()).or_default() += 1;
+        }
+        let problems = problems(&src);
+        flagged += usize::from(!problems.is_empty());
+        if std::env::var("CFXLUA_SHAPES").is_ok() {
+            // The kinds of the tokens of each line with a problem, never their text.
+            let tokens = root.tree().tokens();
+            let line = |at: usize| src.text[..at].matches('\n').count() + 1;
+            for problem in &problems {
+                let wanted: usize = problem.split(':').next().and_then(|line| line.parse().ok()).unwrap_or(0);
+                let kinds =
+                    (0..tokens.len()).filter(|i| !tokens.kind(*i).is_trivia() && line(tokens.start(*i)) == wanted);
+                let shape: Vec<&str> = kinds
+                    .map(|i| if tokens.kind(i) == T::DocString { "TEXT" } else { tokens.kind(i).name() })
+                    .collect();
+                *shapes.entry(shape.join(" ")).or_default() += 1;
+            }
+        }
+        for problem in problems {
+            // Only the kind of problem is kept, never a piece of the file.
+            let message = problem.split_once(": ").map_or("", |(_, message)| message).to_owned();
+            *by_message.entry(message).or_default() += 1;
+        }
+    }
+    eprintln!("{files} files, {documented} with documentation: {comments} comments, {tags} tags, read in {spent:?}");
+    eprintln!("tags: {by_tag:?}");
+    eprintln!("{flagged} files with documentation problems: {by_message:?}");
+    let mut shapes: Vec<(usize, String)> = shapes.into_iter().map(|(shape, count)| (count, shape)).collect();
+    shapes.sort_by(|a, b| b.cmp(a));
+    for (count, shape) in shapes {
+        eprintln!("  {count} x {shape}");
+    }
+}
+
 #[test]
 #[ignore = "the stubs of the JetBrains plugin: CFXLUA_INTELLIJ=<its repository> cargo test --lib the_stubs_of_the_jetbrains_plugin -- --ignored --nocapture"]
 fn the_stubs_of_the_jetbrains_plugin_parse_without_doc_errors() {
-    fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
-        let Ok(entries) = std::fs::read_dir(dir) else { return };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                walk(&path, out);
-            } else if path.extension().is_some_and(|extension| extension == "lua") {
-                out.push(path);
-            }
-        }
-    }
     let repository = std::path::PathBuf::from(std::env::var("CFXLUA_INTELLIJ").expect("CFXLUA_INTELLIJ"));
     let mut stubs = Vec::new();
-    walk(&repository.join("src/main/resources/std"), &mut stubs);
+    lua_files(&repository.join("src/main/resources/std"), &mut stubs);
     stubs.sort();
     assert!(!stubs.is_empty());
     let (mut comments, mut tags) = (0, 0);
