@@ -16,6 +16,7 @@ pub struct Source {
     fine: Option<Rc<Tokens>>,
     code: Vec<u32>,
     tree: OnceCell<Tree>,
+    docs: OnceCell<Tree>,
     scopes: OnceCell<Scopes>,
     models: RefCell<Vec<Rc<dyn Any>>>,
 }
@@ -94,6 +95,7 @@ impl Source {
             fine: Some(Rc::new(fine)),
             code,
             tree: OnceCell::new(),
+            docs: OnceCell::new(),
             scopes: OnceCell::new(),
             models: RefCell::default(),
         }
@@ -109,6 +111,7 @@ impl Source {
             fine: None,
             code: Vec::new(),
             tree: OnceCell::new(),
+            docs: OnceCell::new(),
             scopes: OnceCell::new(),
             models: RefCell::default(),
         }
@@ -125,6 +128,16 @@ impl Source {
     pub fn root(&self) -> Node<'_> {
         let text = if self.fine.is_some() { self.text.as_str() } else { "" };
         self.tree().root(text)
+    }
+
+    /// The documentation comments, parsed once: a `DocFile` that holds one `DocComment` per comment.
+    pub fn docs(&self) -> Node<'_> {
+        let text = if self.fine.is_some() { self.text.as_str() } else { "" };
+        let tree = self.docs.get_or_init(|| match &self.fine {
+            Some(fine) => Tree::docs(text, fine),
+            None => Tree::docs("", &lex("")),
+        });
+        tree.root(text)
     }
 
     /// The declaration each name refers to, resolved once.

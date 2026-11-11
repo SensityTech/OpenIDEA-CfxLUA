@@ -48,6 +48,48 @@ pub enum N {
     UnaryOp,
     ParenExpr,
     ClosureExpr,
+    DocFile,
+    DocComment,
+    DocTagParam,
+    DocTagAlias,
+    DocTagSuppress,
+    DocTagVararg,
+    DocTagReturn,
+    DocTagClass,
+    DocTagField,
+    DocTagType,
+    DocTagLan,
+    DocTagOverload,
+    DocTagSee,
+    DocTagCast,
+    DocTagDef,
+    DocAccessModifier,
+    DocTagGenericList,
+    DocGenericDef,
+    DocParamNameRef,
+    DocClassNameRef,
+    DocClassAttr,
+    DocCommentString,
+    DocTypeList,
+    DocAliasMember,
+    DocCastItem,
+    DocLanId,
+    DocUnionTy,
+    DocFunctionTy,
+    DocFunctionParam,
+    DocVarargParam,
+    DocTableTy,
+    DocTableDef,
+    DocTableField,
+    DocTableIndexField,
+    DocGenericTy,
+    DocArrTy,
+    DocNullableTy,
+    DocGeneralTy,
+    DocParTy,
+    DocStringLiteralTy,
+    DocNumberLiteralTy,
+    DocTupleTy,
     Error,
 }
 
@@ -88,6 +130,24 @@ impl N {
                 | N::UnaryExpr
                 | N::ParenExpr
                 | N::ClosureExpr
+        )
+    }
+
+    /// A type of a documentation comment.
+    pub fn is_doc_type(self) -> bool {
+        matches!(
+            self,
+            N::DocUnionTy
+                | N::DocFunctionTy
+                | N::DocTableTy
+                | N::DocGenericTy
+                | N::DocArrTy
+                | N::DocNullableTy
+                | N::DocGeneralTy
+                | N::DocParTy
+                | N::DocStringLiteralTy
+                | N::DocNumberLiteralTy
+                | N::DocTupleTy
         )
     }
 
@@ -138,6 +198,48 @@ impl N {
             N::UnaryOp => "UNARY_OP",
             N::ParenExpr => "PAREN_EXPR",
             N::ClosureExpr => "CLOSURE_EXPR",
+            N::DocFile => "DOC_FILE",
+            N::DocComment => "DOC_COMMENT",
+            N::DocTagParam => "TAG_PARAM",
+            N::DocTagAlias => "TAG_ALIAS",
+            N::DocTagSuppress => "TAG_SUPPRESS",
+            N::DocTagVararg => "TAG_VARARG",
+            N::DocTagReturn => "TAG_RETURN",
+            N::DocTagClass => "TAG_CLASS",
+            N::DocTagField => "TAG_FIELD",
+            N::DocTagType => "TAG_TYPE",
+            N::DocTagLan => "TAG_LAN",
+            N::DocTagOverload => "TAG_OVERLOAD",
+            N::DocTagSee => "TAG_SEE",
+            N::DocTagCast => "TAG_CAST",
+            N::DocTagDef => "TAG_DEF",
+            N::DocAccessModifier => "ACCESS_MODIFIER",
+            N::DocTagGenericList => "TAG_GENERIC_LIST",
+            N::DocGenericDef => "GENERIC_DEF",
+            N::DocParamNameRef => "PARAM_NAME_REF",
+            N::DocClassNameRef => "CLASS_NAME_REF",
+            N::DocClassAttr => "CLASS_ATTR",
+            N::DocCommentString => "COMMENT_STRING",
+            N::DocTypeList => "TYPE_LIST",
+            N::DocAliasMember => "ALIAS_MEMBER",
+            N::DocCastItem => "CAST_ITEM",
+            N::DocLanId => "LAN_ID",
+            N::DocUnionTy => "UNION_TY",
+            N::DocFunctionTy => "FUNCTION_TY",
+            N::DocFunctionParam => "FUNCTION_PARAM",
+            N::DocVarargParam => "VARARG_PARAM",
+            N::DocTableTy => "TABLE_TY",
+            N::DocTableDef => "TABLE_DEF",
+            N::DocTableField => "TABLE_FIELD",
+            N::DocTableIndexField => "TABLE_INDEX_FIELD",
+            N::DocGenericTy => "GENERIC_TY",
+            N::DocArrTy => "ARR_TY",
+            N::DocNullableTy => "NULLABLE_TY",
+            N::DocGeneralTy => "GENERAL_TY",
+            N::DocParTy => "PAR_TY",
+            N::DocStringLiteralTy => "STRING_LITERAL_TY",
+            N::DocNumberLiteralTy => "NUMBER_LITERAL_TY",
+            N::DocTupleTy => "TUPLE_TY",
             N::Error => "ERROR_ELEMENT",
         }
     }

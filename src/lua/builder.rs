@@ -196,6 +196,14 @@ impl<'a> Builder<'a> {
         Marker(at)
     }
 
+    /// Forgets what was read since `marker` was set, the marker included.
+    pub fn rollback(&mut self, marker: Marker) {
+        if let Event::Start { lexeme, .. } = self.events[marker.0 as usize] {
+            self.cur = lexeme as usize;
+        }
+        self.events.truncate(marker.0 as usize);
+    }
+
     pub fn drop(&mut self, marker: Marker) {
         self.events[marker.0 as usize] = Event::Dropped;
     }

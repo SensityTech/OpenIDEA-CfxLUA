@@ -79,6 +79,36 @@ pub enum T {
     BitAnd,
     BitOr,
     BadCharacter,
+    DocDashes,
+    DocAt,
+    DocTagName,
+    DocTagField,
+    DocTagParam,
+    DocTagVararg,
+    DocTagClass,
+    DocTagEnum,
+    DocTagModule,
+    DocTagReturn,
+    DocTagType,
+    DocTagOverload,
+    DocTagCast,
+    DocTagPrivate,
+    DocTagProtected,
+    DocTagPublic,
+    DocTagLanguage,
+    DocTagGeneric,
+    DocTagSee,
+    DocTagAlias,
+    DocTagSuppress,
+    DocArr,
+    DocFun,
+    DocVararg,
+    DocPrivate,
+    DocProtected,
+    DocPublic,
+    DocStringBegin,
+    DocString,
+    DocAliasBar,
 }
 
 const KEYWORDS: &[(&str, T)] = &[
@@ -221,6 +251,11 @@ impl T {
         (T::And as u8..=T::While as u8).contains(&(self as u8))
     }
 
+    /// The names of the documentation tags the JetBrains plugin colours: every one but `suppress`.
+    pub fn is_doc_tag(self) -> bool {
+        (T::DocTagName as u8..=T::DocTagAlias as u8).contains(&(self as u8))
+    }
+
     pub fn is_compound_assign(self) -> bool {
         (T::PlusAssign as u8..=T::BitXorAssign as u8).contains(&(self as u8))
     }
@@ -248,6 +283,36 @@ impl T {
             T::String => "STRING",
             T::HashString => "HASH_STRING",
             T::BadCharacter => "BAD_CHARACTER",
+            T::DocDashes => "DASHES",
+            T::DocAt => "@",
+            T::DocTagName => "TAG_NAME",
+            T::DocTagField => "TAG_NAME_FIELD",
+            T::DocTagParam => "TAG_NAME_PARAM",
+            T::DocTagVararg => "TAG_NAME_VARARG",
+            T::DocTagClass => "TAG_NAME_CLASS",
+            T::DocTagEnum => "TAG_NAME_ENUM",
+            T::DocTagModule => "TAG_NAME_MODULE",
+            T::DocTagReturn => "TAG_NAME_RETURN",
+            T::DocTagType => "TAG_NAME_TYPE",
+            T::DocTagOverload => "TAG_NAME_OVERLOAD",
+            T::DocTagCast => "TAG_NAME_CAST",
+            T::DocTagPrivate => "TAG_NAME_PRIVATE",
+            T::DocTagProtected => "TAG_NAME_PROTECTED",
+            T::DocTagPublic => "TAG_NAME_PUBLIC",
+            T::DocTagLanguage => "TAG_NAME_LANGUAGE",
+            T::DocTagGeneric => "TAG_NAME_GENERIC",
+            T::DocTagSee => "TAG_NAME_SEE",
+            T::DocTagAlias => "TAG_NAME_ALIAS",
+            T::DocTagSuppress => "TAG_NAME_SUPPRESS",
+            T::DocArr => "[]",
+            T::DocFun => "fun",
+            T::DocVararg => "vararg",
+            T::DocPrivate => "private",
+            T::DocProtected => "protected",
+            T::DocPublic => "public",
+            T::DocStringBegin => "STRING_BEGIN",
+            T::DocString => "STRING",
+            T::DocAliasBar => "ALIAS_BAR",
             _ => KEYWORDS.iter().chain(OPERATORS).find(|(_, kind)| *kind == self).map_or("?", |(text, _)| *text),
         }
     }
@@ -296,9 +361,18 @@ impl Tokens {
         Some(i.saturating_sub(1).min(self.kinds.len() - 1))
     }
 
-    fn push(&mut self, kind: T, start: usize) {
+    pub(super) fn with_capacity(tokens: usize) -> Self {
+        Tokens { kinds: Vec::with_capacity(tokens), starts: Vec::with_capacity(tokens + 1) }
+    }
+
+    pub(super) fn push(&mut self, kind: T, start: usize) {
         self.kinds.push(kind);
         self.starts.push(start as u32);
+    }
+
+    /// Ends the last token at `end`: nothing is pushed after it.
+    pub(super) fn close(&mut self, end: usize) {
+        self.starts.push(end as u32);
     }
 }
 
@@ -437,7 +511,7 @@ fn comment(src: &str, bytes: &[u8], at: usize) -> (T, usize) {
 /// Every token of `src`, white space and comments included: the tokens cover the text end to end.
 pub fn lex(src: &str) -> Tokens {
     let bytes = src.as_bytes();
-    let mut out = Tokens { kinds: Vec::with_capacity(src.len() / 3), starts: Vec::with_capacity(src.len() / 3 + 1) };
+    let mut out = Tokens::with_capacity(src.len() / 3);
     let mut i = 0;
     if bytes.starts_with(b"#!") {
         out.push(T::Shebang, 0);
@@ -501,7 +575,7 @@ pub fn lex(src: &str) -> Tokens {
         };
         out.push(kind, start);
     }
-    out.starts.push(bytes.len() as u32);
+    out.close(bytes.len());
     out
 }
 

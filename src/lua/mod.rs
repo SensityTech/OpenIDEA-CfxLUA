@@ -1,4 +1,5 @@
 mod builder;
+pub mod doc;
 pub mod joaat;
 pub mod lexer;
 pub mod parser;
