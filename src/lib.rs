@@ -867,6 +867,9 @@ impl SemanticTokens for DevKit {
                         Kind::Method => TokenKind::Method,
                         Kind::Property => TokenKind::Property,
                         Kind::Hash => TokenKind::String,
+                        Kind::Type => TokenKind::Type,
+                        Kind::Tag => TokenKind::Decorator,
+                        Kind::Keyword => TokenKind::Keyword,
                     };
                     let modifiers = [
                         (Mods::DECLARATION, TokenModifier::Declaration),

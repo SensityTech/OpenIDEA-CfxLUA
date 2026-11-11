@@ -1,4 +1,5 @@
 use crate::feature::Ctx;
+use crate::lua::Source;
 use crate::lua::scope::{DeclKind, Scopes};
 use crate::lua::token::T;
 use crate::lua::tree::{N, Node};
@@ -19,6 +20,12 @@ pub enum Kind {
     SelfName,
     /// A CfxLua `` `hash` `` literal.
     Hash,
+    /// A class, an alias or a type named in a documentation comment.
+    Type,
+    /// The name of a documentation tag (`param` of `---@param`), and the `|` of a `---|` line.
+    Tag,
+    /// `fun` and `vararg` in a documented type.
+    Keyword,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -67,13 +74,21 @@ impl Token {
             Kind::Property => "property",
             Kind::SelfName => "self-keyword",
             Kind::Hash => "string",
+            Kind::Type => "type",
+            Kind::Tag => "decorator",
+            Kind::Keyword => "self-type-keyword",
         }
     }
 
     /// What the SDK's enums cannot say: the kind to send in place of the SDK's, and the modifiers
     /// to add to the SDK's.
     pub fn beyond_sdk(&self) -> (Option<&'static str>, &'static [&'static str]) {
-        let kind = (self.kind == Kind::SelfName).then_some("self-keyword");
+        // The editor styles no plain keyword token: `self-type-keyword` carries the keyword colour.
+        let kind = match self.kind {
+            Kind::SelfName => Some("self-keyword"),
+            Kind::Keyword => Some("self-type-keyword"),
+            _ => None,
+        };
         let modifiers: &[&str] =
             match (self.kind == Kind::Hash, self.mods.has(Mods::GLOBAL), self.mods.has(Mods::UPVALUE)) {
                 (true, ..) => &["byte-string"],
@@ -213,6 +228,34 @@ impl<'a> Painter<'a> {
     }
 }
 
+/// The documentation comments, as the JetBrains plugin colours them: the names of the tags, `fun` and
+/// `vararg`, the names of classes and aliases, the types, the names of fields and of parameters.
+fn docs(src: &Source, out: &mut Vec<Token>) {
+    let root = src.docs();
+    let tokens = root.tree().tokens();
+    for i in 0..tokens.len() {
+        let kind = match tokens.kind(i) {
+            T::DocFun | T::DocVararg => Kind::Keyword,
+            T::DocAliasBar => Kind::Tag,
+            kind if kind.is_doc_tag() => Kind::Tag,
+            _ => continue,
+        };
+        out.push(Token { start: tokens.start(i), end: tokens.end(i), kind, mods: Mods::NONE });
+    }
+    for node in root.descendants() {
+        let (kind, mods) = match node.kind() {
+            N::DocTagClass | N::DocTagAlias => (Kind::Type, Mods::DECLARATION),
+            N::DocClassNameRef => (Kind::Type, Mods::NONE),
+            N::DocTagField => (Kind::Property, Mods::NONE),
+            N::DocParamNameRef => (Kind::Parameter, Mods::NONE),
+            _ => continue,
+        };
+        if let Some(id) = node.token(T::Id) {
+            out.push(Token { start: id.start(), end: id.end(), kind, mods });
+        }
+    }
+}
+
 /// The tokens of the document, as the IntelliJ plugin's annotator colours them. `functions` tells
 /// whether a `function name()` statement of the project defines the global `name`.
 pub fn tokens(cx: &Ctx, functions: &dyn Fn(&str) -> bool) -> Vec<Token> {
@@ -238,6 +281,7 @@ pub fn tokens(cx: &Ctx, functions: &dyn Fn(&str) -> bool) -> Vec<Token> {
     for i in (0..tokens.len()).filter(|i| tokens.kind(*i) == T::HashString) {
         out.push(Token { start: tokens.start(i), end: tokens.end(i), kind: Kind::Hash, mods: Mods::NONE });
     }
+    docs(&doc.src, &mut out);
     out.sort_by_key(|token| token.start);
     out.truncate(MAX_TOKENS);
     out

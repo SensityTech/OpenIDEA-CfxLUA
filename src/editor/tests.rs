@@ -51,6 +51,54 @@ fn locals_parameters_and_upvalues() {
 }
 
 #[test]
+fn documentation_comments() {
+    let found = painted(
+        "---@class Shop : Base @a shop\n---@field private name string the name\n---@field [string] Item\n\
+         local Shop = {}\n\n---@alias Kind\n---| 'a' # first\n\n---@generic T\n---@param list T[] the list\n\
+         ---@param cb fun(item: T, vararg any): boolean?\n---@return table<string, T> found\n\
+         ---@deprecated use other\n---@suppress unused\nlocal function find(list, cb) end",
+        "",
+    );
+    assert_eq!(
+        found,
+        [
+            "class decorator",
+            "Shop type declaration",
+            "Base type",
+            "field decorator",
+            "name property",
+            "string type",
+            "field decorator",
+            "string type",
+            "Item type",
+            "Shop variable declaration",
+            "alias decorator",
+            "Kind type declaration",
+            "| decorator",
+            "generic decorator",
+            "param decorator",
+            "list parameter",
+            "T type",
+            "param decorator",
+            "cb parameter",
+            "fun self-type-keyword",
+            "T type",
+            "vararg self-type-keyword",
+            "any type",
+            "boolean type",
+            "return decorator",
+            "table type",
+            "string type",
+            "T type",
+            "deprecated decorator",
+            "find function declaration",
+            "list parameter declaration",
+            "cb parameter declaration",
+        ]
+    );
+}
+
+#[test]
 fn globals_and_functions_of_the_project() {
     let found = painted("function Start() end\nStart()\nHelper()\nUnknown()\nvalue = other", "function Helper() end");
     assert_eq!(

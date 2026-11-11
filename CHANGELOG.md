@@ -11,6 +11,9 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   JetBrains plugin does: parameters, locals read from a nested function (underlined), globals, functions and methods
   (in italics when called through a dot), fields, `self`, hash literals, and natives, the Cfx runtime API and the Lua
   standard library as library names. Where lua-language-server colours the same name, the plugin's colour is shown.
+- **Documentation comments are coloured**, the way the JetBrains plugin colours them: the tag names (`@param`,
+  `@class`, `@return`…), the types, the names of classes, aliases, fields and parameters, `fun` and `vararg`. EmmyDoc
+  and the LuaCATS annotations of lua-language-server are both read.
 - **Syntax errors of CfxLua itself.** A missing `end`, an unexpected symbol, a missing expression, a statement that
   is only an expression or a method name without its arguments are reported by the plugin's own parser, which knows
   the CfxLua syntax (compound assignments, safe navigation, hash literals, set constructors, `in` unpacking, C
