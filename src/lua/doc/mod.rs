@@ -3,6 +3,7 @@
 
 mod lexer;
 mod parser;
+pub mod tags;
 
 #[cfg(test)]
 mod tests;

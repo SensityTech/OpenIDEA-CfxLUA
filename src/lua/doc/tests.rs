@@ -1,8 +1,9 @@
 //! The parsing tests of the JetBrains plugin (`LuaCatsParsingTest`), on its own synthetic library.
 
+use super::tags::{self, Comment, description, is_optional as optional, name, ty, value_names as names};
 use crate::lua::Source;
 use crate::lua::token::T;
-use crate::lua::tree::{Element, N, Node};
+use crate::lua::tree::{N, Node};
 
 const LIBRARY: &str = include_str!("testdata/synthlib.lua");
 
@@ -37,70 +38,15 @@ fn above<'a>(src: &'a Source, needle: &str) -> Node<'a> {
 }
 
 fn types(node: Node) -> Vec<Node> {
-    node.children().filter(|child| child.kind().is_doc_type()).collect()
+    tags::types(node).collect()
 }
 
 fn texts<'a>(nodes: Vec<Node<'a>>) -> Vec<&'a str> {
     nodes.into_iter().map(Node::code).collect()
 }
 
-/// The type of a tag: its value type for an index signature.
-fn ty(node: Node) -> Option<Node> {
-    let all = types(node);
-    if node.has(T::LBrack) { all.get(1).copied() } else { all.first().copied() }
-}
-
-fn accepts_nil(ty: Option<Node>) -> bool {
-    let Some(ty) = ty else { return false };
-    match ty.kind() {
-        N::DocNullableTy => true,
-        N::DocGeneralTy => ty.code() == "nil",
-        N::DocUnionTy | N::DocParTy => types(ty).into_iter().any(|inner| accepts_nil(Some(inner))),
-        _ => false,
-    }
-}
-
-fn optional(tag: Node) -> bool {
-    tag.has(T::Question) || accepts_nil(ty(tag)) || tag.children_of(N::DocAliasMember).any(|m| accepts_nil(ty(m)))
-}
-
 fn param<'a>(comment: Node<'a>, name: &str) -> Node<'a> {
-    let named = |tag: &Node| tag.child(N::DocParamNameRef).is_some_and(|reference| reference.code() == name);
-    comment.children_of(N::DocTagParam).find(named).expect(name)
-}
-
-fn name<'a>(tag: Node<'a>) -> Option<&'a str> {
-    tag.token(T::Id).map(|id| id.text())
-}
-
-fn description<'a>(tag: Node<'a>) -> &'a str {
-    let text = tag.child(N::DocCommentString).and_then(|comment| comment.token(T::DocString));
-    text.map_or("", |text| text.text().trim())
-}
-
-/// The names of the returned values, an empty one for a value that has none.
-fn names<'a>(list: Node<'a>) -> Vec<&'a str> {
-    let mut out = Vec::new();
-    let mut unnamed = false;
-    for element in list.elements() {
-        match element {
-            Element::Node(node) if node.kind().is_doc_type() => {
-                if unnamed {
-                    out.push("");
-                }
-                unnamed = true;
-            }
-            Element::Token(token) if unnamed && token.kind() == T::Id => {
-                out.push(token.text());
-                unnamed = false;
-            }
-            _ => {}
-        }
-    }
-    if unnamed {
-        out.push("");
-    }
-    out
+    Comment(comment).param(name).expect(name)
 }
 
 fn returned(comment: Node) -> Node {
@@ -238,8 +184,7 @@ fn multi_line_aliases() {
         texts(members.iter().filter_map(|member| ty(*member)).collect()),
         ["'inform'", "'error'", "'success'", "'warning'"]
     );
-    let default = |member: &Node| member.first_token().is_some_and(|bar| bar.text().starts_with("|>"));
-    assert_eq!(members.iter().map(default).collect::<Vec<_>>(), [false, false, false, true]);
+    assert_eq!(members.iter().map(|member| tags::is_default(*member)).collect::<Vec<_>>(), [false, false, false, true]);
     assert_eq!(description(members[0]), "Informational (blue)");
     assert_eq!(param(above(&src, "function lib.count"), "kind").children_of(N::DocAliasMember).count(), 3);
 }
@@ -269,8 +214,8 @@ fn tags_of_lua_language_server_only_are_accepted() {
     }
     // `---@module 'name'` types a local as `require('name')`: no module is declared.
     assert!(all(&src, N::DocTagClass).iter().all(|class| !class.has(T::DocTagModule)));
-    let deprecated = |tag: Node| tag.token(T::DocTagName).is_some_and(|name| name.text() == "deprecated");
-    assert!(above(&src, "function lib.alert").children_of(N::DocTagDef).any(deprecated));
+    assert!(Comment(above(&src, "function lib.alert")).is_deprecated());
+    assert!(!Comment(above(&src, "function lib.notify")).is_deprecated());
 }
 
 #[test]
