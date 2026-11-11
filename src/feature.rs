@@ -170,4 +170,8 @@ pub trait Feature {
     fn intentions(&self, _cx: &Ctx, _start: usize, _end: usize) -> Vec<Intention> {
         Vec::new()
     }
+
+    fn semantic_tokens(&self, _cx: &Ctx) -> Vec<crate::editor::semantic::Token> {
+        Vec::new()
+    }
 }

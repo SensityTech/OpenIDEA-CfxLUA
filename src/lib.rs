@@ -1,5 +1,6 @@
 pub mod coords;
 pub mod docs;
+pub mod editor;
 pub mod escrow;
 pub mod events;
 pub mod feature;
@@ -25,6 +26,7 @@ use feature::{CommandCx, Ctx, Doc, Feature, Problem};
 use lua::Source;
 use natives::Natives;
 use openidea_plugin::providers::{CodeAction, CompletionItem, Document, LineMarker, Providers};
+use openidea_plugin::semantic_tokens::{SemanticToken, SemanticTokens, TokenKind, TokenModifier};
 use openidea_plugin::views::{View, ViewEvent, Viewport, Views};
 use openidea_plugin::{
     Context, Diagnostic, Error, Event, EventKind, Invocation, Location, LogLevel, Plugin, Position, Range, StatusItem,
@@ -66,6 +68,7 @@ pub fn all_features() -> Vec<Box<dyn Feature>> {
         Box::<coords::CoordsFeature>::default(),
         Box::<perf::PerfFeature>::default(),
         Box::<syntax::SyntaxFeature>::default(),
+        Box::<editor::EditorFeature>::default(),
         Box::<escrow::EscrowFeature>::default(),
         Box::<luals::LualsFeature>::default(),
     ]
@@ -806,7 +809,80 @@ impl Views for DevKit {
     }
 }
 
+thread_local! {
+    /// The token types and modifiers of the last answer, by the names the editor styles: the SDK's
+    /// enums lack `self-keyword`, `global` and `mutable`, which the plugin API accepts as strings.
+    static TOKEN_NAMES: std::cell::RefCell<Vec<(&'static str, Vec<&'static str>)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+impl SemanticTokens for DevKit {
+    fn semantic_tokens(&mut self, d: &Document) -> Vec<SemanticToken> {
+        let tokens = self.prepare(d).and_then(|ws| {
+            self.with_ctx(ws, |cx, features| {
+                let tokens: Vec<editor::semantic::Token> =
+                    features.iter().flat_map(|f| f.semantic_tokens(cx)).collect();
+                tokens.into_iter().map(|token| (cx.doc.range(token.start, token.end), token)).collect::<Vec<_>>()
+            })
+        });
+        let tokens = tokens.unwrap_or_default();
+        TOKEN_NAMES.with(|names| {
+            *names.borrow_mut() = tokens.iter().map(|(_, token)| (token.kind_name(), token.modifier_names())).collect();
+        });
+        tokens
+            .into_iter()
+            .map(|(range, token)| {
+                use editor::semantic::{Kind, Mods};
+                let kind = match token.kind {
+                    Kind::Variable => TokenKind::Variable,
+                    Kind::Parameter | Kind::SelfName => TokenKind::Parameter,
+                    Kind::Function => TokenKind::Function,
+                    Kind::Method => TokenKind::Method,
+                    Kind::Property => TokenKind::Property,
+                    Kind::Hash => TokenKind::String,
+                };
+                let modifiers = [
+                    (Mods::DECLARATION, TokenModifier::Declaration),
+                    (Mods::STATIC, TokenModifier::Static),
+                    (Mods::DEPRECATED, TokenModifier::Deprecated),
+                    (Mods::LIBRARY, TokenModifier::DefaultLibrary),
+                ];
+                let modifiers = modifiers.into_iter().filter(|(flag, _)| token.mods.has(*flag)).map(|(_, m)| m);
+                SemanticToken { range, kind, modifiers: modifiers.collect() }
+            })
+            .collect()
+    }
+}
+
 register_plugin!(DevKit, providers, views);
+
+// The semantic tokens are exported here rather than by `register_plugin!`, to send the names of
+// `TOKEN_NAMES` in place of the SDK's.
+#[cfg(target_arch = "wasm32")]
+const _: () = {
+    use openidea_plugin::semantic_bindings::exports::openidea::plugin::semantic_tokens_provider as wit;
+
+    struct Export;
+
+    impl wit::Guest for Export {
+        fn semantic_tokens(doc: wit::Document) -> Vec<wit::SemanticToken> {
+            let mut tokens = openidea_plugin::__rt::semantic_tokens::<DevKit>(doc);
+            TOKEN_NAMES.with(|names| {
+                let names = names.borrow();
+                if names.len() != tokens.len() {
+                    return;
+                }
+                for (token, (kind, modifiers)) in tokens.iter_mut().zip(names.iter()) {
+                    token.kind = (*kind).to_owned();
+                    token.modifiers = modifiers.iter().map(|modifier| (*modifier).to_owned()).collect();
+                }
+            });
+            tokens
+        }
+    }
+
+    openidea_plugin::semantic_bindings::__export_semantic_tokens_world!(Export with_types_in openidea_plugin::semantic_bindings);
+};
 
 #[cfg(test)]
 mod tests {
