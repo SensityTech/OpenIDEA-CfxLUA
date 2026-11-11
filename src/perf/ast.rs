@@ -543,6 +543,8 @@ struct Lower<'a> {
     src: &'a Source,
     ast: Ast,
     scopes: Vec<Vec<usize>>,
+    /// The declarations in scope under each name, the innermost last.
+    visible: HashMap<&'a str, Vec<usize>>,
     spine: Vec<Syntax<'a>>,
 }
 
@@ -558,7 +560,7 @@ impl<'a> Lower<'a> {
             functions: Vec::new(),
             by_name: HashMap::new(),
         };
-        Self { src, ast, scopes: Vec::new(), spine: Vec::new() }
+        Self { src, ast, scopes: Vec::new(), visible: HashMap::new(), spine: Vec::new() }
     }
 
     fn tok(&self, token: Token) -> usize {
@@ -637,7 +639,11 @@ impl<'a> Lower<'a> {
 
     fn close_scope(&mut self, to: usize) {
         for d in self.scopes.pop().unwrap_or_default() {
-            self.ast.decls[d].to = to;
+            let decl = &mut self.ast.decls[d];
+            decl.to = to;
+            if let Some(visible) = self.visible.get_mut(decl.name.as_str()) {
+                visible.pop();
+            }
         }
     }
 
@@ -646,19 +652,24 @@ impl<'a> Lower<'a> {
         self.declare_named(name, tok, kind, from)
     }
 
-    fn declare_named(&mut self, name: &str, tok: usize, kind: DeclKind, from: usize) -> usize {
-        let name = name.to_owned();
+    fn declare_named(&mut self, name: &'a str, tok: usize, kind: DeclKind, from: usize) -> usize {
         let id = self.ast.decls.len();
-        self.ast.by_name.entry(name.clone()).or_default().push(id);
-        self.ast.decls.push(Decl { name, tok, kind, from, to: usize::MAX, init: None, assigned: Vec::new() });
+        if let Some(declared) = self.ast.by_name.get_mut(name) {
+            declared.push(id);
+        } else {
+            self.ast.by_name.insert(name.to_owned(), vec![id]);
+        }
+        let name_of = name.to_owned();
+        self.ast.decls.push(Decl { name: name_of, tok, kind, from, to: usize::MAX, init: None, assigned: Vec::new() });
         if let Some(scope) = self.scopes.last_mut() {
             scope.push(id);
+            self.visible.entry(name).or_default().push(id);
         }
         id
     }
 
     fn resolve(&self, name: &str) -> Option<usize> {
-        self.scopes.iter().rev().flat_map(|s| s.iter().rev()).copied().find(|&d| self.ast.decls[d].name == name)
+        self.visible.get(name)?.last().copied()
     }
 
     fn assigned(&mut self, target: usize) {
@@ -1149,6 +1160,22 @@ mod tests {
         let a_decl = a.local_at("a", s.toks.len() - 1).unwrap();
         assert_eq!(a.decls[a_decl].assigned.len(), 1);
         assert!(a.local_at("f", s.toks.len() - 1).is_some());
+    }
+
+    #[test]
+    fn a_name_is_the_innermost_declaration_still_in_scope() {
+        let (_, a) = ast("local v = 1\nlocal v = v\ndo\n    local v = v\n    print(v)\nend\nprint(v)\n\
+             for v = 1, v do print(v) end\nprint(v)");
+        let read: Vec<Option<usize>> = a
+            .exprs
+            .iter()
+            .filter_map(|e| match &e.kind {
+                ExprKind::Name { name, decl } if name == "v" => Some(*decl),
+                _ => None,
+            })
+            .collect();
+        // Declarations in source order: the two locals, the one of the `do` block, the loop variable.
+        assert_eq!(read, [Some(0), Some(1), Some(2), Some(1), Some(1), Some(3), Some(1)]);
     }
 
     #[test]
