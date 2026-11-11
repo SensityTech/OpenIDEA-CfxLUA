@@ -20,6 +20,8 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   that size, so its semantic colors never came either. Run **CfxLua: Generate lua-language-server Definitions** again
   to rewrite the file: natives and the Cfx runtime API then take the library color, apart from your own functions,
   parameters and fields.
+- A comment on a line that ends with a lone carriage return (old Mac line endings) ran over the lines after it, so
+  nothing was found in them.
 - Ctrl+click on a native said "Cannot find declaration to go to": native declarations now come from
   lua-language-server and the generated definitions, without reading that file on every hover.
 - **Natives listed up to four times in completion, and "Choose Declaration (3 found)" on Ctrl+click,** once the
@@ -41,6 +43,9 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
 
 - **OpenIDEA 0.1.40 or newer is required.** The plugin is built against plugin API 1.4 (it was 1.0); its features are
   unchanged.
+- **One CfxLua parser reads every file**, the one of the JetBrains plugin ported to Rust: events, state bags, NUI,
+  performance, coordinates, magic values and syntax checks used to read Lua through three partial parsers that could
+  disagree. What they report is unchanged; code being typed is read the same way by all of them.
 - The **lua-language-server config (.luarc.json)** template ignores `.cfxlua` as project code (it stays a library)
   and lets completion list up to 1,000 items: lua-language-server stops at 100, which could hide the native you type.
   In an existing `.luarc.json`, add `".cfxlua"` to `workspace.ignoreDir` and `"completion.maxSuggestCount": 1000`.
