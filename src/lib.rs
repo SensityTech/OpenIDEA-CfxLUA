@@ -369,7 +369,7 @@ impl DevKit {
         self.last = None;
     }
 
-    // Hidden folders (`.cfxlua`) are not listed by the host: the definitions are read by name.
+    // The host does not list a `.cfxlua` that Git ignores: the definitions are read by name.
     fn read_luals(&mut self, i: usize) {
         self.reread_luarc(i);
         for path in luals::candidates(&self.workspaces[i]) {
@@ -919,7 +919,7 @@ mod tests {
         host.add_file(luals::LUARC, include_str!("../templates/luarc.json"));
         let sets = [natives::NativeSet::Gta5, natives::NativeSet::Server];
         let (text, _) = luals::definitions(&Natives::bundled(), &sets, &[runtime::Part::Shared]);
-        // Not a `.lua` name: the scan lists it without reading it, as the host does with hidden folders.
+        // Not a `.lua` name: the scan lists it without reading it, standing for a folder the host does not list.
         let hidden = "/project/.cfxlua/natives.meta";
         host.add_file(".cfxlua/natives.meta", &text);
         host::storage::set("luals.definitions", &serde_json::to_string(&[hidden]).unwrap()).unwrap();

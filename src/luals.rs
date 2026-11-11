@@ -219,7 +219,7 @@ fn remember(path: &str) {
     }
 }
 
-/// The definitions files to read by name, as the host does not list hidden folders: those the command wrote, and
+/// The definitions files to read by name, as the host does not list a folder Git ignores: those the command wrote, and
 /// `natives.lua` in each library folder.
 pub fn candidates(ws: &Workspace) -> Vec<String> {
     let mut out: Vec<String> = remembered().into_iter().filter(|p| ws.contains(p)).collect();

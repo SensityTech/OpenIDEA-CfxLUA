@@ -40,7 +40,7 @@ jobs:
           if gh api "repos/l0ng-ai/openidea/contents/crates/ide-host/src/bin/openidea-plugin/main.rs?ref=$ref" --silent; then
             echo "tool=true" >> "$GITHUB_OUTPUT"
           else
-            echo "OpenIDEA $ref has no openidea-plugin tool: no plugin API 1.0." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "OpenIDEA $ref has no openidea-plugin tool: no plugin API." | tee -a "$GITHUB_STEP_SUMMARY"
           fi
       - id: cache
         if: steps.target.outputs.tool == 'true'

@@ -37,7 +37,6 @@ jobs:
   publish:
     needs: key
     if: needs.key.outputs.set == 'true'
-    # Package digests hash OS paths (`web\…` on Windows): sign where most users are, until l0ng-ai/openidea#1258.
     runs-on: windows-latest
     defaults:
       run:
