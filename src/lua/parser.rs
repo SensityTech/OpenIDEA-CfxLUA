@@ -290,10 +290,12 @@ impl Parser<'_> {
         } else {
             self.expect(T::Assign, "'=' expected");
             self.expect_expr();
-            self.expect(T::Comma, "',' expected");
-            self.expect_expr();
-            if self.b.eat(T::Comma) {
+            // Without its comma the limit is not read: what follows is the next statement.
+            if self.expect(T::Comma, "',' expected") {
                 self.expect_expr();
+                if self.b.eat(T::Comma) {
+                    self.expect_expr();
+                }
             }
             N::ForAStat
         };
@@ -614,6 +616,22 @@ impl Parser<'_> {
         Some(first)
     }
 
+    /// The arguments of a call. One that is missing before a comma is reported and the list goes
+    /// on: the arguments after the one being typed stay arguments.
+    fn arguments(&mut self) -> Option<Done> {
+        let mut first = None;
+        loop {
+            let argument = self.expr();
+            first = first.or(argument);
+            if argument.is_none() && (first.is_some() || self.b.at(T::Comma)) {
+                self.b.error("Expression expected");
+            }
+            if !self.b.eat(T::Comma) {
+                return first;
+            }
+        }
+    }
+
     fn expect_expr_list(&mut self, required: bool) -> Option<Done> {
         match self.expr_list() {
             Some(first) => {
@@ -633,6 +651,68 @@ impl Parser<'_> {
         self.subexpr(0)
     }
 
+    fn skip_group(&mut self) {
+        let mut depth = 0usize;
+        while let Some(kind) = self.b.tok() {
+            self.b.advance();
+            match kind {
+                T::LParen | T::LBrack | T::LCurly => depth += 1,
+                T::RParen | T::RBrack | T::RCurly => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        return;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// At the nesting limit the rest of the expression is stepped over, a bracketed group or a
+    /// function as one piece each: the statements that follow are still parsed.
+    fn too_deep(&mut self) -> Option<Done> {
+        let m = self.b.mark();
+        let start = self.b.position();
+        loop {
+            while matches!(self.b.tok(), Some(T::Not | T::GetN | T::Minus | T::BitTilde)) {
+                self.b.advance();
+            }
+            match self.b.tok() {
+                Some(T::LParen | T::LCurly) => self.skip_group(),
+                Some(T::Function) => {
+                    self.b.advance();
+                    self.skip_block(T::Function, false);
+                    self.b.eat(T::End);
+                }
+                Some(T::Id | T::Number | T::String | T::HashString | T::Nil | T::True | T::False | T::Ellipsis) => {
+                    self.b.advance()
+                }
+                _ => break,
+            }
+            loop {
+                match self.b.tok() {
+                    Some(T::Dot | T::Colon) => {
+                        self.b.advance();
+                        self.b.eat(T::Id);
+                    }
+                    Some(T::Question | T::String | T::HashString) => self.b.advance(),
+                    Some(T::LParen | T::LBrack | T::LCurly) => self.skip_group(),
+                    _ => break,
+                }
+            }
+            let operator = self.b.tok().and_then(binary_priority).is_some();
+            if !operator || self.is_increment() || self.is_missing_compound() {
+                break;
+            }
+            self.b.advance();
+        }
+        if self.b.position() == start {
+            self.b.drop(m);
+            return None;
+        }
+        Some(self.b.fail(m, NESTED_TOO_DEEPLY))
+    }
+
     fn missing_operand(&mut self) {
         let m = self.b.mark();
         self.b.fail(m, "Expression expected");
@@ -640,7 +720,7 @@ impl Parser<'_> {
 
     fn nested(&mut self, limit: u8) -> Option<Done> {
         if self.depth >= MAX_DEPTH {
-            return self.swallow();
+            return self.too_deep();
         }
         self.depth += 1;
         let expr = self.subexpr(limit);
@@ -651,7 +731,7 @@ impl Parser<'_> {
     /// An operand and the binary operators that bind tighter than `limit`.
     fn subexpr(&mut self, limit: u8) -> Option<Done> {
         if self.depth >= MAX_DEPTH {
-            return self.swallow();
+            return self.too_deep();
         }
         let mut left = if matches!(self.b.tok(), Some(T::Not | T::GetN | T::Minus | T::BitTilde)) {
             let m = self.b.mark();
@@ -762,7 +842,7 @@ impl Parser<'_> {
             Some(T::LParen) => {
                 let args = self.b.mark();
                 self.b.advance();
-                self.bracketed(Self::expr_list);
+                self.bracketed(Self::arguments);
                 self.expect(T::RParen, "')' expected");
                 self.b.done(args, N::ListArgs);
             }

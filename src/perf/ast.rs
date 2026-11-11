@@ -1,5 +1,6 @@
 use crate::lua::Source;
-use crate::lua::lexer::Tok;
+use crate::lua::token::T;
+use crate::lua::tree::{Element, N, Node as Syntax, Token};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -158,21 +159,15 @@ fn fnv(text: &str) -> u64 {
 
 impl Ast {
     pub fn new(src: &Source) -> Self {
-        let mut p = Parser::new(src);
-        p.open_scope();
+        let mut lower = Lower::new(src);
+        lower.open_scope();
         let mut stats = Vec::new();
-        while p.pos < p.limit {
-            p.statements(&mut stats);
-            // A stray closer at the top level: skip it and go on.
-            if p.pos < p.limit {
-                p.pos += 1;
-            }
-        }
-        p.close_scope(src.toks.len());
-        let root = p.ast.blocks.len();
-        p.ast.blocks.push(Block { stats, start: 0, stop: src.text.len(), parent: None });
-        p.ast.root = root;
-        let mut ast = p.ast;
+        lower.statements(src.root(), &mut stats);
+        lower.close_scope(src.toks.len());
+        let root = lower.ast.blocks.len();
+        lower.ast.blocks.push(Block { stats, start: 0, stop: src.text.len(), parent: None });
+        lower.ast.root = root;
+        let mut ast = lower.ast;
         ast.link();
         ast
     }
@@ -508,8 +503,6 @@ impl Ast {
     }
 }
 
-const UNARY_PRIORITY: u8 = 12;
-
 fn binary(op: &str) -> Option<(&'static str, u8, u8)> {
     Some(match op {
         "or" => ("or", 1, 1),
@@ -565,18 +558,16 @@ fn compound(op: &str) -> Option<&'static str> {
     })
 }
 
-struct Parser<'a> {
+/// Reads the expressions, statements and blocks off the syntax tree, in the order the source writes
+/// them: what a node holds is numbered before the node itself.
+struct Lower<'a> {
     src: &'a Source,
-    pos: usize,
-    limit: usize,
     ast: Ast,
     scopes: Vec<Vec<usize>>,
-    depth: usize,
+    spine: Vec<Syntax<'a>>,
 }
 
-const MAX_DEPTH: usize = 200;
-
-impl<'a> Parser<'a> {
+impl<'a> Lower<'a> {
     fn new(src: &'a Source) -> Self {
         let ast = Ast {
             exprs: Vec::new(),
@@ -588,53 +579,34 @@ impl<'a> Parser<'a> {
             functions: Vec::new(),
             by_name: HashMap::new(),
         };
-        Self { src, pos: 0, limit: src.toks.len(), ast, scopes: Vec::new(), depth: 0 }
+        Self { src, ast, scopes: Vec::new(), spine: Vec::new() }
     }
 
-    fn text(&self, i: usize) -> &'a str {
-        if i < self.limit { self.src.tok_text(i) } else { "" }
+    fn tok(&self, token: Token) -> usize {
+        self.src.tok_of(token.index())
     }
 
-    fn kind(&self, i: usize) -> Option<Tok> {
-        (i < self.limit).then(|| self.src.toks[i].kind)
+    fn at(&self, node: Syntax, kind: T) -> Option<usize> {
+        node.token(kind).map(|token| self.tok(token))
     }
 
-    fn is_op(&self, op: &str) -> bool {
-        self.kind(self.pos) == Some(Tok::Op) && self.text(self.pos) == op
-    }
-
-    fn is_kw(&self, kw: &str) -> bool {
-        self.kind(self.pos) == Some(Tok::Keyword) && self.text(self.pos) == kw
-    }
-
-    fn eat_op(&mut self, op: &str) -> bool {
-        let yes = self.is_op(op);
-        if yes {
-            self.pos += 1;
+    /// The tokens of `node`, without the `;` that ends a statement.
+    fn range(&self, node: Syntax) -> (usize, usize) {
+        match (node.first_token(), node.last_token()) {
+            (Some(first), Some(last)) => {
+                let closed = node.kind().is_statement() && !node.is(N::ReturnStat) && last.is(T::Semi);
+                let (first, end) = (self.tok(first), self.tok(last) + 1);
+                (first, if closed && end > first + 1 { end - 1 } else { end })
+            }
+            _ => {
+                let at = self.src.tok_of(node.token_span().0);
+                (at, at)
+            }
         }
-        yes
-    }
-
-    fn eat_kw(&mut self, kw: &str) -> bool {
-        let yes = self.is_kw(kw);
-        if yes {
-            self.pos += 1;
-        }
-        yes
     }
 
     fn byte_at(&self, i: usize) -> usize {
-        if i < self.limit {
-            self.src.toks[i].start
-        } else if self.limit < self.src.toks.len() {
-            self.src.toks[self.limit].start
-        } else {
-            self.src.text.len()
-        }
-    }
-
-    fn end_byte(&self, i: usize) -> usize {
-        self.src.toks.get(i).map_or(self.src.text.len(), |t| t.end)
+        self.src.toks.get(i).map_or(self.src.text.len(), |t| t.start)
     }
 
     fn span(&self, first: usize, end: usize) -> (usize, usize) {
@@ -660,8 +632,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn push(&mut self, kind: ExprKind, first: usize) -> usize {
-        let end = self.pos.max(first);
+    fn push(&mut self, kind: ExprKind, (first, end): (usize, usize)) -> usize {
         let (start, stop) = self.span(first, end);
         let id = self.ast.exprs.len();
         self.ast.exprs.push(Expr { kind, first, end, start, stop, parent: None });
@@ -669,8 +640,7 @@ impl<'a> Parser<'a> {
         id
     }
 
-    fn push_stat(&mut self, kind: StatKind, first: usize) -> usize {
-        let end = self.pos.max(first);
+    fn push_stat(&mut self, kind: StatKind, (first, end): (usize, usize)) -> usize {
         let (start, stop) = self.span(first, end);
         let id = self.ast.stats.len();
         self.ast.stats.push(Stat { kind, first, end, start, stop, parent: 0 });
@@ -678,11 +648,8 @@ impl<'a> Parser<'a> {
         id
     }
 
-    fn push_block(&mut self, stats: Vec<usize>, start: usize) -> usize {
-        let stop = self.byte_at(self.pos).max(start);
-        let id = self.ast.blocks.len();
-        self.ast.blocks.push(Block { stats, start, stop, parent: None });
-        id
+    fn error(&mut self, at: usize) -> usize {
+        self.push(ExprKind::Error, (at, at))
     }
 
     fn open_scope(&mut self) {
@@ -715,173 +682,163 @@ impl<'a> Parser<'a> {
         self.scopes.iter().rev().flat_map(|s| s.iter().rev()).copied().find(|&d| self.ast.decls[d].name == name)
     }
 
-    fn at_block_end(&self) -> bool {
-        self.pos >= self.limit
-            || (self.kind(self.pos) == Some(Tok::Keyword)
-                && matches!(self.text(self.pos), "end" | "else" | "elseif" | "until"))
+    fn assigned(&mut self, target: usize) {
+        if let Some(d) = self.ast.decl_of(target) {
+            let stat = self.ast.stats.len();
+            self.ast.decls[d].assigned.push(stat);
+        }
     }
 
-    fn statements(&mut self, out: &mut Vec<usize>) {
-        while !self.at_block_end() {
-            let before = self.pos;
-            if let Some(s) = self.statement() {
-                out.push(s);
-            }
-            if self.pos == before {
-                self.pos += 1;
+    fn statements(&mut self, parent: Syntax<'a>, out: &mut Vec<usize>) {
+        for child in parent.children() {
+            if child.kind().is_statement() {
+                self.stat(child, out);
             }
         }
     }
 
-    fn block(&mut self, opener: usize) -> usize {
+    /// The token where the block `node` stops: the keyword that closes it.
+    fn stop(&self, node: Syntax) -> usize {
+        self.src.tok_of(node.token_span().1)
+    }
+
+    fn block_in_scope(&mut self, node: Option<Syntax<'a>>, at: usize) -> usize {
+        let mut stats = Vec::new();
+        let (start, stop) = match node {
+            Some(node) => {
+                self.statements(node, &mut stats);
+                node.range()
+            }
+            None => (self.byte_at(at), self.byte_at(at)),
+        };
+        self.ast.blocks.push(Block { stats, start, stop, parent: None });
+        self.ast.blocks.len() - 1
+    }
+
+    fn block(&mut self, node: Option<Syntax<'a>>, at: usize) -> usize {
         self.open_scope();
-        let block = self.block_in_scope(opener);
-        self.close_scope(self.pos);
+        let block = self.block_in_scope(node, at);
+        self.close_scope(node.map_or(at, |node| self.stop(node)));
         block
     }
 
-    fn block_in_scope(&mut self, opener: usize) -> usize {
-        let start = if opener < self.pos { self.end_byte(opener) } else { self.byte_at(self.pos) };
-        let mut stats = Vec::new();
-        self.statements(&mut stats);
-        self.push_block(stats, start)
-    }
-
-    fn statement(&mut self) -> Option<usize> {
-        if self.depth >= MAX_DEPTH {
-            return None;
-        }
-        self.depth += 1;
-        let s = self.statement_here();
-        self.depth -= 1;
-        s
-    }
-
-    fn statement_here(&mut self) -> Option<usize> {
-        let first = self.pos;
-        let kind = match (self.kind(first)?, self.text(first)) {
-            (Tok::Op, ";") => {
-                self.pos += 1;
-                StatKind::Empty
-            }
-            (Tok::Op, "::") => {
-                self.pos += 1;
-                if self.kind(self.pos) == Some(Tok::Name) {
-                    self.pos += 1;
+    fn stat(&mut self, node: Syntax<'a>, out: &mut Vec<usize>) {
+        let (first, end) = self.range(node);
+        let body = node.child(N::Block);
+        let kind = match node.kind() {
+            N::EmptyStat => {
+                for semi in node.tokens().filter(|token| token.is(T::Semi)) {
+                    let at = self.tok(semi);
+                    out.push(self.push_stat(StatKind::Empty, (at, at + 1)));
                 }
-                self.eat_op("::");
-                StatKind::Label
+                return;
             }
-            (Tok::Keyword, "if") => self.if_stat(),
-            (Tok::Keyword, "while") => {
-                self.pos += 1;
-                let cond = self.expr();
-                let opener = self.pos;
-                self.eat_kw("do");
-                let body = self.block(opener);
-                self.eat_kw("end");
-                StatKind::While { cond, body }
+            N::LabelStat => StatKind::Label,
+            N::GotoStat => StatKind::Goto,
+            N::BreakStat => StatKind::Break,
+            N::IfStat => self.if_stat(node),
+            N::WhileStat => {
+                let cond = self.expr_or_error(node.expr(), first + 1);
+                StatKind::While { cond, body: self.block(body, end) }
             }
-            (Tok::Keyword, "do") => {
-                self.pos += 1;
-                let body = self.block(first);
-                self.eat_kw("end");
-                StatKind::Do(body)
-            }
-            (Tok::Keyword, "repeat") => {
-                self.pos += 1;
+            N::DoStat => StatKind::Do(self.block(body, end)),
+            N::RepeatStat => {
                 self.open_scope();
-                let body = self.block_in_scope(first);
-                self.eat_kw("until");
-                let cond = self.expr();
-                self.close_scope(self.pos);
+                let body = self.block_in_scope(body, end);
+                let cond = self.expr_or_error(node.expr(), end);
+                self.close_scope(end);
                 StatKind::Repeat { body, cond }
             }
-            (Tok::Keyword, "for") => self.for_stat(),
-            (Tok::Keyword, "function") => {
-                self.pos += 1;
-                let (target, method) = self.function_name();
-                let func = self.function_body(first, method.is_some());
-                if let Some(d) = self.ast.decl_of(target) {
-                    let stat = self.ast.stats.len();
-                    self.ast.decls[d].assigned.push(stat);
-                }
+            N::ForAStat | N::ForBStat => self.for_stat(node, end),
+            N::FuncDef | N::ClassMethodDef => {
+                let (target, method) = self.function_name(node, first + 1);
+                let func = self.function(node, (first, end), method.is_some());
+                self.assigned(target);
                 StatKind::Function { target, method, func }
             }
-            (Tok::Keyword, "local") => {
-                self.pos += 1;
-                if self.eat_kw("function") {
-                    return Some(self.local_function(first));
+            N::LocalFuncDef => match self.at(node, T::Id) {
+                Some(tok) => {
+                    let decl = self.declare(tok, DeclKind::LocalFunction { stat: 0 }, tok);
+                    let func = self.function(node, (first, end), false);
+                    self.ast.decls[decl].kind = DeclKind::LocalFunction { stat: self.ast.stats.len() };
+                    self.ast.decls[decl].init = Some(func);
+                    StatKind::LocalFunction { decl, func }
                 }
-                return Some(self.local(first));
+                None => StatKind::Expr(self.function(node, (first, end), false)),
+            },
+            N::LocalDef => return self.local(node, (first, end), out),
+            N::AssignStat => return self.assign(node, (first, end), out),
+            N::CompoundAssignStat => {
+                let mut operands = node.exprs();
+                let target = self.expr_or_error(operands.next(), first);
+                let after = self.ast.exprs[target].end;
+                let Some(op) = compound(self.src.tok_text(after)) else { return };
+                let value = self.expr_or_error(operands.next(), after + 1);
+                self.assigned(target);
+                StatKind::Compound { target, op, value }
             }
-            (Tok::Keyword, "return") => {
-                self.pos += 1;
-                let values = if self.at_block_end() || self.is_op(";") { Vec::new() } else { self.expr_list() };
-                self.eat_op(";");
-                StatKind::Return(values)
+            N::ExprStat => {
+                let Some(expr) = node.expr() else { return };
+                let value = self.expr(expr);
+                let range = (self.ast.exprs[value].first, self.ast.exprs[value].end);
+                out.push(self.push_stat(StatKind::Expr(value), range));
+                return self.semi(node, out);
             }
-            (Tok::Keyword, "break") => {
-                self.pos += 1;
-                StatKind::Break
-            }
-            (Tok::Keyword, "goto") => {
-                self.pos += 1;
-                if self.kind(self.pos) == Some(Tok::Name) {
-                    self.pos += 1;
-                }
-                StatKind::Goto
-            }
-            (Tok::Name, _) | (Tok::Op, "(") => return self.expr_stat(first),
-            _ => return None,
+            N::ReturnStat => StatKind::Return(self.expr_list(node.child(N::ExprList), None)),
+            _ => return,
         };
-        Some(self.push_stat(kind, first))
+        out.push(self.push_stat(kind, (first, end)));
+        self.semi(node, out);
     }
 
-    fn if_stat(&mut self) -> StatKind {
-        let mut conds = Vec::new();
-        let mut blocks = Vec::new();
-        let mut otherwise = None;
-        self.pos += 1;
-        loop {
-            conds.push(self.expr());
-            let opener = self.pos;
-            self.eat_kw("then");
-            blocks.push(self.block(opener));
-            if self.eat_kw("elseif") {
-                continue;
+    /// The `;` that ends a statement is an empty statement of its own, except after `return`.
+    fn semi(&mut self, node: Syntax<'a>, out: &mut Vec<usize>) {
+        if node.is(N::ReturnStat) {
+            return;
+        }
+        if let Some(semi) = node.tokens().last().filter(|token| token.is(T::Semi)) {
+            let at = self.tok(semi);
+            out.push(self.push_stat(StatKind::Empty, (at, at + 1)));
+        }
+    }
+
+    fn if_stat(&mut self, node: Syntax<'a>) -> StatKind {
+        let (mut conds, mut blocks, mut otherwise, mut last) = (Vec::new(), Vec::new(), None, false);
+        for element in node.elements() {
+            match element {
+                Element::Token(token) if token.is(T::Else) => last = true,
+                Element::Node(child) if child.kind().is_expr() => conds.push(self.expr(child)),
+                Element::Node(child) if child.is(N::Block) => {
+                    let at = self.range(child).0;
+                    if last {
+                        otherwise = Some(self.block(Some(child), at));
+                        continue;
+                    }
+                    if conds.len() == blocks.len() {
+                        conds.push(self.error(at));
+                    }
+                    blocks.push(self.block(Some(child), at));
+                }
+                _ => {}
             }
-            if self.is_kw("else") {
-                let opener = self.pos;
-                self.pos += 1;
-                otherwise = Some(self.block(opener));
-            }
-            self.eat_kw("end");
-            break;
         }
         StatKind::If { conds, blocks, otherwise }
     }
 
-    fn for_stat(&mut self) -> StatKind {
-        self.pos += 1;
-        let mut names = Vec::new();
-        while self.kind(self.pos) == Some(Tok::Name) {
-            names.push(self.pos);
-            self.pos += 1;
-            if !self.eat_op(",") {
-                break;
-            }
-        }
-        let numeric = self.is_op("=");
-        self.pos += usize::from(numeric || self.is_kw("in"));
-        let exprs = self.expr_list();
-        let opener = self.pos;
-        self.eat_kw("do");
+    fn for_stat(&mut self, node: Syntax<'a>, end: usize) -> StatKind {
+        let names: Vec<usize> = node.children_of(N::ParamNameDef).map(|var| self.range(var).0).collect();
+        let numeric = node.is(N::ForAStat) && node.has(T::Assign);
+        let body = node.child(N::Block);
+        let opener = self.at(node, T::Do).or(body.map(|body| self.range(body).0)).unwrap_or(end);
+        let exprs = match node.child(N::ExprList) {
+            Some(list) => self.expr_list(Some(list), Some(opener)),
+            None => self.expr_list(Some(node), Some(opener)),
+        };
         self.open_scope();
         let vars: Vec<usize> = names.iter().map(|&t| self.declare(t, DeclKind::ForVar { stat: 0 }, opener)).collect();
-        let body = self.block(opener);
-        self.close_scope(self.pos);
-        self.eat_kw("end");
+        let stop = body.map_or(end, |body| self.stop(body));
+        let body = self.block(body, end);
+        self.close_scope(stop);
         // The statement is pushed right after its body: that is the loop variables' statement.
         let stat = self.ast.stats.len();
         for &d in &vars {
@@ -893,60 +850,41 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn function_name(&mut self) -> (usize, Option<String>) {
-        let first = self.pos;
-        if self.kind(self.pos) != Some(Tok::Name) {
-            return (self.push(ExprKind::Error, first), None);
+    fn function_name(&mut self, node: Syntax<'a>, at: usize) -> (usize, Option<String>) {
+        if let Some(path) = node.child(N::ClassMethodName) {
+            let object = self.expr_or_error(path.expr(), at);
+            let member = path.token(T::Id).map(|name| name.text().to_owned());
+            if path.has(T::Colon) {
+                return (object, member);
+            }
+            let Some(name) = member else { return (object, None) };
+            let range = (self.ast.exprs[object].first, self.range(path).1);
+            return (self.push(ExprKind::Field { obj: object, name, safe: false }, range), None);
         }
-        let name = self.text(self.pos).to_owned();
-        self.pos += 1;
-        let decl = self.resolve(&name);
-        let mut target = self.push(ExprKind::Name { name, decl }, first);
-        while self.is_op(".") && self.kind(self.pos + 1) == Some(Tok::Name) {
-            let name = self.text(self.pos + 1).to_owned();
-            self.pos += 2;
-            target = self.push(ExprKind::Field { obj: target, name, safe: false }, first);
+        match node.token(T::Id) {
+            Some(name) => {
+                let tok = self.tok(name);
+                let decl = self.resolve(name.text());
+                (self.push(ExprKind::Name { name: name.text().to_owned(), decl }, (tok, tok + 1)), None)
+            }
+            None => (self.error(at), None),
         }
-        let mut method = None;
-        if self.is_op(":") && self.kind(self.pos + 1) == Some(Tok::Name) {
-            method = Some(self.text(self.pos + 1).to_owned());
-            self.pos += 2;
-        }
-        (target, method)
     }
 
-    fn function_body(&mut self, first: usize, method: bool) -> usize {
+    fn function(&mut self, owner: Syntax<'a>, (first, end): (usize, usize), method: bool) -> usize {
         self.open_scope();
-        let mut params = Vec::new();
         // The implicit `self` of a method has no token of its own.
         let self_decl = method.then(|| self.declare_named("self", first, DeclKind::Param { func: 0 }, first));
-        let mut opener = self.pos;
-        if self.is_op("(") {
-            let close = self.src.pair[self.pos].filter(|&c| c < self.limit);
-            self.pos += 1;
-            loop {
-                match self.kind(self.pos) {
-                    Some(Tok::Name) => {
-                        let tok = self.pos;
-                        params.push(self.declare(tok, DeclKind::Param { func: 0 }, tok));
-                        self.pos += 1;
-                    }
-                    Some(Tok::Op) if self.text(self.pos) == "..." => self.pos += 1,
-                    _ => {}
-                }
-                if !self.eat_op(",") {
-                    break;
-                }
-            }
-            if let Some(c) = close {
-                self.pos = c;
-            }
-            opener = self.pos;
-            self.eat_op(")");
+        let body = owner.child(N::FuncBody);
+        let mut params = Vec::new();
+        for param in body.into_iter().flat_map(|body| body.children_of(N::ParamNameDef)) {
+            let tok = self.range(param).0;
+            params.push(self.declare(tok, DeclKind::Param { func: 0 }, tok));
         }
-        let body = self.block_in_scope(opener);
-        self.close_scope(self.pos);
-        self.eat_kw("end");
+        let block = body.and_then(|body| body.child(N::Block));
+        let stop = block.map_or(end, |block| self.stop(block));
+        let body = self.block_in_scope(block, end);
+        self.close_scope(stop);
         // The function is pushed right after its body: that is the parameters' function.
         let func = self.ast.exprs.len();
         for &p in params.iter().chain(&self_decl) {
@@ -954,315 +892,236 @@ impl<'a> Parser<'a> {
         }
         let ordinal = self.ast.functions.len();
         self.ast.functions.push(func);
-        self.push(ExprKind::Function { params, body, ordinal, method }, first)
+        self.push(ExprKind::Function { params, body, ordinal, method }, (first, end))
     }
 
-    fn local_function(&mut self, first: usize) -> usize {
-        if self.kind(self.pos) != Some(Tok::Name) {
-            let func = self.function_body(first, false);
-            return self.push_stat(StatKind::Expr(func), first);
-        }
-        let tok = self.pos;
-        self.pos += 1;
-        let decl = self.declare(tok, DeclKind::LocalFunction { stat: 0 }, tok);
-        let func = self.function_body(first, false);
+    fn local(&mut self, node: Syntax<'a>, (first, end): (usize, usize), out: &mut Vec<usize>) {
+        let names: Vec<usize> = node
+            .child(N::NameList)
+            .into_iter()
+            .flat_map(|list| list.children_of(N::NameDef))
+            .map(|name| self.range(name).0)
+            .collect();
+        // `local a, b in src`: the names, then the source as a statement of its own.
+        let unpack = self.at(node, T::In);
+        let values = match node.child(N::ExprList) {
+            Some(list) if unpack.is_none() => self.expr_list(Some(list), Some(end)),
+            _ => Vec::new(),
+        };
         let stat = self.ast.stats.len();
-        self.ast.decls[decl].kind = DeclKind::LocalFunction { stat };
-        self.ast.decls[decl].init = Some(func);
-        self.push_stat(StatKind::LocalFunction { decl, func }, first)
-    }
-
-    fn local(&mut self, first: usize) -> usize {
-        let mut names = Vec::new();
-        while self.kind(self.pos) == Some(Tok::Name) {
-            names.push(self.pos);
-            self.pos += 1;
-            // `<const>` / `<close>` attributes.
-            if self.is_op("<") && self.kind(self.pos + 1) == Some(Tok::Name) && self.text(self.pos + 2) == ">" {
-                self.pos += 3;
-            }
-            if !self.eat_op(",") {
-                break;
-            }
-        }
-        let values = if self.eat_op("=") { self.expr_list() } else { Vec::new() };
-        let stat = self.ast.stats.len();
-        let from = self.pos;
-        let decls: Vec<usize> =
-            names.iter().enumerate().map(|(i, &t)| self.declare(t, DeclKind::Local { stat, index: i }, from)).collect();
+        let from = unpack.unwrap_or(end);
+        let decls: Vec<usize> = names
+            .iter()
+            .enumerate()
+            .map(|(index, &tok)| self.declare(tok, DeclKind::Local { stat, index }, from))
+            .collect();
         for (i, &d) in decls.iter().enumerate() {
             self.ast.decls[d].init = values.get(i).copied();
         }
-        self.push_stat(StatKind::Local { names: decls, values }, first)
+        out.push(self.push_stat(StatKind::Local { names: decls, values }, (first, from)));
+        self.unpacked(node, unpack, out);
+        self.semi(node, out);
     }
 
-    fn expr_stat(&mut self, first: usize) -> Option<usize> {
-        let e = self.suffixed();
-        if self.is_op("=") || self.is_op(",") {
-            let mut targets = vec![e];
-            while self.eat_op(",") {
-                targets.push(self.suffixed());
+    fn unpacked(&mut self, node: Syntax<'a>, unpack: Option<usize>, out: &mut Vec<usize>) {
+        if let (Some(_), Some(source)) = (unpack, node.expr()) {
+            let source = self.expr(source);
+            let range = (self.ast.exprs[source].first, self.ast.exprs[source].end);
+            out.push(self.push_stat(StatKind::Expr(source), range));
+        }
+    }
+
+    fn assign(&mut self, node: Syntax<'a>, (first, end): (usize, usize), out: &mut Vec<usize>) {
+        let targets = self.expr_list(node.child(N::VarList), Some(first));
+        let unpack = self.at(node, T::In);
+        let kind = match unpack {
+            Some(_) if targets.len() == 1 => StatKind::Expr(targets[0]),
+            Some(at) => {
+                let values = vec![self.error(at)];
+                targets.iter().for_each(|&target| self.assigned(target));
+                StatKind::Assign { targets, values }
             }
-            self.eat_op("=");
-            let values = self.expr_list();
-            let stat = self.ast.stats.len();
-            for &t in &targets {
-                if let Some(d) = self.ast.decl_of(t) {
-                    self.ast.decls[d].assigned.push(stat);
+            None => {
+                let values = self.expr_list(node.child(N::ExprList), Some(end));
+                targets.iter().for_each(|&target| self.assigned(target));
+                StatKind::Assign { targets, values }
+            }
+        };
+        out.push(self.push_stat(kind, (first, unpack.unwrap_or(end))));
+        self.unpacked(node, unpack, out);
+        self.semi(node, out);
+    }
+
+    fn expr_or_error(&mut self, node: Option<Syntax<'a>>, at: usize) -> usize {
+        match node {
+            Some(node) => self.expr(node),
+            None => self.error(at),
+        }
+    }
+
+    /// The expressions of `list`; a list that must hold one holds an error where it is missing.
+    fn expr_list(&mut self, list: Option<Syntax<'a>>, required: Option<usize>) -> Vec<usize> {
+        let mut out = Vec::new();
+        // The comma an expression is still expected after.
+        let mut open = None;
+        let mut commas = false;
+        for element in list.into_iter().flat_map(Syntax::elements) {
+            match element {
+                Element::Node(expr) if expr.kind().is_expr() => {
+                    out.push(self.expr(expr));
+                    open = None;
                 }
+                Element::Token(comma) if comma.is(T::Comma) => {
+                    let at = self.tok(comma);
+                    if open.is_some() || !commas && out.is_empty() {
+                        out.push(self.error(at));
+                    }
+                    (open, commas) = (Some(at), true);
+                }
+                _ => {}
             }
-            return Some(self.push_stat(StatKind::Assign { targets, values }, first));
         }
-        if self.kind(self.pos) == Some(Tok::Op)
-            && let Some(op) = compound(self.text(self.pos))
-        {
-            self.pos += 1;
-            let value = self.expr();
-            let stat = self.ast.stats.len();
-            if let Some(d) = self.ast.decl_of(e) {
-                self.ast.decls[d].assigned.push(stat);
-            }
-            return Some(self.push_stat(StatKind::Compound { target: e, op, value }, first));
+        if let Some(comma) = open {
+            out.push(self.error(comma + 1));
         }
-        if self.pos == first {
-            return None;
-        }
-        Some(self.push_stat(StatKind::Expr(e), first))
-    }
-
-    fn expr_list(&mut self) -> Vec<usize> {
-        let mut out = vec![self.expr()];
-        while self.eat_op(",") {
-            out.push(self.expr());
+        if let (true, Some(at)) = (out.is_empty(), required) {
+            out.push(self.error(at));
         }
         out
     }
 
-    fn expr(&mut self) -> usize {
-        self.subexpr(0)
-    }
-
-    fn subexpr(&mut self, limit: u8) -> usize {
-        if self.depth >= MAX_DEPTH {
-            return self.push(ExprKind::Error, self.pos);
-        }
-        self.depth += 1;
-        let e = self.subexpr_here(limit);
-        self.depth -= 1;
-        e
-    }
-
-    fn subexpr_here(&mut self, limit: u8) -> usize {
-        let first = self.pos;
-        let mut chain = 0;
-        let mut lhs = match self
-            .kind(first)
-            .filter(|k| matches!(k, Tok::Op | Tok::Keyword))
-            .and_then(|_| unary(self.text(first)))
-        {
-            Some(op) => {
-                self.pos += 1;
-                let operand = self.subexpr(UNARY_PRIORITY);
-                self.push(ExprKind::Unary { op, operand }, first)
-            }
-            None => self.simple(),
-        };
-        while let Some((op, left, right)) = self
-            .kind(self.pos)
-            .filter(|k| matches!(k, Tok::Op | Tok::Keyword))
-            .and_then(|_| binary(self.text(self.pos)))
-        {
-            if left <= limit || chain >= MAX_DEPTH {
-                break;
-            }
-            chain += 1;
-            self.pos += 1;
-            let rhs = self.subexpr(right);
-            lhs = self.push(ExprKind::Binary { op, lhs, rhs }, first);
-        }
-        lhs
-    }
-
-    fn simple(&mut self) -> usize {
-        let first = self.pos;
-        let leaf = match (self.kind(first), self.text(first)) {
-            (Some(Tok::Number), _) => ExprKind::Number,
-            (Some(Tok::Str { .. } | Tok::LongStr), _) => ExprKind::Str,
-            (Some(Tok::Hash { .. }), _) => ExprKind::Hash,
-            (Some(Tok::Keyword), "nil") => ExprKind::Nil,
-            (Some(Tok::Keyword), "true") => ExprKind::True,
-            (Some(Tok::Keyword), "false") => ExprKind::False,
-            (Some(Tok::Op), "...") => ExprKind::Vararg,
-            (Some(Tok::Op), "{") => return self.table(),
-            (Some(Tok::Keyword), "function") => {
-                self.pos += 1;
-                return self.function_body(first, false);
-            }
-            _ => return self.suffixed(),
-        };
-        self.pos += 1;
-        self.push(leaf, first)
-    }
-
-    fn primary(&mut self) -> usize {
-        let first = self.pos;
-        match self.kind(first) {
-            Some(Tok::Name) => {
-                let name = self.text(first).to_owned();
-                self.pos += 1;
-                let decl = self.resolve(&name);
-                self.push(ExprKind::Name { name, decl }, first)
-            }
-            Some(Tok::Op) if self.text(first) == "(" => {
-                let close = self.src.pair[first].filter(|&c| c < self.limit);
-                self.pos += 1;
-                let inner = self.bounded(close, Self::expr);
-                self.push(ExprKind::Paren(inner), first)
-            }
-            _ => self.push(ExprKind::Error, first),
+    fn args(&mut self, call: Syntax<'a>) -> Vec<usize> {
+        match call.child(N::ListArgs) {
+            Some(list) => self.expr_list(Some(list), None),
+            None => call.child(N::SingleArg).and_then(Syntax::expr).map(|arg| self.expr(arg)).into_iter().collect(),
         }
     }
 
-    fn bounded<T>(&mut self, close: Option<usize>, f: impl FnOnce(&mut Self) -> T) -> T {
-        let saved = self.limit;
-        if let Some(c) = close {
-            self.limit = c;
-        }
-        let out = f(self);
-        self.limit = saved;
-        match close {
-            Some(c) => self.pos = c + 1,
-            None => {
-                self.eat_op(")");
-            }
-        }
-        out
-    }
-
-    fn suffixed(&mut self) -> usize {
-        let first = self.pos;
-        let mut e = self.primary();
-        if matches!(self.ast.exprs[e].kind, ExprKind::Error) {
-            return e;
-        }
-        for _ in 0..MAX_DEPTH {
-            let i = self.pos;
-            match (self.kind(i), self.text(i)) {
-                (Some(Tok::Op), "?") if self.src.is_safe_nav(i) => self.pos += 1,
-                (Some(Tok::Op), ".") if self.kind(i + 1) == Some(Tok::Name) => {
-                    let name = self.text(i + 1).to_owned();
-                    self.pos += 2;
-                    let safe = self.src.is_op(i - 1, "?");
-                    e = self.push(ExprKind::Field { obj: e, name, safe }, first);
-                }
-                (Some(Tok::Op), "[") => {
-                    let close = self.src.pair[i].filter(|&c| c < self.limit);
-                    self.pos += 1;
-                    let key = self.bounded_index(close);
-                    e = self.push(ExprKind::Index { obj: e, key }, first);
-                }
-                (Some(Tok::Op), ":") if self.kind(i + 1) == Some(Tok::Name) => {
-                    let method = self.text(i + 1).to_owned();
-                    self.pos += 2;
-                    let args = self.call_args();
-                    e = self.push(ExprKind::Call { callee: e, method: Some(method), args }, first);
-                }
-                (Some(Tok::Op), "(" | "{") | (Some(Tok::Str { .. } | Tok::LongStr), _) => {
-                    let args = self.call_args();
-                    e = self.push(ExprKind::Call { callee: e, method: None, args }, first);
-                }
-                _ => return e,
-            }
-        }
-        e
-    }
-
-    fn bounded_index(&mut self, close: Option<usize>) -> usize {
-        let saved = self.limit;
-        if let Some(c) = close {
-            self.limit = c;
-        }
-        let key = self.expr();
-        self.limit = saved;
-        match close {
-            Some(c) => self.pos = c + 1,
-            None => {
-                self.eat_op("]");
-            }
-        }
-        key
-    }
-
-    fn call_args(&mut self) -> Vec<usize> {
-        let i = self.pos;
-        match (self.kind(i), self.text(i)) {
-            (Some(Tok::Op), "(") => {
-                let close = self.src.pair[i].filter(|&c| c < self.limit);
-                self.pos += 1;
-                self.bounded(close, |p| if p.is_op(")") || p.pos >= p.limit { Vec::new() } else { p.expr_list() })
-            }
-            (Some(Tok::Op), "{") => vec![self.table()],
-            (Some(Tok::Str { .. } | Tok::LongStr), _) => {
-                self.pos += 1;
-                vec![self.push(ExprKind::Str, i)]
-            }
-            _ => Vec::new(),
-        }
-    }
-
-    fn table(&mut self) -> usize {
-        let first = self.pos;
-        let close = self.src.pair[first].filter(|&c| c < self.limit);
-        self.pos += 1;
-        let saved = self.limit;
-        if let Some(c) = close {
-            self.limit = c;
-        }
+    fn table(&mut self, node: Syntax<'a>) -> usize {
         let mut fields = Vec::new();
-        while self.pos < self.limit && !self.is_op("}") {
-            let start = self.pos;
-            let field = self.field();
-            if self.pos == start {
-                self.pos += 1;
-                continue;
+        for field in node.children_of(N::TableField) {
+            let at = self.range(field).0;
+            let mut exprs = field.exprs();
+            let assign = self.at(field, T::Assign);
+            if field.has(T::LBrack) {
+                let key = self.expr_or_error(exprs.next(), at + 1);
+                match assign {
+                    Some(assign) => {
+                        let value = self.expr_or_error(exprs.next(), assign + 1);
+                        fields.push(Field { key: FieldKey::Expr(key), value: Some(value) });
+                    }
+                    None => fields.push(Field { key: FieldKey::Set, value: None }),
+                }
+            } else if field.has(T::Dot) {
+                fields.push(Field { key: FieldKey::Set, value: None });
+                if let Some(assign) = assign {
+                    self.error(assign);
+                    let value = self.expr_or_error(exprs.next(), assign + 1);
+                    fields.push(Field { key: FieldKey::Positional, value: Some(value) });
+                }
+            } else if let (Some(assign), Some(name)) = (assign, field.token(T::Id)) {
+                let value = self.expr_or_error(exprs.next(), assign + 1);
+                fields.push(Field { key: FieldKey::Named(name.text().to_owned()), value: Some(value) });
+            } else {
+                let value = self.expr_or_error(exprs.next(), at);
+                fields.push(Field { key: FieldKey::Positional, value: Some(value) });
             }
-            fields.push(Field { key: field.0, value: field.1 });
-            let _ = self.eat_op(",") || self.eat_op(";");
         }
-        self.limit = saved;
-        match close {
-            Some(c) => self.pos = c + 1,
-            None => {
-                self.eat_op("}");
-            }
-        }
-        self.push(ExprKind::Table { fields }, first)
+        let range = self.range(node);
+        self.push(ExprKind::Table { fields }, range)
     }
 
-    fn field(&mut self) -> (FieldKey, Option<usize>) {
-        let i = self.pos;
-        if self.is_op("[") {
-            let close = self.src.pair[i].filter(|&c| c < self.limit);
-            self.pos += 1;
-            let key = self.bounded_index(close);
-            if self.eat_op("=") {
-                return (FieldKey::Expr(key), Some(self.expr()));
+    fn expr(&mut self, node: Syntax<'a>) -> usize {
+        let range = self.range(node);
+        let kind = match node.kind() {
+            N::BinaryExpr | N::IndexExpr | N::CallExpr => return self.chain(node),
+            N::TableExpr => return self.table(node),
+            N::ClosureExpr => return self.function(node, range, false),
+            N::LiteralExpr => match node.first_token().map(|token| token.kind()) {
+                Some(T::Number) => ExprKind::Number,
+                Some(T::String) => ExprKind::Str,
+                Some(T::HashString) => ExprKind::Hash,
+                Some(T::Nil) => ExprKind::Nil,
+                Some(T::True) => ExprKind::True,
+                Some(T::False) => ExprKind::False,
+                Some(T::Ellipsis) => ExprKind::Vararg,
+                _ => ExprKind::Error,
+            },
+            N::NameExpr => {
+                let name = node.code();
+                ExprKind::Name { name: name.to_owned(), decl: self.resolve(name) }
             }
-            return (FieldKey::Set, None);
+            N::ParenExpr => ExprKind::Paren(self.expr_or_error(node.expr(), range.0 + 1)),
+            N::UnaryExpr => {
+                let op = node.child(N::UnaryOp).and_then(|op| unary(op.code()));
+                let operand = self.expr_or_error(node.expr(), range.0 + 1);
+                match op {
+                    Some(op) => ExprKind::Unary { op, operand },
+                    None => return operand,
+                }
+            }
+            _ => return self.error(range.0),
+        };
+        self.push(kind, range)
+    }
+
+    /// A chain of operators or suffixes is as deep as it is long on its left side: it is walked from
+    /// its first operand outwards instead of recursed into.
+    fn chain(&mut self, node: Syntax<'a>) -> usize {
+        let binary_chain = node.is(N::BinaryExpr);
+        let links = |node: Syntax| {
+            if binary_chain { node.is(N::BinaryExpr) } else { matches!(node.kind(), N::IndexExpr | N::CallExpr) }
+        };
+        let base = self.spine.len();
+        let mut first = Some(node);
+        while let Some(link) = first.filter(|node| links(*node)) {
+            self.spine.push(link);
+            first = link.expr();
         }
-        if self.is_op(".") && self.kind(i + 1) == Some(Tok::Name) {
-            self.pos += 2;
-            return (FieldKey::Set, None);
+        let start = self.range(node).0;
+        let mut value = self.expr_or_error(first, start);
+        while self.spine.len() > base {
+            let Some(link) = self.spine.pop() else { break };
+            let end = self.range(link).1;
+            let kind = match link.kind() {
+                N::BinaryExpr => {
+                    let op = link.child(N::BinaryOp).and_then(|op| binary(op.code()));
+                    let rhs = self.expr_or_error(link.exprs().nth(1), end);
+                    match op {
+                        Some((op, ..)) => ExprKind::Binary { op, lhs: value, rhs },
+                        None => continue,
+                    }
+                }
+                N::IndexExpr if link.has(T::LBrack) => {
+                    let key = self.expr_or_error(link.exprs().nth(1), end);
+                    ExprKind::Index { obj: value, key }
+                }
+                N::IndexExpr => {
+                    let Some(name) = link.token(T::Id) else { continue };
+                    let name = name.text().to_owned();
+                    if !link.has(T::Colon) {
+                        ExprKind::Field { obj: value, name, safe: link.has(T::Question) }
+                    } else {
+                        // `obj:name(...)` is one call: the method is not an expression of its own.
+                        let call =
+                            self.spine.last().copied().filter(|outer| self.spine.len() > base && outer.is(N::CallExpr));
+                        let (args, end) = match call {
+                            Some(call) => {
+                                self.spine.pop();
+                                (self.args(call), self.range(call).1)
+                            }
+                            None => (Vec::new(), end),
+                        };
+                        value = self.push(ExprKind::Call { callee: value, method: Some(name), args }, (start, end));
+                        continue;
+                    }
+                }
+                _ => ExprKind::Call { callee: value, method: None, args: self.args(link) },
+            };
+            value = self.push(kind, (start, end));
         }
-        if self.kind(i) == Some(Tok::Name) && self.kind(i + 1) == Some(Tok::Op) && self.text(i + 1) == "=" {
-            let name = self.text(i).to_owned();
-            self.pos += 2;
-            return (FieldKey::Named(name), Some(self.expr()));
-        }
-        if matches!(self.text(i), "," | ";") && self.kind(i) == Some(Tok::Op) {
-            return (FieldKey::Positional, None);
-        }
-        (FieldKey::Positional, Some(self.expr()))
+        self.spine.truncate(base);
+        value
     }
 }
 
