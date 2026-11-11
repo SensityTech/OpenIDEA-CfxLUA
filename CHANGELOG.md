@@ -80,6 +80,8 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   disagree. What they report is unchanged; code being typed is read the same way by all of them.
 - **Indexing a project takes about a tenth less time** (measured on 5,000 files): what the features read from a Lua
   file is built once and released with the file, instead of being looked up again by each of them.
+- **The component is compiled for speed** instead of size: through OpenIDEA it answers about 30% faster and reads a
+  5,000-file project in 9 s instead of 11.5 s, for a package a tenth bigger (2.6 MB).
 - The **lua-language-server config (.luarc.json)** template ignores `.cfxlua` as project code (it stays a library)
   and lets completion list up to 1,000 items: lua-language-server stops at 100, which could hide the native you type.
   In an existing `.luarc.json`, add `".cfxlua"` to `workspace.ignoreDir` and `"completion.maxSuggestCount": 1000`.
