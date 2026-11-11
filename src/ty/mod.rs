@@ -3,6 +3,7 @@
 
 use std::rc::Rc;
 
+mod casts;
 pub mod context;
 pub mod declarations;
 pub mod doc;

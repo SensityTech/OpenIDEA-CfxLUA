@@ -4,7 +4,8 @@ use super::context::{Cx, Psi};
 use super::doc::Reader;
 use super::expressions::{self, infer_expr, unpacked, value_at, values};
 use super::{
-    ANONYMOUS, FileId, FuncRef, Function, GLOBAL, Param, Ret, SELF, SELF_FUNCTION, Signature, Ty, TyParam, members, psi,
+    ANONYMOUS, FileId, FuncRef, Function, GLOBAL, Param, Ret, SELF, SELF_FUNCTION, Signature, Ty, TyParam, casts,
+    members, psi,
 };
 use crate::lua::doc::tags::{self, Comment};
 use crate::lua::tree::{N, Node};
@@ -23,6 +24,10 @@ impl Cx<'_> {
     pub fn infer(&self, psi: Psi) -> Ty {
         self.cached(psi.elem(), || match psi.node.kind() {
             _ if psi::is_function(psi.node) => function(self, psi),
+            N::NameExpr => match casts::cast(self, psi) {
+                cast if cast.is_invalid() => infer_expr(self, psi),
+                cast => cast,
+            },
             kind if kind.is_expr() => infer_expr(self, psi),
             N::ParamNameDef => param(self, psi),
             N::NameDef => name_def(self, psi),

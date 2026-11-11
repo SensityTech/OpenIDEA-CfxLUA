@@ -421,6 +421,60 @@ fn a_file_is_declared_again_when_it_changes() {
     assert!(project.index.own("_G").next().is_none());
 }
 
+/// The names of the types of the local `name`, the type made for the local itself left out.
+fn types(project: &Project, name: &str) -> Vec<String> {
+    project.type_of(name).split('|').map(str::to_owned).collect()
+}
+
+#[test]
+fn a_cast_narrows_the_variable_read_after_it() {
+    let project = with_library(
+        "---@type string|number
+local v = nil
+local before = v
+---@cast v string
+local a = v
+         ---@cast v +boolean
+local b = v
+---@cast v -string
+local c = v
+if a then
+    ---@cast v SynthPoint
+             local inner = v
+end
+local after = v
+v = 1
+local reassigned = v
+",
+    );
+    assert_eq!(project.type_of("before"), "number|string");
+    assert_eq!(project.type_of("a"), "string");
+    assert_eq!(project.type_of("b"), "boolean|string");
+    assert_eq!(project.type_of("c"), "boolean");
+    assert_eq!(project.type_of("inner"), "SynthPoint");
+    assert_eq!(project.type_of("after"), "boolean", "a cast written in a block ends with it");
+    assert_eq!(project.type_of("reassigned"), "number|string", "an assignment ends the cast");
+}
+
+#[test]
+fn a_cast_of_a_parameter_stays_inside_its_function() {
+    let project = with_library(
+        "---@param data any
+local function handle(data)
+    ---@cast data SynthNotifyProps
+             local title = data.title
+    return title
+end
+---@cast data SynthPoint
+         local function other(data)
+    local d = data
+end
+",
+    );
+    assert_eq!(project.type_of("title"), "string");
+    assert!(!types(&project, "d").contains(&"SynthPoint".to_owned()), "{:?}", types(&project, "d"));
+}
+
 #[test]
 fn what_has_no_type_has_no_member() {
     assert!(
