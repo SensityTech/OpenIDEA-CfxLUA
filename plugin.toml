@@ -20,7 +20,7 @@ required = ["project.read", "editor.read", "editor.write", "storage", "events"]
 optional = ["net:static.cfx.re", "net:raw.githubusercontent.com", "clipboard"]
 
 [[contributes.providers]]
-kinds = ["completion", "definition", "line-markers", "code-actions"]
+kinds = ["completion", "definition", "line-markers", "code-actions", "semantic-tokens"]
 languages = ["lua"]
 
 # The NUI bridge: callbacks and messages in the pages of resources.

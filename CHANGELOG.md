@@ -5,6 +5,13 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
 
 ## [Unreleased]
 
+### Added
+
+- **Semantic colours without lua-language-server.** The plugin colours the names of a Lua file itself, the way the
+  JetBrains plugin does: parameters, locals read from a nested function (underlined), globals, functions and methods
+  (in italics when called through a dot), fields, `self`, hash literals, and natives, the Cfx runtime API and the Lua
+  standard library as library names. Where lua-language-server colours the same name, the plugin's colour is shown.
+
 ### Fixed
 
 - **No natives in completion on big projects.** The catalogs were loaded once the manifests were read, which a big
