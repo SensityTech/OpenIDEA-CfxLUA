@@ -264,6 +264,11 @@ impl<'a> Node<'a> {
         self.id
     }
 
+    /// The id of the first node after this one and its descendants.
+    pub fn next_id(self) -> u32 {
+        self.data().next
+    }
+
     pub fn tree(self) -> &'a Tree {
         self.tree
     }
