@@ -36,7 +36,8 @@ Security issues: see [SECURITY.md](SECURITY.md), not a public issue.
 | `src/lib.rs` | Entry point: providers (completion, definition, gutter, quick fixes), events, commands, the tool window, the status bar. |
 | `src/feature.rs` | The `Feature` trait every area implements, `Doc`, `Ctx`, `Problem`, `Fix`. |
 | `src/lua/` | CfxLua lexer, parser and syntax tree, scopes, documentation comments (`doc/`), and a light structural view (`Source`, chains, calls). |
-| `src/ty/` | The types of Lua values: the model, how a type is shown, the types written in documentation comments. |
+| `src/ty/` | The type engine: the types of Lua values, how they are shown, the types written in documentation comments, and the inference of expressions and declarations. |
+| `src/index/` | What the files of a project declare, by name: classes, members, aliases. |
 | `src/editor/` | What the editor shows of a Lua file: semantic colours, folding, structure, occurrences. |
 | `src/project/` | Resources, manifest entries, FXServer globs, client/server/shared side, game. |
 | `src/workspace.rs` | The project files the plugin has read; areas only read the project through it. |
