@@ -1271,8 +1271,8 @@ mod tests {
         let (rel, text) = all.iter().find(small).expect("a small script");
         let path = format!("/project/{rel}");
         for typed in ["GetEnt", "GetEnti", "GetEntit"] {
-            let text = format!("{text}\n{typed}");
-            let at = Position::new(text.split('\n').count() as u32 - 1, typed.len() as u32);
+            let text = format!("{typed}\n{text}");
+            let at = Position::new(0, typed.len() as u32);
             let doc = Document { path: path.clone(), language: "lua".into(), version: typed.len() as _, text };
             eprintln!("{} bytes, `{typed}` typed:", doc.text.len());
             let mut timed = |what: &str, run: &mut dyn FnMut(&mut DevKit) -> usize| {
