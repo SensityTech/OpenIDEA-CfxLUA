@@ -150,3 +150,38 @@ fn loop_variables_are_parameters_and_function_statements_over_locals_are_not_glo
         ]
     );
 }
+
+fn source(text: &str) -> crate::lua::Source {
+    crate::lua::Source::new(text)
+}
+
+/// Each fold as `first line..last line` (1-based) and its kind.
+fn folded(text: &str) -> Vec<String> {
+    let src = source(text);
+    let line = |at: usize| text[..at].matches('\n').count() + 1;
+    super::folding::folds(&src)
+        .iter()
+        .map(|fold| format!("{}..{} {:?}", line(fold.start), line(fold.end), fold.kind))
+        .collect()
+}
+
+#[test]
+fn blocks_tables_comments_and_regions_fold() {
+    let text = "function f(a)\n  if a then\n    g()\n  elseif b then\n    h()\n  else\n    i()\n  end\nend\n\
+                local t = {\n  1,\n}\n--[[ a\n comment ]]\n--- doc\n--- more\nlocal s = [[\nlong]]\n\
+                --region r\nx = 1\n--endregion\nlocal one = { 1 } do f() end";
+    assert_eq!(
+        folded(text),
+        [
+            "1..9 Region",
+            "2..3 Region",
+            "4..5 Region",
+            "6..8 Region",
+            "10..12 Region",
+            "13..14 Comment",
+            "15..16 Comment",
+            "17..18 Region",
+            "19..21 Region",
+        ]
+    );
+}

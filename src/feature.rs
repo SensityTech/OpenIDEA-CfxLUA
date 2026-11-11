@@ -174,4 +174,8 @@ pub trait Feature {
     fn semantic_tokens(&self, _cx: &Ctx) -> Vec<crate::editor::semantic::Token> {
         Vec::new()
     }
+
+    fn folding(&self, _cx: &Ctx) -> Vec<crate::editor::folding::Fold> {
+        Vec::new()
+    }
 }

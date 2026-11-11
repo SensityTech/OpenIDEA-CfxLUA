@@ -25,6 +25,7 @@ pub mod testing;
 use feature::{CommandCx, Ctx, Doc, Feature, Problem};
 use lua::Source;
 use natives::Natives;
+use openidea_plugin::language_features::{FoldRange, LanguageFeatures};
 use openidea_plugin::providers::{CodeAction, CompletionItem, Document, LineMarker, Providers};
 use openidea_plugin::semantic_tokens::{SemanticToken, SemanticTokens, TokenKind, TokenModifier};
 use openidea_plugin::views::{View, ViewEvent, Viewport, Views};
@@ -854,7 +855,29 @@ impl SemanticTokens for DevKit {
     }
 }
 
-register_plugin!(DevKit, providers, views);
+impl LanguageFeatures for DevKit {
+    fn folding(&mut self, d: &Document) -> Vec<FoldRange> {
+        let folds = self.prepare(d).and_then(|ws| {
+            self.with_ctx(ws, |cx, features| {
+                let folds = features.iter().flat_map(|f| f.folding(cx));
+                let lines = folds.map(|fold| {
+                    let kind = match fold.kind {
+                        editor::folding::FoldKind::Region => "region",
+                        editor::folding::FoldKind::Comment => "comment",
+                    };
+                    (cx.doc.position(fold.start).line, cx.doc.position(fold.end).line, kind)
+                });
+                lines
+                    .filter(|(start, end, _)| end > start)
+                    .map(|(start_line, end_line, kind)| FoldRange { start_line, end_line, kind: kind.to_owned() })
+                    .collect::<Vec<_>>()
+            })
+        });
+        folds.unwrap_or_default()
+    }
+}
+
+register_plugin!(DevKit, providers, views, language_features);
 
 // The semantic tokens are exported here rather than by `register_plugin!`, to send the names of
 // `TOKEN_NAMES` in place of the SDK's.

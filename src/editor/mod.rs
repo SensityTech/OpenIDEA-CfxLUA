@@ -1,3 +1,4 @@
+pub mod folding;
 pub mod semantic;
 
 #[cfg(test)]
@@ -88,5 +89,9 @@ impl Feature for EditorFeature {
         }
         let functions = self.functions.borrow();
         semantic::tokens(cx, &|name| functions.defined.contains_key(name))
+    }
+
+    fn folding(&self, cx: &Ctx) -> Vec<folding::Fold> {
+        if Self::applies(cx) { folding::folds(&cx.doc.src) } else { Vec::new() }
     }
 }
