@@ -1,0 +1,58 @@
+FILE
+  BLOCK_COMMENT '/* a C style comment */'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'a'
+    = '='
+    EXPR_LIST
+      BINARY_EXPR
+        LITERAL_EXPR
+          NUMBER '1'
+        BLOCK_COMMENT '/* inline */'
+        BINARY_OP
+          + '+'
+        LITERAL_EXPR
+          NUMBER '2'
+  BLOCK_COMMENT '/*\n  multi-line\n  comment\n*/'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'b'
+    = '='
+    EXPR_LIST
+      BINARY_EXPR
+        NAME_EXPR
+          ID 'a'
+        BINARY_OP
+          // '//'
+        LITERAL_EXPR
+          NUMBER '2'
+  SHORT_COMMENT '-- integer division, not a comment'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'c'
+    = '='
+    EXPR_LIST
+      BINARY_EXPR
+        NAME_EXPR
+          ID 'a'
+        BLOCK_COMMENT '/* nested /* is not nested */'
+        BINARY_OP
+          * '*'
+        LITERAL_EXPR
+          NUMBER '3'
+  SHORT_COMMENT '--/* just a line comment'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'd'
+    = '='
+    EXPR_LIST
+      LITERAL_EXPR
+        STRING '"/* in a string */"'

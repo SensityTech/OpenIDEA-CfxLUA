@@ -1,0 +1,211 @@
+FILE
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'count'
+      , ','
+      NAME_DEF
+        ID 'mask'
+      , ','
+      NAME_DEF
+        ID 'flags'
+      , ','
+      NAME_DEF
+        ID 'ratio'
+    = '='
+    EXPR_LIST
+      LITERAL_EXPR
+        NUMBER '0'
+      , ','
+      LITERAL_EXPR
+        NUMBER '0xFF'
+      , ','
+      LITERAL_EXPR
+        NUMBER '0'
+      , ','
+      LITERAL_EXPR
+        NUMBER '10'
+  COMPOUND_ASSIGN_STAT
+    NAME_EXPR
+      ID 'count'
+    += '+='
+    LITERAL_EXPR
+      NUMBER '1'
+  COMPOUND_ASSIGN_STAT
+    NAME_EXPR
+      ID 'count'
+    -= '-='
+    LITERAL_EXPR
+      NUMBER '2'
+  COMPOUND_ASSIGN_STAT
+    NAME_EXPR
+      ID 'count'
+    *= '*='
+    BINARY_EXPR
+      LITERAL_EXPR
+        NUMBER '3'
+      BINARY_OP
+        + '+'
+      LITERAL_EXPR
+        NUMBER '1'
+  COMPOUND_ASSIGN_STAT
+    NAME_EXPR
+      ID 'ratio'
+    /= '/='
+    LITERAL_EXPR
+      NUMBER '2'
+  COMPOUND_ASSIGN_STAT
+    NAME_EXPR
+      ID 'mask'
+    &= '&='
+    UNARY_EXPR
+      UNARY_OP
+        ~ '~'
+      LITERAL_EXPR
+        NUMBER '0x4'
+  COMPOUND_ASSIGN_STAT
+    NAME_EXPR
+      ID 'flags'
+    |= '|='
+    BINARY_EXPR
+      LITERAL_EXPR
+        NUMBER '1'
+      BINARY_OP
+        << '<<'
+      LITERAL_EXPR
+        NUMBER '3'
+  COMPOUND_ASSIGN_STAT
+    NAME_EXPR
+      ID 'flags'
+    ^= '^='
+    LITERAL_EXPR
+      NUMBER '0x10'
+  COMPOUND_ASSIGN_STAT
+    NAME_EXPR
+      ID 'flags'
+    <<= '<<='
+    LITERAL_EXPR
+      NUMBER '2'
+  COMPOUND_ASSIGN_STAT
+    NAME_EXPR
+      ID 'flags'
+    >>= '>>='
+    LITERAL_EXPR
+      NUMBER '1'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 't'
+    = '='
+    EXPR_LIST
+      TABLE_EXPR
+        { '{'
+        TABLE_FIELD
+          ID 'n'
+          = '='
+          LITERAL_EXPR
+            NUMBER '0'
+        TABLE_FIELD_SEP
+          , ','
+        TABLE_FIELD
+          ID 'list'
+          = '='
+          TABLE_EXPR
+            { '{'
+            TABLE_FIELD
+              LITERAL_EXPR
+                NUMBER '1'
+            TABLE_FIELD_SEP
+              , ','
+            TABLE_FIELD
+              LITERAL_EXPR
+                NUMBER '2'
+            } '}'
+        } '}'
+  COMPOUND_ASSIGN_STAT
+    INDEX_EXPR
+      NAME_EXPR
+        ID 't'
+      . '.'
+      ID 'n'
+    += '+='
+    LITERAL_EXPR
+      NUMBER '1'
+  COMPOUND_ASSIGN_STAT
+    INDEX_EXPR
+      NAME_EXPR
+        ID 't'
+      [ '['
+      LITERAL_EXPR
+        STRING '"n"'
+      ] ']'
+    -= '-='
+    LITERAL_EXPR
+      NUMBER '1'
+  COMPOUND_ASSIGN_STAT
+    INDEX_EXPR
+      INDEX_EXPR
+        NAME_EXPR
+          ID 't'
+        . '.'
+        ID 'list'
+      [ '['
+      LITERAL_EXPR
+        NUMBER '1'
+      ] ']'
+    *= '*='
+    LITERAL_EXPR
+      NUMBER '2'
+  LOCAL_FUNC_DEF
+    local 'local'
+    function 'function'
+    ID 'f'
+    FUNC_BODY
+      ( '('
+      ) ')'
+      LuaBlock
+        RETURN_STAT
+          return 'return'
+          EXPR_LIST
+            NAME_EXPR
+              ID 't'
+      end 'end'
+  COMPOUND_ASSIGN_STAT
+    INDEX_EXPR
+      CALL_EXPR
+        NAME_EXPR
+          ID 'f'
+        LIST_ARGS
+          ( '('
+          ) ')'
+      . '.'
+      ID 'n'
+    += '+='
+    LITERAL_EXPR
+      NUMBER '5'
+  ASSIGN_STAT
+    VAR_LIST
+      NAME_EXPR
+        ID 'self'
+    = '='
+    EXPR_LIST
+      TABLE_EXPR
+        { '{'
+        TABLE_FIELD
+          ID 'count'
+          = '='
+          LITERAL_EXPR
+            NUMBER '0'
+        } '}'
+  COMPOUND_ASSIGN_STAT
+    INDEX_EXPR
+      NAME_EXPR
+        ID 'self'
+      . '.'
+      ID 'count'
+    += '+='
+    LITERAL_EXPR
+      NUMBER '1'
+    ; ';'

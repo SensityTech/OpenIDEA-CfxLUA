@@ -1,0 +1,156 @@
+FILE
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'allowed'
+    = '='
+    EXPR_LIST
+      TABLE_EXPR
+        { '{'
+        TABLE_FIELD
+          . '.'
+          ID 'police'
+        TABLE_FIELD_SEP
+          , ','
+        TABLE_FIELD
+          . '.'
+          ID 'ambulance'
+        TABLE_FIELD_SEP
+          , ','
+        TABLE_FIELD
+          [ '['
+          LITERAL_EXPR
+            STRING '"mechanic"'
+          ] ']'
+        TABLE_FIELD_SEP
+          , ','
+        TABLE_FIELD
+          ID 'vip'
+          = '='
+          LITERAL_EXPR
+            false 'false'
+        } '}'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'key'
+    = '='
+    EXPR_LIST
+      LITERAL_EXPR
+        STRING '"taxi"'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 's'
+    = '='
+    EXPR_LIST
+      TABLE_EXPR
+        { '{'
+        TABLE_FIELD
+          [ '['
+          NAME_EXPR
+            ID 'key'
+          ] ']'
+        TABLE_FIELD_SEP
+          , ','
+        TABLE_FIELD
+          . '.'
+          ID 'a'
+          = '='
+          LITERAL_EXPR
+            NUMBER '1'
+        TABLE_FIELD_SEP
+          , ','
+        TABLE_FIELD
+          . '.'
+          ID 'b'
+        TABLE_FIELD_SEP
+          , ','
+        TABLE_FIELD
+          LITERAL_EXPR
+            NUMBER '2'
+        TABLE_FIELD_SEP
+          , ','
+        } '}'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'numbers'
+    = '='
+    EXPR_LIST
+      TABLE_EXPR
+        { '{'
+        TABLE_FIELD
+          LITERAL_EXPR
+            NUMBER '.5'
+        TABLE_FIELD_SEP
+          , ','
+        TABLE_FIELD
+          LITERAL_EXPR
+            NUMBER '1.5'
+        } '}'
+  LOCAL_FUNC_DEF
+    local 'local'
+    function 'function'
+    ID 'varargs'
+    FUNC_BODY
+      ( '('
+      ... '...'
+      ) ')'
+      LuaBlock
+        RETURN_STAT
+          return 'return'
+          EXPR_LIST
+            TABLE_EXPR
+              { '{'
+              TABLE_FIELD
+                LITERAL_EXPR
+                  ... '...'
+              } '}'
+      end 'end'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'nested'
+    = '='
+    EXPR_LIST
+      TABLE_EXPR
+        { '{'
+        TABLE_FIELD
+          . '.'
+          ID 'outer'
+        TABLE_FIELD_SEP
+          , ','
+        TABLE_FIELD
+          ID 'inner'
+          = '='
+          TABLE_EXPR
+            { '{'
+            TABLE_FIELD
+              . '.'
+              ID 'x'
+            TABLE_FIELD_SEP
+              ; ';'
+            TABLE_FIELD
+              . '.'
+              ID 'y'
+            } '}'
+        } '}'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'spaced'
+    = '='
+    EXPR_LIST
+      TABLE_EXPR
+        { '{'
+        TABLE_FIELD
+          . '.'
+          ID 'spacedName'
+        } '}'

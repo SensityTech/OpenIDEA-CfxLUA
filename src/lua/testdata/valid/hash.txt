@@ -1,0 +1,124 @@
+FILE
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'model'
+    = '='
+    EXPR_LIST
+      LITERAL_EXPR
+        HASH_STRING '`adder`'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'same'
+    = '='
+    EXPR_LIST
+      LITERAL_EXPR
+        HASH_STRING '`ADDER`'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'empty'
+    = '='
+    EXPR_LIST
+      LITERAL_EXPR
+        HASH_STRING '``'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'escaped'
+    = '='
+    EXPR_LIST
+      LITERAL_EXPR
+        HASH_STRING '`a\tb\x41\65`'
+  LOCAL_FUNC_DEF
+    local 'local'
+    function 'function'
+    ID 'GetHashKey'
+    FUNC_BODY
+      ( '('
+      PARAM_NAME_DEF
+        ID 's'
+      ) ')'
+      LuaBlock
+        RETURN_STAT
+          return 'return'
+          EXPR_LIST
+            NAME_EXPR
+              ID 's'
+      end 'end'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'v'
+    = '='
+    EXPR_LIST
+      CALL_EXPR
+        NAME_EXPR
+          ID 'GetHashKey'
+        SINGLE_ARG
+          LITERAL_EXPR
+            HASH_STRING '`prop_bench_01a`'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'c'
+      ATTRIBUTE
+        < '<'
+        ID 'const'
+        > '>'
+    = '='
+    EXPR_LIST
+      BINARY_EXPR
+        LITERAL_EXPR
+          HASH_STRING '`weapon_pistol`'
+        BINARY_OP
+          & '&'
+        LITERAL_EXPR
+          NUMBER '0xFFFFFFFF'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 't'
+    = '='
+    EXPR_LIST
+      TABLE_EXPR
+        { '{'
+        TABLE_FIELD
+          [ '['
+          LITERAL_EXPR
+            HASH_STRING '`blista`'
+          ] ']'
+          = '='
+          LITERAL_EXPR
+            true 'true'
+        TABLE_FIELD_SEP
+          , ','
+        TABLE_FIELD
+          . '.'
+          ID 'car'
+        } '}'
+  CALL_STAT
+    CALL_EXPR
+      NAME_EXPR
+        ID 'print'
+      LIST_ARGS
+        ( '('
+        BINARY_EXPR
+          LITERAL_EXPR
+            HASH_STRING '`adder`'
+          BINARY_OP
+            == '=='
+          UNARY_EXPR
+            UNARY_OP
+              - '-'
+            LITERAL_EXPR
+              NUMBER '1216765807'
+        ) ')'

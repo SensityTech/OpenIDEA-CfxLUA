@@ -1,0 +1,316 @@
+FILE
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'player'
+    = '='
+    EXPR_LIST
+      TABLE_EXPR
+        { '{'
+        TABLE_FIELD
+          ID 'ped'
+          = '='
+          TABLE_EXPR
+            { '{'
+            TABLE_FIELD
+              ID 'coords'
+              = '='
+              TABLE_EXPR
+                { '{'
+                TABLE_FIELD
+                  ID 'x'
+                  = '='
+                  LITERAL_EXPR
+                    NUMBER '1'
+                } '}'
+            } '}'
+        TABLE_FIELD_SEP
+          , ','
+        TABLE_FIELD
+          ID 'getName'
+          = '='
+          CLOSURE_EXPR
+            function 'function'
+            FUNC_BODY
+              ( '('
+              PARAM_NAME_DEF
+                ID 'self'
+              ) ')'
+              LuaBlock
+                RETURN_STAT
+                  return 'return'
+                  EXPR_LIST
+                    LITERAL_EXPR
+                      STRING '"p"'
+              end 'end'
+        } '}'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'x'
+    = '='
+    EXPR_LIST
+      INDEX_EXPR
+        INDEX_EXPR
+          INDEX_EXPR
+            NAME_EXPR
+              ID 'player'
+            ? '?'
+            . '.'
+            ID 'ped'
+          ? '?'
+          . '.'
+          ID 'coords'
+        ? '?'
+        . '.'
+        ID 'x'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'y'
+    = '='
+    EXPR_LIST
+      INDEX_EXPR
+        INDEX_EXPR
+          NAME_EXPR
+            ID 'player'
+          ? '?'
+          [ '['
+          LITERAL_EXPR
+            STRING '"ped"'
+          ] ']'
+        ? '?'
+        . '.'
+        ID 'coords'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'name'
+    = '='
+    EXPR_LIST
+      CALL_EXPR
+        INDEX_EXPR
+          NAME_EXPR
+            ID 'player'
+          ? '?'
+          : ':'
+          ID 'getName'
+        LIST_ARGS
+          ( '('
+          ) ')'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'cb'
+    = '='
+    EXPR_LIST
+      INDEX_EXPR
+        NAME_EXPR
+          ID 'player'
+        ? '?'
+        . '.'
+        ID 'callback'
+  CALL_STAT
+    CALL_EXPR
+      NAME_EXPR
+        ID 'cb'
+      ? '?'
+      LIST_ARGS
+        ( '('
+        LITERAL_EXPR
+          NUMBER '1'
+        , ','
+        LITERAL_EXPR
+          NUMBER '2'
+        ) ')'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'r'
+    = '='
+    EXPR_LIST
+      CALL_EXPR
+        NAME_EXPR
+          ID 'cb'
+        ? '?'
+        SINGLE_ARG
+          LITERAL_EXPR
+            STRING '"str"'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 's'
+    = '='
+    EXPR_LIST
+      CALL_EXPR
+        NAME_EXPR
+          ID 'cb'
+        ? '?'
+        SINGLE_ARG
+          TABLE_EXPR
+            { '{'
+            TABLE_FIELD
+              LITERAL_EXPR
+                NUMBER '1'
+            } '}'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'h'
+    = '='
+    EXPR_LIST
+      CALL_EXPR
+        NAME_EXPR
+          ID 'cb'
+        ? '?'
+        SINGLE_ARG
+          LITERAL_EXPR
+            HASH_STRING '`hash`'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'v'
+    = '='
+    EXPR_LIST
+      INDEX_EXPR
+        NAME_EXPR
+          ID 'player'
+        ? '?'
+        . '.'
+        ID 'ped'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'z'
+    = '='
+    EXPR_LIST
+      BINARY_EXPR
+        INDEX_EXPR
+          NAME_EXPR
+            ID 'player'
+          ? '?'
+          . '.'
+          ID 'missing'
+        BINARY_OP
+          or 'or'
+        LITERAL_EXPR
+          NUMBER '10'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'nz'
+    = '='
+    EXPR_LIST
+      UNARY_EXPR
+        UNARY_OP
+          not 'not'
+        INDEX_EXPR
+          NAME_EXPR
+            ID 'player'
+          ? '?'
+          . '.'
+          ID 'ped'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'len'
+    = '='
+    EXPR_LIST
+      UNARY_EXPR
+        UNARY_OP
+          # '#'
+        INDEX_EXPR
+          NAME_EXPR
+            ID 'player'
+          ? '?'
+          . '.'
+          ID 'ped'
+  ASSIGN_STAT
+    VAR_LIST
+      INDEX_EXPR
+        NAME_EXPR
+          ID 'player'
+        ? '?'
+        . '.'
+        ID 'ped'
+    = '='
+    EXPR_LIST
+      TABLE_EXPR
+        { '{'
+        } '}'
+  COMPOUND_ASSIGN_STAT
+    INDEX_EXPR
+      INDEX_EXPR
+        INDEX_EXPR
+          NAME_EXPR
+            ID 'player'
+          ? '?'
+          . '.'
+          ID 'ped'
+        . '.'
+        ID 'coords'
+      . '.'
+      ID 'x'
+    += '+='
+    LITERAL_EXPR
+      NUMBER '1'
+  CALL_STAT
+    CALL_EXPR
+      INDEX_EXPR
+        NAME_EXPR
+          ID 'player'
+        ? '?'
+        : ':'
+        ID 'getName'
+      LIST_ARGS
+        ( '('
+        ) ')'
+  ASSIGN_STAT
+    VAR_LIST
+      INDEX_EXPR
+        NAME_EXPR
+          ID 'player'
+        ? '?'
+        . '.'
+        ID 'ped'
+      , ','
+      NAME_EXPR
+        ID 'y'
+    = '='
+    EXPR_LIST
+      LITERAL_EXPR
+        NUMBER '1'
+      , ','
+      LITERAL_EXPR
+        NUMBER '2'
+  ASSIGN_STAT
+    VAR_LIST
+      INDEX_EXPR
+        INDEX_EXPR
+          INDEX_EXPR
+            NAME_EXPR
+              ID 'player'
+            ? '?'
+            . '.'
+            ID 'ped'
+          . '.'
+          ID 'coords'
+        ? '?'
+        . '.'
+        ID 'x'
+    = '='
+    EXPR_LIST
+      LITERAL_EXPR
+        NUMBER '3'

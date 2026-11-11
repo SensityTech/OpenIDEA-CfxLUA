@@ -1,0 +1,203 @@
+FILE
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'src'
+    = '='
+    EXPR_LIST
+      TABLE_EXPR
+        { '{'
+        TABLE_FIELD
+          ID 'a'
+          = '='
+          LITERAL_EXPR
+            NUMBER '1'
+        TABLE_FIELD_SEP
+          , ','
+        TABLE_FIELD
+          ID 'b'
+          = '='
+          LITERAL_EXPR
+            NUMBER '2'
+        TABLE_FIELD_SEP
+          , ','
+        TABLE_FIELD
+          ID 'x'
+          = '='
+          LITERAL_EXPR
+            NUMBER '3'
+        TABLE_FIELD_SEP
+          , ','
+        TABLE_FIELD
+          [ '['
+          LITERAL_EXPR
+            NUMBER '1'
+          ] ']'
+          = '='
+          LITERAL_EXPR
+            STRING '"one"'
+        TABLE_FIELD_SEP
+          , ','
+        TABLE_FIELD
+          ID 'c'
+          = '='
+          TABLE_EXPR
+            { '{'
+            TABLE_FIELD
+              ID 'd'
+              = '='
+              LITERAL_EXPR
+                NUMBER '4'
+            } '}'
+        } '}'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'a'
+      , ','
+      NAME_DEF
+        ID 'b'
+    in 'in'
+    NAME_EXPR
+      ID 'src'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'x'
+      ATTRIBUTE
+        < '<'
+        ID 'const'
+        > '>'
+    in 'in'
+    NAME_EXPR
+      ID 'src'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'c'
+    in 'in'
+    PAREN_EXPR
+      ( '('
+      NAME_EXPR
+        ID 'src'
+      ) ')'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'd'
+    in 'in'
+    INDEX_EXPR
+      NAME_EXPR
+        ID 'src'
+      . '.'
+      ID 'c'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'e'
+    in 'in'
+    INDEX_EXPR
+      NAME_EXPR
+        ID 'src'
+      ? '?'
+      . '.'
+      ID 'c'
+  LOCAL_FUNC_DEF
+    local 'local'
+    function 'function'
+    ID 'get'
+    FUNC_BODY
+      ( '('
+      ) ')'
+      LuaBlock
+        RETURN_STAT
+          return 'return'
+          EXPR_LIST
+            NAME_EXPR
+              ID 'src'
+      end 'end'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'a2'
+    in 'in'
+    CALL_EXPR
+      NAME_EXPR
+        ID 'get'
+      LIST_ARGS
+        ( '('
+        ) ')'
+  ASSIGN_STAT
+    VAR_LIST
+      NAME_EXPR
+        ID 'a'
+      , ','
+      NAME_EXPR
+        ID 'b'
+    in 'in'
+    NAME_EXPR
+      ID 'src'
+  ASSIGN_STAT
+    VAR_LIST
+      NAME_EXPR
+        ID 'x2'
+    in 'in'
+    NAME_EXPR
+      ID 'src'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 't'
+    = '='
+    EXPR_LIST
+      TABLE_EXPR
+        { '{'
+        } '}'
+  ASSIGN_STAT
+    VAR_LIST
+      INDEX_EXPR
+        NAME_EXPR
+          ID 't'
+        . '.'
+        ID 'a'
+      , ','
+      INDEX_EXPR
+        NAME_EXPR
+          ID 't'
+        [ '['
+        LITERAL_EXPR
+          STRING '"b"'
+        ] ']'
+      , ','
+      INDEX_EXPR
+        NAME_EXPR
+          ID 't'
+        [ '['
+        LITERAL_EXPR
+          NUMBER '1'
+        ] ']'
+    in 'in'
+    NAME_EXPR
+      ID 'src'
+  ASSIGN_STAT
+    VAR_LIST
+      INDEX_EXPR
+        INDEX_EXPR
+          NAME_EXPR
+            ID 'src'
+          ? '?'
+          . '.'
+          ID 'c'
+        . '.'
+        ID 'd'
+    in 'in'
+    NAME_EXPR
+      ID 'src'

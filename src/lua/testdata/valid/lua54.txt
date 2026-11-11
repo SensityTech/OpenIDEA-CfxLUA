@@ -1,0 +1,361 @@
+FILE
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'a'
+      ATTRIBUTE
+        < '<'
+        ID 'const'
+        > '>'
+    = '='
+    EXPR_LIST
+      LITERAL_EXPR
+        NUMBER '10'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'f'
+      ATTRIBUTE
+        < '<'
+        ID 'close'
+        > '>'
+    = '='
+    EXPR_LIST
+      LITERAL_EXPR
+        nil 'nil'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'b'
+    = '='
+    EXPR_LIST
+      BINARY_EXPR
+        LITERAL_EXPR
+          NUMBER '7'
+        BINARY_OP
+          // '//'
+        LITERAL_EXPR
+          NUMBER '2'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'c'
+    = '='
+    EXPR_LIST
+      BINARY_EXPR
+        PAREN_EXPR
+          ( '('
+          BINARY_EXPR
+            NAME_EXPR
+              ID 'a'
+            BINARY_OP
+              & '&'
+            LITERAL_EXPR
+              NUMBER '3'
+          ) ')'
+        BINARY_OP
+          | '|'
+        BINARY_EXPR
+          BINARY_EXPR
+            PAREN_EXPR
+              ( '('
+              BINARY_EXPR
+                NAME_EXPR
+                  ID 'b'
+                BINARY_OP
+                  ~ '~'
+                LITERAL_EXPR
+                  NUMBER '1'
+              ) ')'
+            BINARY_OP
+              << '<<'
+            LITERAL_EXPR
+              NUMBER '2'
+          BINARY_OP
+            >> '>>'
+          LITERAL_EXPR
+            NUMBER '1'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'd'
+    = '='
+    EXPR_LIST
+      UNARY_EXPR
+        UNARY_OP
+          ~ '~'
+        NAME_EXPR
+          ID 'c'
+  FOR_A_STAT
+    for 'for'
+    PARAM_NAME_DEF
+      ID 'i'
+    = '='
+    LITERAL_EXPR
+      NUMBER '1'
+    , ','
+    LITERAL_EXPR
+      NUMBER '3'
+    do 'do'
+    LuaBlock
+      IF_STAT
+        if 'if'
+        BINARY_EXPR
+          NAME_EXPR
+            ID 'i'
+          BINARY_OP
+            == '=='
+          LITERAL_EXPR
+            NUMBER '2'
+        then 'then'
+        LuaBlock
+          GOTO_STAT
+            goto 'goto'
+            ID 'continue'
+        end 'end'
+      CALL_STAT
+        CALL_EXPR
+          NAME_EXPR
+            ID 'print'
+          LIST_ARGS
+            ( '('
+            NAME_EXPR
+              ID 'i'
+            ) ')'
+      LABEL_STAT
+        :: '::'
+        ID 'continue'
+        :: '::'
+    end 'end'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 't'
+    = '='
+    EXPR_LIST
+      CALL_EXPR
+        NAME_EXPR
+          ID 'setmetatable'
+        LIST_ARGS
+          ( '('
+          TABLE_EXPR
+            { '{'
+            } '}'
+          , ','
+          TABLE_EXPR
+            { '{'
+            TABLE_FIELD
+              ID '__index'
+              = '='
+              CLOSURE_EXPR
+                function 'function'
+                FUNC_BODY
+                  ( '('
+                  PARAM_NAME_DEF
+                    ID '_'
+                  , ','
+                  PARAM_NAME_DEF
+                    ID 'k'
+                  ) ')'
+                  LuaBlock
+                    RETURN_STAT
+                      return 'return'
+                      EXPR_LIST
+                        NAME_EXPR
+                          ID 'k'
+                  end 'end'
+            } '}'
+          ) ')'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 's'
+    = '='
+    EXPR_LIST
+      BINARY_EXPR
+        LITERAL_EXPR
+          STRING '[[long\nstring]]'
+        BINARY_OP
+          .. '..'
+        LITERAL_EXPR
+          STRING '[==[another]==]'
+  LOCAL_FUNC_DEF
+    local 'local'
+    function 'function'
+    ID 'va'
+    FUNC_BODY
+      ( '('
+      ... '...'
+      ) ')'
+      LuaBlock
+        LOCAL_DEF
+          local 'local'
+          NAME_LIST
+            NAME_DEF
+              ID 'n'
+          = '='
+          EXPR_LIST
+            CALL_EXPR
+              NAME_EXPR
+                ID 'select'
+              LIST_ARGS
+                ( '('
+                LITERAL_EXPR
+                  STRING ''#''
+                , ','
+                LITERAL_EXPR
+                  ... '...'
+                ) ')'
+        RETURN_STAT
+          return 'return'
+          EXPR_LIST
+            NAME_EXPR
+              ID 'n'
+      end 'end'
+  WHILE_STAT
+    while 'while'
+    LITERAL_EXPR
+      true 'true'
+    do 'do'
+    LuaBlock
+      BREAK_STAT
+        break 'break'
+    end 'end'
+  REPEAT_STAT
+    repeat 'repeat'
+    LuaBlock
+      LOCAL_DEF
+        local 'local'
+        NAME_LIST
+          NAME_DEF
+            ID 'x'
+        = '='
+        EXPR_LIST
+          LITERAL_EXPR
+            NUMBER '1'
+    until 'until'
+    BINARY_EXPR
+      NAME_EXPR
+        ID 'x'
+      BINARY_OP
+        == '=='
+      LITERAL_EXPR
+        NUMBER '1'
+  LOCAL_DEF
+    local 'local'
+    NAME_LIST
+      NAME_DEF
+        ID 'm'
+    = '='
+    EXPR_LIST
+      TABLE_EXPR
+        { '{'
+        } '}'
+  Class Method
+    function 'function'
+    CLASS_METHOD_NAME
+      NAME_EXPR
+        ID 'm'
+      . '.'
+      ID 'f'
+    FUNC_BODY
+      ( '('
+      PARAM_NAME_DEF
+        ID 'x'
+      ) ')'
+      LuaBlock
+        RETURN_STAT
+          return 'return'
+          EXPR_LIST
+            NAME_EXPR
+              ID 'x'
+      end 'end'
+  Class Method
+    function 'function'
+    CLASS_METHOD_NAME
+      NAME_EXPR
+        ID 'm'
+      : ':'
+      ID 'g'
+    FUNC_BODY
+      ( '('
+      PARAM_NAME_DEF
+        ID 'x'
+      ) ')'
+      LuaBlock
+        RETURN_STAT
+          return 'return'
+          EXPR_LIST
+            NAME_EXPR
+              ID 'self'
+            , ','
+            NAME_EXPR
+              ID 'x'
+      end 'end'
+  CALL_STAT
+    CALL_EXPR
+      INDEX_EXPR
+        NAME_EXPR
+          ID 'm'
+        : ':'
+        ID 'g'
+      LIST_ARGS
+        ( '('
+        LITERAL_EXPR
+          NUMBER '1'
+        ) ')'
+  CALL_STAT
+    CALL_EXPR
+      INDEX_EXPR
+        NAME_EXPR
+          ID 'm'
+        . '.'
+        ID 'f'
+      SINGLE_ARG
+        LITERAL_EXPR
+          STRING '"s"'
+  CALL_STAT
+    CALL_EXPR
+      INDEX_EXPR
+        NAME_EXPR
+          ID 'm'
+        . '.'
+        ID 'f'
+      SINGLE_ARG
+        TABLE_EXPR
+          { '{'
+          TABLE_FIELD
+            LITERAL_EXPR
+              NUMBER '1'
+          } '}'
+  CALL_STAT
+    CALL_EXPR
+      NAME_EXPR
+        ID 'print'
+      LIST_ARGS
+        ( '('
+        UNARY_EXPR
+          UNARY_OP
+            # '#'
+          NAME_EXPR
+            ID 't'
+        , ','
+        UNARY_EXPR
+          UNARY_OP
+            - '-'
+          NAME_EXPR
+            ID 'b'
+        , ','
+        UNARY_EXPR
+          UNARY_OP
+            not 'not'
+          NAME_EXPR
+            ID 'a'
+        ) ')'
