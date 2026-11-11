@@ -1,6 +1,10 @@
 //! What the files of a project declare, by name: classes, members, aliases (`stubs/index/`,
 //! `LuaShortNamesManager`). A member is kept under each class the declaring file alone can tell it belongs to.
 
+pub mod declare;
+
+pub use declare::declare;
+
 use crate::lua::doc::tags::Visibility;
 use crate::ty::{FileId, Ty, global_type_name};
 use std::collections::{BTreeMap, HashMap};

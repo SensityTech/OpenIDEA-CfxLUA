@@ -3,10 +3,18 @@
 
 use std::rc::Rc;
 
+pub mod context;
+pub mod declarations;
 pub mod doc;
+pub mod expressions;
+pub mod members;
+pub mod psi;
 mod render;
+pub mod resolve;
 mod subst;
 
+#[cfg(test)]
+mod engine_tests;
 #[cfg(test)]
 mod tests;
 
