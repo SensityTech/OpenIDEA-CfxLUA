@@ -178,4 +178,8 @@ pub trait Feature {
     fn folding(&self, _cx: &Ctx) -> Vec<crate::editor::folding::Fold> {
         Vec::new()
     }
+
+    fn symbols(&self, _cx: &Ctx) -> Vec<crate::editor::symbols::Symbol> {
+        Vec::new()
+    }
 }

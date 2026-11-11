@@ -25,7 +25,7 @@ pub mod testing;
 use feature::{CommandCx, Ctx, Doc, Feature, Problem};
 use lua::Source;
 use natives::Natives;
-use openidea_plugin::language_features::{FoldRange, LanguageFeatures};
+use openidea_plugin::language_features::{DocumentSymbol, FoldRange, LanguageFeatures};
 use openidea_plugin::providers::{CodeAction, CompletionItem, Document, LineMarker, Providers};
 use openidea_plugin::semantic_tokens::{SemanticToken, SemanticTokens, TokenKind, TokenModifier};
 use openidea_plugin::views::{View, ViewEvent, Viewport, Views};
@@ -874,6 +874,25 @@ impl LanguageFeatures for DevKit {
             })
         });
         folds.unwrap_or_default()
+    }
+
+    fn document_symbols(&mut self, d: &Document) -> Vec<DocumentSymbol> {
+        let symbols = self.prepare(d).and_then(|ws| {
+            self.with_ctx(ws, |cx, features| {
+                let symbols = features.iter().flat_map(|f| f.symbols(cx));
+                symbols
+                    .map(|symbol| DocumentSymbol {
+                        name: symbol.name,
+                        detail: symbol.detail,
+                        kind: symbol.kind.to_owned(),
+                        range: cx.doc.range(symbol.range.0, symbol.range.1),
+                        selection_range: cx.doc.range(symbol.selection.0, symbol.selection.1),
+                        parent: symbol.parent,
+                    })
+                    .collect::<Vec<_>>()
+            })
+        });
+        symbols.unwrap_or_default()
     }
 }
 

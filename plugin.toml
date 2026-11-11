@@ -27,6 +27,7 @@ kinds = [
     "code-actions",
     "semantic-tokens",
     "folding",
+    "document-symbols",
 ]
 languages = ["lua"]
 

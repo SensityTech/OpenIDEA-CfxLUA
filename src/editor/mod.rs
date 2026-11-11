@@ -1,5 +1,6 @@
 pub mod folding;
 pub mod semantic;
+pub mod symbols;
 
 #[cfg(test)]
 mod tests;
@@ -93,5 +94,9 @@ impl Feature for EditorFeature {
 
     fn folding(&self, cx: &Ctx) -> Vec<folding::Fold> {
         if Self::applies(cx) { folding::folds(&cx.doc.src) } else { Vec::new() }
+    }
+
+    fn symbols(&self, cx: &Ctx) -> Vec<symbols::Symbol> {
+        if Self::applies(cx) { symbols::symbols(&cx.doc.src) } else { Vec::new() }
     }
 }

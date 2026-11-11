@@ -185,3 +185,47 @@ fn blocks_tables_comments_and_regions_fold() {
         ]
     );
 }
+
+/// The outline as `depth name detail kind`.
+fn outlined(text: &str) -> Vec<String> {
+    let symbols = super::symbols::symbols(&source(text));
+    symbols
+        .iter()
+        .map(|symbol| {
+            let mut depth = 0;
+            let mut parent = symbol.parent;
+            while let Some(index) = parent {
+                depth += 1;
+                parent = symbols[index as usize].parent;
+            }
+            format!("{depth} {}{} {}", symbol.name, symbol.detail, symbol.kind)
+        })
+        .collect()
+}
+
+#[test]
+fn the_structure_lists_declarations_with_what_they_hold() {
+    let text = "local M = { name = 1, run = function(a) end }\nlocal function helper(x, ...)\n  local inner = 2\nend\n\
+                function Start() local hidden end\nfunction M.sub.go(self) local step end\nfunction M:stop() end\n\
+                Config = { debug = true }\nConfig.Locale.fr = {}\nOnReady(function(cb) local state end)\nM = nil";
+    assert_eq!(
+        outlined(text),
+        [
+            "0 M variable",
+            "1 name field",
+            "1 run(a) function",
+            "1 sub field",
+            "2 go(self) method",
+            "3 step variable",
+            "1 stop() method",
+            "0 helper(x, ...) function",
+            "1 inner variable",
+            "0 Start() function",
+            "0 Config variable",
+            "1 debug field",
+            "1 Locale.fr field",
+            "0 <anonymous>(cb) function",
+            "1 state variable",
+        ]
+    );
+}
