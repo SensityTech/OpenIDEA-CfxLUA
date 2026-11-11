@@ -4,28 +4,85 @@
 // answers nothing here as it would in the IDE. The host then stops waiting at its deadline and the time printed is
 // its wait, not what the provider costs: `--patient` lifts the deadline to show that cost. An entry of the structure
 // that its parent does not hold fails the check: the IDE would list it at the top.
-// No project is open in this host, so the plugin loads no native catalog: natives come back as unknown globals and
-// completion lists none. What is timed is the reading of the file itself.
+// Without `--project`, no project is open in this host and the plugin loads no native catalog: natives come back as
+// unknown globals and completion lists none. With it, the host opens that folder as a project and events are posted
+// until the plugin has read it, as they are while a user moves between files: the file is then asked about as one
+// of an indexed project. `--log` prints on stderr what the host logs, the lines of the plugin included.
 // Built like scripts/openidea-start-check.rs, as an example of OpenIDEA's `ide-host` crate:
 //
 //   cp scripts/openidea-editor-check.rs <openidea>/crates/ide-host/examples/cfxlua_editor_check.rs
 //   cargo run --release --locked -p ide-host --example cfxlua_editor_check -- \
-//       [--patient] <package.oiplugin> <file.lua> [word]
+//       [--patient] [--log] [--project <folder>] <package.oiplugin> <file.lua> [word]
 
-use ide_core::{Pos, Range};
-use ide_host::plugins::{Consent, PluginHost};
-use ide_plugin::{Limits, ProviderDocument};
+use ide_core::{Pos, Range, TextEdit};
+use ide_host::plugins::{Consent, PluginEvent, PluginHost, PluginWorkspace};
+use ide_plugin::{HostError, Invocation, Limits, ProviderDocument, WorkbenchEvent};
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
+
+const USAGE: &str =
+    "usage: cfxlua_editor_check [--patient] [--log] [--project <folder>] <package.oiplugin> <file.lua> [word]";
+/// More event batches than any project needs: a scan that never ends stops the check instead of hanging it.
+const MAX_BATCHES: usize = 5_000;
+
+/// One open project, with no editor on it: what the plugin reads comes from the disk.
+struct Opened(PathBuf);
+
+impl PluginWorkspace for Opened {
+    fn projects(&self) -> Vec<PathBuf> {
+        vec![self.0.clone()]
+    }
+    fn buffer_text(&self, _: &Path) -> Option<String> {
+        None
+    }
+    fn document(&self, _: &Path) -> Option<(u64, String)> {
+        None
+    }
+    fn apply_edits(&self, _: &Path, _: u64, _: &[TextEdit]) -> Result<u64, HostError> {
+        Err(HostError::Stale)
+    }
+    fn trusted(&self, _: &Path) -> bool {
+        true
+    }
+    fn project_of(&self, _: &str) -> Option<PathBuf> {
+        Some(self.0.clone())
+    }
+    fn publish_diagnostics(&self, _: &str, _: &Path, _: Vec<ide_core::Diagnostic>) -> Result<(), HostError> {
+        Ok(())
+    }
+}
+
+/// What the plugin tells the IDE while it reads a project.
+#[derive(Default)]
+struct Scan {
+    slices: AtomicUsize,
+    ended: AtomicBool,
+}
 
 fn main() -> ExitCode {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let patient = args.iter().position(|a| a == "--patient").map(|at| args.remove(at)).is_some();
+    if args.iter().position(|a| a == "--log").map(|at| args.remove(at)).is_some() {
+        let logs = tracing_subscriber::fmt().with_writer(std::io::stderr).with_ansi(false).with_target(false);
+        let _ = logs.with_max_level(tracing::Level::INFO).try_init();
+    }
+    let project = match args.iter().position(|a| a == "--project") {
+        Some(at) if at + 1 < args.len() => {
+            args.remove(at);
+            Some(PathBuf::from(args.remove(at)))
+        }
+        Some(_) => {
+            eprintln!("{USAGE}");
+            return ExitCode::from(2);
+        }
+        None => None,
+    };
     let (Some(package), Some(file)) = (args.first(), args.get(1)) else {
-        eprintln!("usage: cfxlua_editor_check [--patient] <package.oiplugin> <file.lua> [word]");
+        eprintln!("{USAGE}");
         return ExitCode::from(2);
     };
     let limits = if patient {
@@ -34,7 +91,8 @@ fn main() -> ExitCode {
         Limits::default()
     };
     let dir = std::env::temp_dir().join(format!("cfxlua-editor-check-{}", std::process::id()));
-    let result = check(&dir, limits, Path::new(package), Path::new(file), args.get(2).map(String::as_str));
+    let word = args.get(2).map(String::as_str);
+    let result = check(&dir, limits, project.as_deref(), Path::new(package), Path::new(file), word);
     let _ = std::fs::remove_dir_all(&dir);
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -52,11 +110,55 @@ fn slice(lines: &[&str], line: u32, from: u32, to: u32) -> String {
     String::from_utf16_lossy(&units[from..to.max(from)])
 }
 
-fn check(dir: &Path, limits: Limits, package: &Path, file: &Path, word: Option<&str>) -> Result<(), String> {
-    let host =
-        PluginHost::new(dir.to_path_buf(), Arc::new(|_: Option<&str>, _| {}), limits).map_err(|e| e.to_string())?;
+/// Starts the plugin on the open project and posts events until its first scan ends: it reads a slice per call.
+fn read_project(host: &PluginHost, plugin: &str, scan: &Scan) -> Result<(), String> {
+    let start = Instant::now();
+    host.run_command(plugin, "show-docs", None, Invocation::default()).map_err(|e| format!("show-docs: {e}"))?;
+    let mut batches = 0;
+    while !scan.ended.load(Ordering::Relaxed) && batches < MAX_BATCHES {
+        host.post_events(Some("main"), vec![WorkbenchEvent::EditorFocused(None)]);
+        host.flush_events();
+        host.wait_events(Duration::from_secs(60));
+        batches += 1;
+    }
+    let slices = scan.slices.load(Ordering::Relaxed);
+    println!("project: read in {:?}, {batches} event batches, {slices} indexing slices", start.elapsed());
+    if scan.ended.load(Ordering::Relaxed) {
+        Ok(())
+    } else {
+        Err("the plugin did not finish reading the project".into())
+    }
+}
+
+fn check(
+    dir: &Path,
+    limits: Limits,
+    project: Option<&Path>,
+    package: &Path,
+    file: &Path,
+    word: Option<&str>,
+) -> Result<(), String> {
+    let scan = Arc::new(Scan::default());
+    let seen = scan.clone();
+    let sink = move |_: Option<&str>, event: PluginEvent| match event {
+        PluginEvent::TaskStarted { .. } => {
+            seen.slices.fetch_add(1, Ordering::Relaxed);
+        }
+        // The plugin tells its tool window to list again what the first scan found.
+        PluginEvent::ViewMessage { message, .. } if message.contains("\"refresh\"") => {
+            seen.ended.store(true, Ordering::Relaxed);
+        }
+        _ => {}
+    };
+    let host = PluginHost::new(dir.to_path_buf(), Arc::new(sink), limits).map_err(|e| e.to_string())?;
+    if let Some(root) = project {
+        host.set_workspace(Some(Arc::new(Opened(root.to_path_buf()))));
+    }
     let unpacked = host.unpack_package(package).map_err(|e| e.to_string())?;
     let installed = host.install_from_dir(&unpacked, &Consent::all()).map_err(|e| e.to_string())?;
+    if project.is_some() {
+        read_project(&host, &installed.id, &scan)?;
+    }
     let text = std::fs::read_to_string(file).map_err(|e| format!("{}: {e}", file.display()))?.replace("\r\n", "\n");
     let lines: Vec<&str> = text.split('\n').collect();
     let doc = ProviderDocument { path: file.to_path_buf(), language: "lua".into(), version: 1, text: text.clone() };
@@ -148,7 +250,7 @@ fn check(dir: &Path, limits: Limits, package: &Path, file: &Path, word: Option<&
     let coloured = ask(600, "tokens", &|| host.provide_semantic_tokens(&typed).len());
 
     let info = host.info_of(&installed.id).map_err(|e| e.to_string())?;
-    println!("{} {}: {:?}", info.id, info.version, info.status);
+    println!("{} {}: {:?}, {:?}", info.id, info.version, info.status, info.stats);
     if tokens.is_empty() {
         return Err("no semantic token came back".to_owned());
     }
