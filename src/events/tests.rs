@@ -2,7 +2,7 @@ use super::EventsFeature;
 use super::db::{Config, Db};
 use super::model::{Dirs, EventKey, Origin, Role, Site};
 use super::spec::format;
-use crate::feature::{Ctx, Feature};
+use crate::feature::{Ctx, Doc, Feature};
 use crate::settings::Settings;
 use crate::testing::Fixture;
 use serde_json::Value;
@@ -535,6 +535,23 @@ fn an_edit_above_an_event_function_updates_the_database_in_place() {
     assert!(redetect, "an event function was renamed");
     assert_eq!(updated, rebuilt(&renamed));
     assert!(!updated.contains("SrvHelper.TriggerClientEvent"));
+}
+
+#[test]
+fn a_completion_outside_a_string_leaves_the_database_for_a_later_call() {
+    let fx = project(&[]);
+    let feature = indexed(&fx);
+    let doc = fx.doc("standard_res/client.lua");
+    assert!(feature.db(&fx.cx(&doc)).is_some());
+    let path = Fixture::path("standard_res/client.lua");
+    let typed = format!("TriggerEv\n{}", fx.ws.text(&path).unwrap());
+    feature.index_file(&fx.ws, &path, crate::project::FileKind::Lua, &crate::lua::Source::new(&typed));
+    let typed = Doc::new(&fx.ws, &path, "lua", 2, &typed);
+    assert!(feature.completion(&fx.cx(&typed), "TriggerEv".len(), None).is_empty());
+    assert!(feature.projects.borrow()[&fx.ws.root].dirty, "nothing was rebuilt for a name being typed");
+    let in_string = typed.text().find("'shop:openMenu'").unwrap() + 2;
+    assert!(!feature.completion(&fx.cx(&typed), in_string, None).is_empty());
+    assert!(!feature.projects.borrow()[&fx.ws.root].dirty);
 }
 
 #[test]

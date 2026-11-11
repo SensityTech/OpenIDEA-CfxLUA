@@ -242,15 +242,25 @@ fn project_item(label: &str, detail: String, replace: Range, documentation: Opti
     item
 }
 
-pub fn completion(cx: &Ctx, db: Option<&Db>, files: &BTreeMap<String, FileFacts>, at: usize) -> Vec<CompletionItem> {
+/// The quoted string whose content holds the caret: its token.
+pub fn string_at(cx: &Ctx, at: usize) -> Option<usize> {
     let src = &cx.doc.src;
-    let Some(i) = src.tok_at(at) else { return Vec::new() };
+    let i = src.tok_at(at)?;
     let tok = src.toks[i];
-    let Tok::Str { closed } = tok.kind else { return Vec::new() };
+    let Tok::Str { closed } = tok.kind else { return None };
     let content_end = if closed { tok.end - 1 } else { tok.end };
-    if !tok.text(&src.text).starts_with(['\'', '"']) || at <= tok.start || at > content_end {
-        return Vec::new();
-    }
+    (tok.text(&src.text).starts_with(['\'', '"']) && at > tok.start && at <= content_end).then_some(i)
+}
+
+pub fn completion(
+    cx: &Ctx,
+    db: Option<&Db>,
+    files: &BTreeMap<String, FileFacts>,
+    i: usize,
+    at: usize,
+) -> Vec<CompletionItem> {
+    let src = &cx.doc.src;
+    let tok = src.toks[i];
     let prefix = &src.text[tok.start + 1..at];
     let current = ast::raw_string(src, i);
     let replace = cx.doc.range(tok.start + 1, at);

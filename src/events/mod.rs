@@ -164,8 +164,10 @@ impl Feature for EventsFeature {
         if !cx.settings.enabled() || !cx.doc.is_lua() {
             return Vec::new();
         }
+        // Asked at every keystroke: only a caret in a string brings the database up to date.
+        let Some(string) = editor::string_at(cx, at) else { return Vec::new() };
         let db = self.db(cx);
-        self.with_files(cx, |files| editor::completion(cx, db.as_deref(), files, at))
+        self.with_files(cx, |files| editor::completion(cx, db.as_deref(), files, string, at))
     }
 
     fn definition(&self, cx: &Ctx, at: usize) -> Vec<Location> {

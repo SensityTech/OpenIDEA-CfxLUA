@@ -31,7 +31,8 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
 
 - **Completion that came too late on big projects.** Every keystroke in a file that calls events made the plugin
   detect the event functions of the whole project again before it answered: on a 5,000-file project the editor had
-  stopped waiting and listed nothing. They are now detected again only when an edit touches one of them.
+  stopped waiting and listed nothing. They are now detected again only when an edit touches one of them, and a
+  name being typed no longer waits for the event index: only a completion inside a string reads it.
 - **No natives in completion on big projects.** The catalogs were loaded once the manifests were read, which a big
   project now does over several calls, and every natives update check dropped them. They are loaded at activation and
   kept until an update changes them.
