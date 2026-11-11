@@ -1,7 +1,8 @@
+use super::doc::tags::Comment;
 use super::lexer::{Tok, Token, coarse};
 use super::scope::Scopes;
-use super::token::{Tokens, lex};
-use super::tree::{Node, Tree};
+use super::token::{T, Tokens, lex};
+use super::tree::{Element, N, Node, Tree};
 use crate::text::LineIndex;
 use std::any::Any;
 use std::cell::{OnceCell, RefCell};
@@ -138,6 +139,15 @@ impl Source {
             None => Tree::docs("", &lex("")),
         });
         tree.root(text)
+    }
+
+    /// The documentation comment bound to `node`, a statement or a table field of `root()`: the one above it,
+    /// or else the one at the end of its line.
+    pub fn comment_of(&self, node: Node) -> Option<Comment<'_>> {
+        let bound = node.elements().filter_map(Element::token).find(|token| token.is(T::DocComment))?;
+        let docs = self.docs();
+        let inner = docs.tree().node_at(docs.source(), bound.start());
+        std::iter::once(inner).chain(inner.ancestors()).find(|node| node.is(N::DocComment)).map(Comment)
     }
 
     /// The declaration each name refers to, resolved once.

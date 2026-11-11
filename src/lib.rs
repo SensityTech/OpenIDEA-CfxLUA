@@ -16,6 +16,7 @@ pub mod settings;
 pub mod statebags;
 pub mod syntax;
 pub mod text;
+pub mod ty;
 pub mod values;
 pub mod workspace;
 
