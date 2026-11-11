@@ -1,4 +1,5 @@
 use super::lexer::{Tok, Token, coarse};
+use super::scope::Scopes;
 use super::token::{Tokens, lex};
 use super::tree::{Node, Tree};
 use crate::text::LineIndex;
@@ -14,6 +15,7 @@ pub struct Source {
     fine: Option<Rc<Tokens>>,
     code: Vec<u32>,
     tree: OnceCell<Tree>,
+    scopes: OnceCell<Scopes>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -90,6 +92,7 @@ impl Source {
             fine: Some(Rc::new(fine)),
             code,
             tree: OnceCell::new(),
+            scopes: OnceCell::new(),
         }
     }
 
@@ -103,6 +106,7 @@ impl Source {
             fine: None,
             code: Vec::new(),
             tree: OnceCell::new(),
+            scopes: OnceCell::new(),
         }
     }
 
@@ -117,6 +121,11 @@ impl Source {
     pub fn root(&self) -> Node<'_> {
         let text = if self.fine.is_some() { self.text.as_str() } else { "" };
         self.tree().root(text)
+    }
+
+    /// The declaration each name refers to, resolved once.
+    pub fn scopes(&self) -> &Scopes {
+        self.scopes.get_or_init(|| Scopes::new(self.root()))
     }
 
     /// The index in `toks` of the tree token `index`: the token itself, or the code token after it

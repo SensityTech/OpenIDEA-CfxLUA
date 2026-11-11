@@ -157,7 +157,8 @@ impl<'a> Walker<'a> {
                     }
                 }
             }
-            N::NameExpr => {
+            // `function f() end` assigns to a local `f` in sight, and to a global otherwise.
+            N::NameExpr | N::FuncDef => {
                 if let Some(decl) = name_token(node).and_then(|(_, name)| self.lookup(name)) {
                     self.target[node.id() as usize] = decl;
                 }

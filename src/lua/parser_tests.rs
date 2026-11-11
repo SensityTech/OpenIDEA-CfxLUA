@@ -315,6 +315,22 @@ fn deep_nesting_is_reported_not_overflowed() {
 }
 
 #[test]
+fn a_function_left_open_between_brackets_ends_at_the_bracket() {
+    let src = "AddEventHandler('x', function(a)\n  local b = a\n)\nprint(1)";
+    let tree = Tree::parse(src);
+    assert_eq!(errors(&tree, src), ["'end' expected"]);
+    let top = statements(tree.root(src));
+    assert_eq!(top.iter().map(|s| s.code()).collect::<Vec<_>>(), [&src[..src.len() - 9], "print(1)"]);
+    let src = "function f()\n  on('x', function()\n    if a then\n      g({ h(function() i() })\n  )\n  j()\nend\nk()";
+    let tree = Tree::parse(src);
+    let top = statements(tree.root(src));
+    assert_eq!(top.len(), 2, "{:?}", errors(&tree, src));
+    assert_eq!(top[1].code(), "k()");
+    let body = find(top[0], N::Block);
+    assert_eq!(statements(body).last().map(|s| s.code()), Some("j()"));
+}
+
+#[test]
 fn shebang_line() {
     let src = "#!/usr/bin/env lua\nprint(1)";
     let tree = Tree::parse(src);

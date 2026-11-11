@@ -67,7 +67,7 @@ impl Tree {
     /// The tree of `src`, whose tokens are `tokens`.
     pub fn of(src: &str, tokens: Rc<Tokens>) -> Tree {
         let (nodes, errors) = {
-            let mut parser = Parser { b: Builder::new(src, &tokens), depth: 0 };
+            let mut parser = Parser { b: Builder::new(src, &tokens), depth: 0, brackets: 0 };
             parser.file();
             parser.b.finish()
         };
@@ -78,6 +78,8 @@ impl Tree {
 struct Parser<'a> {
     b: Builder<'a>,
     depth: usize,
+    /// The brackets open around the current position, inside the block being parsed.
+    brackets: usize,
 }
 
 impl Parser<'_> {
@@ -513,7 +515,8 @@ impl Parser<'_> {
         let begin = if begin == T::RParen { T::Function } else { begin };
         let start = self.b.position();
         let outer = self.b.limit();
-        self.skip_block(begin);
+        let brackets = std::mem::take(&mut self.brackets);
+        self.skip_block(begin, brackets > 0);
         let end = self.b.position();
         self.b.enter(start, end);
         if self.depth >= MAX_DEPTH {
@@ -523,6 +526,7 @@ impl Parser<'_> {
             self.statements();
             self.depth -= 1;
         }
+        self.brackets = brackets;
         self.b.enter(end, outer);
         let done = self.b.done(m, N::Block);
         self.b.bind(done, None, Some(Bind::After));
@@ -541,31 +545,57 @@ impl Parser<'_> {
 
     /// Moves to the keyword that closes the block opened by `begin`, or to the end of the input.
     /// Each keyword that opens a construct on the way is matched with the one that closes it.
-    fn skip_block(&mut self, begin: T) {
-        let Some(first) = closers(begin, true) else { return };
-        let mut open = vec![first];
-        while let (Some(kind), Some((skips, ends))) = (self.b.tok(), open.last().copied()) {
+    /// A closing bracket ends what was left open inside its pair; one that closes nothing in the
+    /// block ends the block itself when `bounded`: it was written between brackets and lacks its `end`.
+    fn skip_block(&mut self, begin: T, bounded: bool) {
+        let Some((skips, ends)) = closers(begin, true) else { return };
+        let mut open = vec![(skips, ends, 0usize)];
+        let mut brackets: Vec<T> = Vec::new();
+        while let (Some(kind), Some((skips, ends, _))) = (self.b.tok(), open.last().copied()) {
             let outer = open.len() == 1;
-            if skips.contains(&kind) {
-                self.b.advance();
+            let opener = match kind {
+                T::RParen => Some(T::LParen),
+                T::RBrack => Some(T::LBrack),
+                T::RCurly => Some(T::LCurly),
+                _ => None,
+            };
+            if let Some(opener) = opener {
+                match brackets.iter().rposition(|bracket| *bracket == opener) {
+                    Some(at) => {
+                        brackets.truncate(at);
+                        while open.len() > 1 && open.last().is_some_and(|(_, _, inside)| *inside > at) {
+                            open.pop();
+                        }
+                    }
+                    None if bounded => return,
+                    None => {}
+                }
+            } else if matches!(kind, T::LParen | T::LBrack | T::LCurly) {
+                brackets.push(kind);
+            } else if skips.contains(&kind) {
             } else if ends.contains(&kind) {
                 if outer {
                     return;
                 }
-                self.b.advance();
                 open.pop();
             } else if kind == T::Until {
                 if outer {
                     return;
                 }
                 open.pop();
-            } else {
-                self.b.advance();
-                if let Some(inner) = closers(kind, false) {
-                    open.push(inner);
-                }
+                continue;
+            } else if let Some((skips, ends)) = closers(kind, false) {
+                open.push((skips, ends, brackets.len()));
             }
+            self.b.advance();
         }
+    }
+
+    fn bracketed(&mut self, parse: fn(&mut Self) -> Option<Done>) -> Option<Done> {
+        self.brackets += 1;
+        let parsed = parse(self);
+        self.brackets -= 1;
+        parsed
     }
 
     fn expect_expr(&mut self) -> Option<Done> {
@@ -718,7 +748,7 @@ impl Parser<'_> {
             }
             Some(T::LBrack) => {
                 self.b.advance();
-                self.expect_expr();
+                self.bracketed(Self::expect_expr);
                 self.expect(T::RBrack, "']' expected");
             }
             _ => return None,
@@ -732,7 +762,7 @@ impl Parser<'_> {
             Some(T::LParen) => {
                 let args = self.b.mark();
                 self.b.advance();
-                self.expr_list();
+                self.bracketed(Self::expr_list);
                 self.expect(T::RParen, "')' expected");
                 self.b.done(args, N::ListArgs);
             }
@@ -761,7 +791,7 @@ impl Parser<'_> {
             T::LParen => {
                 let m = self.b.mark();
                 self.b.advance();
-                self.expect_expr();
+                self.bracketed(Self::expect_expr);
                 self.expect(T::RParen, "')' expected");
                 Some((self.b.done(m, N::ParenExpr), true))
             }
@@ -786,6 +816,7 @@ impl Parser<'_> {
         }
         let m = self.b.mark();
         self.b.advance();
+        self.brackets += 1;
         if self.table_field().is_some() {
             loop {
                 let missing = if matches!(self.b.tok(), Some(T::Semi | T::Comma)) {
@@ -805,6 +836,7 @@ impl Parser<'_> {
                 }
             }
         }
+        self.brackets -= 1;
         self.expect(T::RCurly, "'}' expected");
         Some(self.b.done(m, N::TableExpr))
     }

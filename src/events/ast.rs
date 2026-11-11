@@ -1,12 +1,11 @@
 use crate::lua::Source;
-use crate::lua::lexer::Tok;
+use crate::lua::scope::Scopes;
+use crate::lua::token::T;
+use crate::lua::tree::{N, Node, Token};
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::Rc;
 
 pub const NONE: u32 = u32::MAX;
-
-const UNARY_PRIORITY: u8 = 12;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BinOp {
@@ -21,24 +20,6 @@ pub enum BinOp {
     Additive,
     Multiplicative,
     Pow,
-}
-
-impl BinOp {
-    fn priority(self) -> (u8, u8) {
-        match self {
-            Self::Or => (1, 1),
-            Self::And => (2, 2),
-            Self::Compare => (3, 3),
-            Self::BOr => (4, 4),
-            Self::BXor => (5, 5),
-            Self::BAnd => (6, 6),
-            Self::Shift => (7, 7),
-            Self::Concat => (9, 8),
-            Self::Additive => (10, 10),
-            Self::Multiplicative => (11, 11),
-            Self::Pow => (14, 13),
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -149,23 +130,17 @@ pub struct Ast {
 
 impl Ast {
     pub fn parse(src: &Source) -> Self {
-        let mut p = Parser {
+        let scopes = src.scopes();
+        let mut lower = Lower {
             src,
-            i: 0,
-            limit: src.toks.len(),
+            scopes,
             ast: Ast::default(),
-            visible: HashMap::new(),
-            scopes: vec![Vec::new()],
+            decls: vec![NONE; scopes.decls().len()],
+            spine: Vec::new(),
             func: NONE,
         };
-        while p.i < p.limit {
-            p.block();
-            // A stray `end` / `until` closes nothing: skip it.
-            if p.i < p.limit {
-                p.i += 1;
-            }
-        }
-        p.ast
+        lower.block(src.root());
+        lower.ast
     }
 
     pub fn expr(&self, id: u32) -> &Expr {
@@ -295,415 +270,244 @@ fn fingerprint(text: &str) -> u64 {
     h
 }
 
-const COMPOUND: &[&str] = &["+=", "-=", "*=", "/=", "%=", "^=", "&=", "|=", "<<=", ">>=", "//=", "..="];
-
-struct Parser<'a> {
+/// Reads the expressions, statements and functions off the syntax tree, in the order the source
+/// writes them: what a node needs is numbered before the node itself.
+struct Lower<'a> {
     src: &'a Source,
-    i: usize,
-    limit: usize,
+    scopes: &'a Scopes,
     ast: Ast,
-    visible: HashMap<&'a str, Vec<u32>>,
-    scopes: Vec<Vec<&'a str>>,
+    decls: Vec<u32>,
+    spine: Vec<Node<'a>>,
     func: u32,
 }
 
-impl<'a> Parser<'a> {
-    fn text_at(&self, i: usize) -> &'a str {
-        let src: &'a Source = self.src;
-        src.toks.get(i).map_or("", |t| &src.text[t.start..t.end])
+fn binary_op(kind: T) -> Option<BinOp> {
+    Some(match kind {
+        T::Or => BinOp::Or,
+        T::And => BinOp::And,
+        T::Eq | T::Ne | T::Lt | T::Le | T::Gt | T::Ge => BinOp::Compare,
+        T::BitOr => BinOp::BOr,
+        T::BitTilde => BinOp::BXor,
+        T::BitAnd => BinOp::BAnd,
+        T::BitLtLt | T::BitRtRt => BinOp::Shift,
+        T::Concat => BinOp::Concat,
+        T::Plus | T::Minus => BinOp::Additive,
+        T::Mult | T::Div | T::DoubleDiv | T::Mod => BinOp::Multiplicative,
+        T::Exp => BinOp::Pow,
+        _ => return None,
+    })
+}
+
+fn unary_op(kind: T) -> Option<UnOp> {
+    Some(match kind {
+        T::Not => UnOp::Not,
+        T::GetN => UnOp::Len,
+        T::Minus => UnOp::Neg,
+        T::BitTilde => UnOp::BNot,
+        _ => return None,
+    })
+}
+
+impl<'a> Lower<'a> {
+    fn tok(&self, token: Token) -> u32 {
+        self.src.tok_of(token.index()) as u32
     }
 
-    fn tok_kind(&self, i: usize) -> Option<Tok> {
-        (i < self.limit).then(|| self.src.toks[i].kind)
+    fn at(&self, node: Node, kind: T) -> Option<u32> {
+        node.token(kind).map(|token| self.tok(token))
     }
 
-    fn op_at(&self, i: usize, s: &str) -> bool {
-        self.tok_kind(i) == Some(Tok::Op) && self.text_at(i) == s
-    }
-
-    fn op(&self, s: &str) -> bool {
-        self.op_at(self.i, s)
-    }
-
-    fn kw(&self, s: &str) -> bool {
-        self.tok_kind(self.i) == Some(Tok::Keyword) && self.text_at(self.i) == s
-    }
-
-    fn name_at(&self, i: usize) -> bool {
-        self.tok_kind(i) == Some(Tok::Name)
-    }
-
-    fn name(&self) -> bool {
-        self.name_at(self.i)
-    }
-
-    fn eat_op(&mut self, s: &str) -> bool {
-        let yes = self.op(s);
-        if yes {
-            self.i += 1;
-        }
-        yes
-    }
-
-    fn eat_kw(&mut self, s: &str) -> bool {
-        let yes = self.kw(s);
-        if yes {
-            self.i += 1;
-        }
-        yes
-    }
-
-    fn last(&self, first: usize) -> u32 {
-        self.i.saturating_sub(1).max(first) as u32
-    }
-
-    fn push_expr(&mut self, kind: ExprKind, first: usize) -> u32 {
-        let id = self.ast.exprs.len() as u32;
-        let last = self.last(first);
-        self.ast.exprs.push(Expr { kind, first: first as u32, last, func: self.func });
-        id
-    }
-
-    fn push_stmt(&mut self, kind: StmtKind, first: usize) {
-        let last = self.last(first);
-        self.ast.stmts.push(Stmt { kind, first: first as u32, last, func: self.func });
-    }
-
-    // ---- scopes
-
-    fn open(&mut self) {
-        self.scopes.push(Vec::new());
-    }
-
-    fn close(&mut self) {
-        for name in self.scopes.pop().unwrap_or_default() {
-            if let Some(v) = self.visible.get_mut(name) {
-                v.pop();
+    fn span(&self, node: Node) -> (u32, u32) {
+        match (node.first_token(), node.last_token()) {
+            (Some(first), Some(last)) => (self.tok(first), self.tok(last)),
+            _ => {
+                let at = self.src.tok_of(node.token_span().0) as u32;
+                (at, at)
             }
         }
     }
 
-    fn declare(&mut self, tok: usize, kind: DeclKind) -> u32 {
-        let id = self.ast.decls.len() as u32;
-        self.ast.decls.push(Decl { tok: tok as u32, kind });
-        let name = self.text_at(tok);
-        self.visible.entry(name).or_default().push(id);
-        if let Some(scope) = self.scopes.last_mut() {
-            scope.push(name);
+    fn push_expr(&mut self, kind: ExprKind, node: Node) -> u32 {
+        let (first, last) = self.span(node);
+        self.ast.exprs.push(Expr { kind, first, last, func: self.func });
+        self.ast.exprs.len() as u32 - 1
+    }
+
+    fn push_stmt(&mut self, kind: StmtKind, node: Node) {
+        let (first, mut last) = self.span(node);
+        if !node.is(N::ReturnStat) && last > first && node.last_token().is_some_and(|token| token.is(T::Semi)) {
+            last -= 1;
+        }
+        self.ast.stmts.push(Stmt { kind, first, last, func: self.func });
+    }
+
+    fn declare(&mut self, node: Node, kind: DeclKind) -> u32 {
+        let tok = self.at(node, T::Id).unwrap_or(self.span(node).0);
+        self.ast.decls.push(Decl { tok, kind });
+        let id = self.ast.decls.len() as u32 - 1;
+        if let Some(decl) = self.scopes.id_of(node) {
+            self.decls[decl as usize] = id;
         }
         id
     }
 
-    fn lookup(&self, name: &str) -> u32 {
-        self.visible.get(name).and_then(|v| v.last()).copied().unwrap_or(NONE)
-    }
-
-    fn within<T>(&mut self, close: Option<usize>, f: impl FnOnce(&mut Self) -> T) -> T {
-        let saved = self.limit;
-        let close = close.filter(|&c| c >= self.i && c < saved);
-        if let Some(c) = close {
-            self.limit = c;
+    fn lookup(&self, node: Node) -> u32 {
+        match self.scopes.id_of(node) {
+            Some(decl) if self.scopes.decl(decl).kind != crate::lua::scope::DeclKind::Global => {
+                self.decls[decl as usize]
+            }
+            _ => NONE,
         }
-        let out = f(self);
-        self.limit = saved;
-        if let Some(c) = close {
-            self.i = c + 1;
-        }
-        out
     }
 
-    // ---- statements
-
-    fn block_end(&self) -> bool {
-        self.kw("end") || self.kw("else") || self.kw("elseif") || self.kw("until")
-    }
-
-    fn block(&mut self) {
-        while self.i < self.limit && !self.block_end() {
-            let before = self.i;
-            self.statement();
-            if self.i == before {
-                self.i += 1;
+    fn block(&mut self, node: Node<'a>) {
+        for child in node.children() {
+            if child.kind().is_statement() {
+                self.stmt(child);
             }
         }
     }
 
-    fn scoped_block(&mut self) {
-        self.open();
-        self.block();
-        self.close();
+    fn inner(&mut self, node: Node<'a>) {
+        for child in node.children() {
+            if child.is(N::Block) {
+                self.block(child);
+            } else if child.kind().is_expr() {
+                self.expr(child);
+            }
+        }
     }
 
-    fn statement(&mut self) {
-        let first = self.i;
-        let t = self.src.toks[self.i];
-        let kind = match (t.kind, self.text_at(self.i)) {
-            (Tok::Op, ";") => {
-                self.i += 1;
+    fn stmt(&mut self, node: Node<'a>) {
+        let kind = match node.kind() {
+            N::EmptyStat => return,
+            N::LocalDef => {
+                let unpack = node.has(T::In);
+                let (values, unpack) = if unpack {
+                    (Vec::new(), node.expr().and_then(|source| self.expr(source)))
+                } else {
+                    (self.exprs(node.child(N::ExprList)), None)
+                };
+                // Declared after the values: `local x = x` reads the outer `x`.
+                let mut names = Vec::new();
+                for (k, name) in
+                    node.child(N::NameList).into_iter().flat_map(|list| list.children_of(N::NameDef)).enumerate()
+                {
+                    let init = if unpack.is_none() { values.get(k).copied() } else { None };
+                    names.push(self.declare(name, DeclKind::Local { init }));
+                }
+                StmtKind::Local { names, values, unpack }
+            }
+            N::LocalFuncDef => {
+                let first = self.at(node, T::Function).unwrap_or(self.span(node).0);
+                if node.has(T::Id) {
+                    let decl = self.declare(node, DeclKind::LocalFunction(NONE));
+                    let func = self.func(node, first);
+                    self.ast.decls[decl as usize].kind = DeclKind::LocalFunction(func);
+                    StmtKind::LocalFunction { decl, func }
+                } else {
+                    self.func(node, first);
+                    StmtKind::Other
+                }
+            }
+            N::FuncDef => {
+                let target = node.token(T::Id).map(|name| {
+                    let tok = self.tok(name);
+                    self.ast.exprs.push(Expr {
+                        kind: ExprKind::Name(self.lookup(node)),
+                        first: tok,
+                        last: tok,
+                        func: self.func,
+                    });
+                    self.ast.exprs.len() as u32 - 1
+                });
+                let func = self.func(node, self.span(node).0);
+                StmtKind::Function { target, func }
+            }
+            N::ClassMethodDef => {
+                let target = node.child(N::ClassMethodName).and_then(|name| {
+                    let object = self.expr(name.expr()?)?;
+                    let member = self.at(name, T::Id);
+                    let key = if name.has(T::Colon) { Key::Method(member) } else { Key::Field(member) };
+                    Some(self.push_expr(ExprKind::Index(object, key), name))
+                });
+                let func = self.func(node, self.span(node).0);
+                StmtKind::Function { target, func }
+            }
+            N::AssignStat => {
+                let targets = self.exprs(node.child(N::VarList));
+                if node.has(T::In) {
+                    let unpack = node.expr().and_then(|source| self.expr(source));
+                    StmtKind::Assign { targets, values: Vec::new(), unpack }
+                } else {
+                    StmtKind::Assign { targets, values: self.exprs(node.child(N::ExprList)), unpack: None }
+                }
+            }
+            N::CompoundAssignStat => {
+                let mut operands = node.exprs();
+                let Some(target) = operands.next().and_then(|target| self.expr(target)) else { return };
+                let op = self.ast.exprs[target as usize].last + 1;
+                let value = operands.next().and_then(|value| self.expr(value));
+                StmtKind::Compound { target, op, value }
+            }
+            N::ExprStat => {
+                let Some(expr) = node.expr() else { return };
+                let Some(value) = self.expr(expr) else { return };
+                self.push_stmt(StmtKind::Expr(value), expr);
                 return;
             }
-            (Tok::Op, "::") => {
-                self.i += 1;
-                if self.name() {
-                    self.i += 1;
-                }
-                self.eat_op("::");
-                StmtKind::Other
-            }
-            (Tok::Keyword, "break") => {
-                self.i += 1;
-                StmtKind::Other
-            }
-            (Tok::Keyword, "goto") => {
-                self.i += 1;
-                if self.name() {
-                    self.i += 1;
-                }
-                StmtKind::Other
-            }
-            (Tok::Keyword, "do") => {
-                self.i += 1;
-                self.scoped_block();
-                self.eat_kw("end");
-                StmtKind::Other
-            }
-            (Tok::Keyword, "while") => {
-                self.i += 1;
-                self.expr();
-                self.eat_kw("do");
-                self.scoped_block();
-                self.eat_kw("end");
-                StmtKind::Other
-            }
-            (Tok::Keyword, "repeat") => {
-                self.i += 1;
-                // The condition sees the locals of the body.
-                self.open();
-                self.block();
-                if self.eat_kw("until") {
-                    self.expr();
-                }
-                self.close();
-                StmtKind::Other
-            }
-            (Tok::Keyword, "if") => {
-                self.i += 1;
-                self.expr();
-                self.eat_kw("then");
-                self.scoped_block();
-                while self.eat_kw("elseif") {
-                    self.expr();
-                    self.eat_kw("then");
-                    self.scoped_block();
-                }
-                if self.eat_kw("else") {
-                    self.scoped_block();
-                }
-                self.eat_kw("end");
-                StmtKind::Other
-            }
-            (Tok::Keyword, "for") => self.for_stmt(),
-            (Tok::Keyword, "function") => self.function_stmt(),
-            (Tok::Keyword, "local") => self.local_stmt(),
-            (Tok::Keyword, "return") => {
-                self.i += 1;
-                let values = if self.i >= self.limit || self.block_end() || self.op(";") {
-                    Vec::new()
-                } else {
-                    self.expr_list()
+            N::ReturnStat => StmtKind::Return(self.exprs(node.child(N::ExprList))),
+            N::ForAStat | N::ForBStat => {
+                let exprs = match node.child(N::ExprList) {
+                    Some(list) => self.exprs(Some(list)),
+                    None => self.exprs(Some(node)),
                 };
-                self.eat_op(";");
-                StmtKind::Return(values)
-            }
-            _ => match self.expr_stmt() {
-                Some(kind) => kind,
-                None => return,
-            },
-        };
-        self.push_stmt(kind, first);
-    }
-
-    fn for_stmt(&mut self) -> StmtKind {
-        self.i += 1;
-        let mut names = Vec::new();
-        while self.name() {
-            names.push(self.i);
-            self.i += 1;
-            if !self.eat_op(",") {
-                break;
-            }
-        }
-        if names.len() == 1 && self.eat_op("=") {
-            let exprs = self.expr_list();
-            self.eat_kw("do");
-            self.open();
-            let var = self.declare(names[0], DeclKind::ForVar);
-            self.block();
-            self.close();
-            self.eat_kw("end");
-            return StmtKind::NumFor { var, exprs };
-        }
-        self.eat_kw("in");
-        let exprs = self.expr_list();
-        self.eat_kw("do");
-        self.open();
-        let vars = names.iter().map(|&n| self.declare(n, DeclKind::ForVar)).collect();
-        self.block();
-        self.close();
-        self.eat_kw("end");
-        StmtKind::GenFor { vars, exprs }
-    }
-
-    fn function_stmt(&mut self) -> StmtKind {
-        let first = self.i;
-        self.i += 1;
-        let mut target = None;
-        if self.name() {
-            let start = self.i;
-            let mut e = self.name_expr();
-            loop {
-                if self.op(".") && self.name_at(self.i + 1) {
-                    self.i += 2;
-                    e = self.push_expr(ExprKind::Index(e, Key::Field(Some(self.i as u32 - 1))), start);
-                } else if self.op(":") && self.name_at(self.i + 1) {
-                    self.i += 2;
-                    e = self.push_expr(ExprKind::Index(e, Key::Method(Some(self.i as u32 - 1))), start);
-                    break;
-                } else {
-                    break;
+                let vars: Vec<u32> =
+                    node.children_of(N::ParamNameDef).map(|var| self.declare(var, DeclKind::ForVar)).collect();
+                if let Some(body) = node.child(N::Block) {
+                    self.block(body);
+                }
+                match vars.as_slice() {
+                    [var] if node.is(N::ForAStat) => StmtKind::NumFor { var: *var, exprs },
+                    _ => StmtKind::GenFor { vars, exprs },
                 }
             }
-            target = Some(e);
-        }
-        let func = self.func_body(first);
-        StmtKind::Function { target, func }
-    }
-
-    fn local_stmt(&mut self) -> StmtKind {
-        self.i += 1;
-        if self.kw("function") {
-            let first = self.i;
-            self.i += 1;
-            if !self.name() {
-                self.func_body(first);
-                return StmtKind::Other;
+            _ => {
+                self.inner(node);
+                StmtKind::Other
             }
-            let tok = self.i;
-            self.i += 1;
-            let decl = self.declare(tok, DeclKind::LocalFunction(NONE));
-            let func = self.func_body(first);
-            self.ast.decls[decl as usize].kind = DeclKind::LocalFunction(func);
-            return StmtKind::LocalFunction { decl, func };
-        }
-        let mut names = Vec::new();
-        while self.name() {
-            names.push(self.i);
-            self.i += 1;
-            // `<const>` / `<close>`
-            if self.op("<") && self.name_at(self.i + 1) && self.op_at(self.i + 2, ">") {
-                self.i += 3;
-            }
-            if !self.eat_op(",") {
-                break;
-            }
-        }
-        let (values, unpack) = if self.eat_op("=") {
-            (self.expr_list(), None)
-        } else if self.eat_kw("in") {
-            (Vec::new(), self.expr())
-        } else {
-            (Vec::new(), None)
         };
-        // Declared after the values: `local x = x` reads the outer `x`.
-        let mut decls = Vec::with_capacity(names.len());
-        for (k, &tok) in names.iter().enumerate() {
-            let init = if unpack.is_none() { values.get(k).copied() } else { None };
-            decls.push(self.declare(tok, DeclKind::Local { init }));
-        }
-        StmtKind::Local { names: decls, values, unpack }
+        self.push_stmt(kind, node);
     }
 
-    fn expr_stmt(&mut self) -> Option<StmtKind> {
-        let e = self.suffixed()?;
-        if self.op("=") || self.op(",") {
-            let mut targets = vec![e];
-            while self.eat_op(",") {
-                match self.suffixed() {
-                    Some(t) => targets.push(t),
-                    None => break,
-                }
-            }
-            if self.eat_op("=") {
-                let values = self.expr_list();
-                return Some(StmtKind::Assign { targets, values, unpack: None });
-            }
-            let unpack = if self.eat_kw("in") { self.expr() } else { None };
-            return Some(StmtKind::Assign { targets, values: Vec::new(), unpack });
-        }
-        if self.eat_kw("in") {
-            let unpack = self.expr();
-            return Some(StmtKind::Assign { targets: vec![e], values: Vec::new(), unpack });
-        }
-        if self.tok_kind(self.i) == Some(Tok::Op) && COMPOUND.contains(&self.text_at(self.i)) {
-            let op = self.i as u32;
-            self.i += 1;
-            let value = self.expr();
-            return Some(StmtKind::Compound { target: e, op, value });
-        }
-        Some(StmtKind::Expr(e))
-    }
-
-    fn func_body(&mut self, first: usize) -> u32 {
+    fn func(&mut self, owner: Node<'a>, first: u32) -> u32 {
         let id = self.ast.funcs.len() as u32;
         self.ast.funcs.push(Func {
-            first: first as u32,
-            last: first as u32,
+            first,
+            last: first,
             params: Vec::new(),
             vararg: false,
             parent: self.func,
             exprs: (0, 0),
             stmts: (0, 0),
         });
-        let outer = self.func;
-        self.func = id;
+        let outer = std::mem::replace(&mut self.func, id);
         let (e0, s0) = (self.ast.exprs.len() as u32, self.ast.stmts.len() as u32);
-        self.open();
-        let mut params = Vec::new();
-        let mut vararg = false;
-        if self.op("(") {
-            let close = self.src.pair[self.i];
-            self.i += 1;
-            loop {
-                if self.name() {
-                    let n = params.len() as u32;
-                    params.push(self.declare(self.i, DeclKind::Param(id, n)));
-                    self.i += 1;
-                } else if self.eat_op("...") {
-                    vararg = true;
-                }
-                if !self.eat_op(",") {
-                    break;
-                }
+        let (mut params, mut vararg, mut last) = (Vec::new(), false, self.span(owner).1.max(first));
+        if let Some(body) = owner.child(N::FuncBody) {
+            for (n, param) in body.children_of(N::ParamNameDef).enumerate() {
+                params.push(self.declare(param, DeclKind::Param(id, n as u32)));
             }
-            match close {
-                Some(c) if c >= self.i && c < self.limit => self.i = c + 1,
-                _ => {
-                    self.eat_op(")");
-                }
+            vararg = body.has(T::Ellipsis);
+            if let Some(block) = body.child(N::Block) {
+                self.block(block);
             }
+            last = self.at(body, T::End).unwrap_or(self.span(body).1).max(first);
         }
-        self.block();
-        let last = if self.kw("end") {
-            self.i += 1;
-            self.i - 1
-        } else {
-            self.i.saturating_sub(1).max(first)
-        };
-        self.close();
         self.func = outer;
         let (e1, s1) = (self.ast.exprs.len() as u32, self.ast.stmts.len() as u32);
         let f = &mut self.ast.funcs[id as usize];
-        f.last = last as u32;
+        f.last = last;
         f.params = params;
         f.vararg = vararg;
         f.exprs = (e0, e1);
@@ -711,238 +515,123 @@ impl<'a> Parser<'a> {
         id
     }
 
-    // ---- expressions
-
-    fn expr(&mut self) -> Option<u32> {
-        self.sub_expr(0)
-    }
-
-    fn expr_list(&mut self) -> Vec<u32> {
+    /// The expressions of a list, up to the first one that is missing.
+    fn exprs(&mut self, list: Option<Node<'a>>) -> Vec<u32> {
         let mut out = Vec::new();
-        if let Some(e) = self.expr() {
-            out.push(e);
-            while self.eat_op(",") {
-                match self.expr() {
-                    Some(e) => out.push(e),
-                    None => break,
-                }
+        for expr in list.into_iter().flat_map(Node::exprs) {
+            match self.expr(expr) {
+                Some(value) => out.push(value),
+                None => break,
             }
         }
         out
     }
 
-    fn unary_op(&self) -> Option<UnOp> {
-        match self.tok_kind(self.i)? {
-            Tok::Keyword if self.text_at(self.i) == "not" => Some(UnOp::Not),
-            Tok::Op => match self.text_at(self.i) {
-                "#" => Some(UnOp::Len),
-                "-" => Some(UnOp::Neg),
-                "~" => Some(UnOp::BNot),
-                _ => None,
-            },
-            _ => None,
+    fn args(&mut self, call: Node<'a>) -> Vec<u32> {
+        if let Some(list) = call.child(N::ListArgs) {
+            return self.exprs(Some(list));
         }
+        call.child(N::SingleArg).and_then(Node::expr).and_then(|arg| self.expr(arg)).into_iter().collect()
     }
 
-    fn binary_op(&self) -> Option<BinOp> {
-        let text = self.text_at(self.i);
-        match self.tok_kind(self.i)? {
-            Tok::Keyword => match text {
-                "or" => Some(BinOp::Or),
-                "and" => Some(BinOp::And),
-                _ => None,
-            },
-            Tok::Op => match text {
-                "==" | "~=" | "!=" | "<" | "<=" | ">" | ">=" => Some(BinOp::Compare),
-                "|" => Some(BinOp::BOr),
-                "~" => Some(BinOp::BXor),
-                "&" => Some(BinOp::BAnd),
-                "<<" | ">>" => Some(BinOp::Shift),
-                ".." => Some(BinOp::Concat),
-                "+" | "-" => Some(BinOp::Additive),
-                "*" | "/" | "//" | "%" => Some(BinOp::Multiplicative),
-                "^" => Some(BinOp::Pow),
-                _ => None,
-            },
-            _ => None,
-        }
-    }
-
-    fn sub_expr(&mut self, limit: u8) -> Option<u32> {
-        let first = self.i;
-        let mut left = if let Some(op) = self.unary_op() {
-            self.i += 1;
-            let operand = self.sub_expr(UNARY_PRIORITY)?;
-            self.push_expr(ExprKind::Unary(op, operand), first)
-        } else {
-            self.simple()?
-        };
-        while let Some(op) = self.binary_op() {
-            let (left_priority, right_priority) = op.priority();
-            if left_priority <= limit {
-                break;
-            }
-            self.i += 1;
-            let Some(right) = self.sub_expr(right_priority) else { break };
-            left = self.push_expr(ExprKind::Binary(op, left, right), first);
-        }
-        Some(left)
-    }
-
-    fn simple(&mut self) -> Option<u32> {
-        let first = self.i;
-        let kind = match (self.tok_kind(self.i)?, self.text_at(self.i)) {
-            (Tok::Number, _) => ExprKind::Number,
-            (Tok::Str { .. } | Tok::LongStr, _) => ExprKind::Str,
-            (Tok::Hash { .. }, _) => ExprKind::Hash,
-            (Tok::Keyword, "nil") => ExprKind::Nil,
-            (Tok::Keyword, "true") => ExprKind::True,
-            (Tok::Keyword, "false") => ExprKind::False,
-            (Tok::Op, "...") => ExprKind::Vararg,
-            (Tok::Keyword, "function") => {
-                self.i += 1;
-                let f = self.func_body(first);
-                return Some(self.push_expr(ExprKind::Func(f), first));
-            }
-            (Tok::Op, "{") => return Some(self.table()),
-            _ => return self.suffixed(),
-        };
-        self.i += 1;
-        Some(self.push_expr(kind, first))
-    }
-
-    fn name_expr(&mut self) -> u32 {
-        let decl = self.lookup(self.text_at(self.i));
-        let first = self.i;
-        self.i += 1;
-        self.push_expr(ExprKind::Name(decl), first)
-    }
-
-    fn args_start(&self) -> bool {
-        match self.tok_kind(self.i) {
-            Some(Tok::Str { .. } | Tok::LongStr | Tok::Hash { .. }) => true,
-            Some(Tok::Op) => matches!(self.text_at(self.i), "(" | "{"),
-            _ => false,
-        }
-    }
-
-    fn suffixed(&mut self) -> Option<u32> {
-        let first = self.i;
-        let mut e = if self.name() {
-            self.name_expr()
-        } else if self.op("(") {
-            let close = self.src.pair[self.i];
-            self.i += 1;
-            let inner = self.within(close, |p| p.expr());
-            self.push_expr(inner.map_or(ExprKind::Error, ExprKind::Paren), first)
-        } else {
-            return None;
-        };
-        while self.i < self.limit {
-            let t = self.src.toks[self.i];
-            match (t.kind, self.text_at(self.i)) {
-                (Tok::Op, ".") => {
-                    if self.name_at(self.i + 1) {
-                        self.i += 2;
-                        e = self.push_expr(ExprKind::Index(e, Key::Field(Some(self.i as u32 - 1))), first);
-                    } else {
-                        self.i += 1;
-                        e = self.push_expr(ExprKind::Index(e, Key::Field(None)), first);
-                        break;
-                    }
-                }
-                (Tok::Op, ":") => {
-                    if !self.name_at(self.i + 1) {
-                        self.i += 1;
-                        e = self.push_expr(ExprKind::Index(e, Key::Method(None)), first);
-                        break;
-                    }
-                    self.i += 2;
-                    let callee = self.push_expr(ExprKind::Index(e, Key::Method(Some(self.i as u32 - 1))), first);
-                    if !self.args_start() {
-                        e = callee;
-                        break;
-                    }
-                    let args = self.args();
-                    e = self.push_expr(ExprKind::Call(callee, args), first);
-                }
-                (Tok::Op, "[") => {
-                    let close = self.src.pair[self.i];
-                    self.i += 1;
-                    let key = self.within(close, |p| p.expr());
-                    e = self.push_expr(ExprKind::Index(e, Key::Bracket(key)), first);
-                }
-                (Tok::Op, "?") if self.src.is_safe_nav(self.i) => self.i += 1,
-                _ if self.args_start() => {
-                    let args = self.args();
-                    e = self.push_expr(ExprKind::Call(e, args), first);
-                }
-                _ => break,
-            }
-        }
-        Some(e)
-    }
-
-    fn args(&mut self) -> Vec<u32> {
-        if self.op("(") {
-            let close = self.src.pair[self.i];
-            self.i += 1;
-            return self.within(close, |p| p.expr_list());
-        }
-        if self.op("{") {
-            return vec![self.table()];
-        }
-        let first = self.i;
-        let kind = if matches!(self.src.toks[self.i].kind, Tok::Hash { .. }) { ExprKind::Hash } else { ExprKind::Str };
-        self.i += 1;
-        vec![self.push_expr(kind, first)]
-    }
-
-    fn table(&mut self) -> u32 {
-        let first = self.i;
-        let close = self.src.pair[self.i];
-        self.i += 1;
-        let fields = self.within(close, |p| p.fields(close.is_some()));
-        self.push_expr(ExprKind::Table(fields), first)
-    }
-
-    fn fields(&mut self, closed: bool) -> Vec<Field> {
+    fn fields(&mut self, table: Node<'a>) -> Vec<Field> {
         let mut out = Vec::new();
-        while self.i < self.limit {
-            if self.eat_op(",") || self.eat_op(";") {
-                continue;
-            }
-            // An unclosed constructor ends where statements resume.
-            if !closed
-                && self.tok_kind(self.i) == Some(Tok::Keyword)
-                && !matches!(self.text_at(self.i), "function" | "nil" | "true" | "false" | "not")
-            {
-                break;
-            }
-            let first = self.i as u32;
-            let before = self.i;
-            if self.op("[") {
-                let close = self.src.pair[self.i];
-                self.i += 1;
-                let key = self.within(close, |p| p.expr());
-                self.eat_op("=");
-                if let Some(value) = self.expr() {
+        for field in table.children_of(N::TableField) {
+            let first = self.span(field).0;
+            let mut exprs = field.exprs();
+            if field.has(T::LBrack) {
+                let key = exprs.next().and_then(|key| self.expr(key));
+                if let Some(value) = exprs.next().and_then(|value| self.expr(value)) {
                     out.push(Field { name: None, key, value, first });
                 }
-            } else if self.name() && self.op_at(self.i + 1, "=") {
-                let name = self.i as u32;
-                self.i += 2;
-                if let Some(value) = self.expr() {
-                    out.push(Field { name: Some(name), key: None, value, first });
+            } else if field.has(T::Assign) {
+                let name = self.at(field, T::Id);
+                if let Some(value) = exprs.next().and_then(|value| self.expr(value)) {
+                    out.push(Field { name, key: None, value, first: name.unwrap_or(first) });
                 }
-            } else if let Some(value) = self.expr() {
+            } else if let Some(value) = exprs.next().and_then(|value| self.expr(value)) {
                 out.push(Field { name: None, key: None, value, first });
-            }
-            if self.i == before {
-                self.i += 1;
             }
         }
         out
+    }
+
+    fn expr(&mut self, node: Node<'a>) -> Option<u32> {
+        let kind = match node.kind() {
+            N::BinaryExpr | N::IndexExpr | N::CallExpr => return self.chain(node),
+            N::LiteralExpr => match node.first_token()?.kind() {
+                T::Number => ExprKind::Number,
+                T::String => ExprKind::Str,
+                T::HashString => ExprKind::Hash,
+                T::Nil => ExprKind::Nil,
+                T::True => ExprKind::True,
+                T::False => ExprKind::False,
+                T::Ellipsis => ExprKind::Vararg,
+                _ => return None,
+            },
+            N::NameExpr => ExprKind::Name(self.lookup(node)),
+            N::ParenExpr => node.expr().and_then(|inner| self.expr(inner)).map_or(ExprKind::Error, ExprKind::Paren),
+            N::UnaryExpr => {
+                let op = unary_op(node.child(N::UnaryOp)?.first_token()?.kind())?;
+                ExprKind::Unary(op, self.expr(node.expr()?)?)
+            }
+            N::TableExpr => ExprKind::Table(self.fields(node)),
+            N::ClosureExpr => {
+                let first = self.at(node, T::Function).unwrap_or(self.span(node).0);
+                ExprKind::Func(self.func(node, first))
+            }
+            _ => return None,
+        };
+        Some(self.push_expr(kind, node))
+    }
+
+    /// A chain of operators or suffixes is as deep as it is long on its left side: it is walked from
+    /// its first operand outwards instead of recursed into.
+    fn chain(&mut self, node: Node<'a>) -> Option<u32> {
+        let binary = node.is(N::BinaryExpr);
+        let links = |node: Node| {
+            if binary { node.is(N::BinaryExpr) } else { matches!(node.kind(), N::IndexExpr | N::CallExpr) }
+        };
+        let base = self.spine.len();
+        let mut first = node;
+        while links(first) {
+            self.spine.push(first);
+            match first.expr() {
+                Some(left) => first = left,
+                None => {
+                    self.spine.truncate(base);
+                    return None;
+                }
+            }
+        }
+        let Some(mut value) = self.expr(first) else {
+            self.spine.truncate(base);
+            return None;
+        };
+        while self.spine.len() > base {
+            let Some(link) = self.spine.pop() else { break };
+            let kind = match link.kind() {
+                N::BinaryExpr => {
+                    let op = link.child(N::BinaryOp).and_then(Node::first_token).and_then(|op| binary_op(op.kind()));
+                    let right = link.exprs().nth(1).and_then(|right| self.expr(right));
+                    match (op, right) {
+                        (Some(op), Some(right)) => ExprKind::Binary(op, value, right),
+                        _ => break,
+                    }
+                }
+                N::IndexExpr if link.has(T::LBrack) => {
+                    ExprKind::Index(value, Key::Bracket(link.exprs().nth(1).and_then(|key| self.expr(key))))
+                }
+                N::IndexExpr => {
+                    let name = self.at(link, T::Id);
+                    ExprKind::Index(value, if link.has(T::Colon) { Key::Method(name) } else { Key::Field(name) })
+                }
+                _ => ExprKind::Call(value, self.args(link)),
+            };
+            value = self.push_expr(kind, link);
+        }
+        self.spine.truncate(base);
+        Some(value)
     }
 }
 
