@@ -61,6 +61,8 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
 - **One CfxLua parser reads every file**, the one of the JetBrains plugin ported to Rust: events, state bags, NUI,
   performance, coordinates, magic values and syntax checks used to read Lua through three partial parsers that could
   disagree. What they report is unchanged; code being typed is read the same way by all of them.
+- **Indexing a project takes about a tenth less time** (measured on 5,000 files): what the features read from a Lua
+  file is built once and released with the file, instead of being looked up again by each of them.
 - The **lua-language-server config (.luarc.json)** template ignores `.cfxlua` as project code (it stays a library)
   and lets completion list up to 1,000 items: lua-language-server stops at 100, which could hide the native you type.
   In an existing `.luarc.json`, add `".cfxlua"` to `workspace.ignoreDir` and `"completion.maxSuggestCount": 1000`.
