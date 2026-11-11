@@ -56,6 +56,30 @@ const EDIT: Slice = Slice { reads: 8, bytes: 24 << 10, heavy: false };
 // Bigger files are generated data or bundles: lexing one would take a call on its own.
 const MAX_INDEXED: usize = 1 << 20;
 const DERIVE_EVERY: u32 = 6;
+// The IDE stops the plugin when an editor call runs 500 ms, without saying which call it stopped.
+const SLOW_CALL_MS: u128 = 250;
+
+/// Names in the log an editor call that came close to that limit.
+struct Timed {
+    what: &'static str,
+    bytes: usize,
+    since: std::time::Instant,
+}
+
+impl Timed {
+    fn start(what: &'static str, d: &Document) -> Self {
+        Self { what, bytes: d.text.len(), since: std::time::Instant::now() }
+    }
+}
+
+impl Drop for Timed {
+    fn drop(&mut self) {
+        let ms = self.since.elapsed().as_millis();
+        if ms >= SLOW_CALL_MS {
+            host::log(LogLevel::Warn, &format!("{} took {ms} ms on {} KB", self.what, self.bytes >> 10));
+        }
+    }
+}
 
 pub fn all_features() -> Vec<Box<dyn Feature>> {
     vec![
@@ -692,6 +716,7 @@ impl Plugin for DevKit {
 
 impl Providers for DevKit {
     fn completion(&mut self, d: &Document, at: Position, trigger: Option<&str>) -> Vec<CompletionItem> {
+        let _timed = Timed::start("completion", d);
         let Some(ws) = self.prepare(d) else { return Vec::new() };
         self.with_ctx(ws, |cx, features| {
             let at = cx.doc.offset(at);
@@ -701,6 +726,7 @@ impl Providers for DevKit {
     }
 
     fn definition(&mut self, d: &Document, at: Position) -> Vec<Location> {
+        let _timed = Timed::start("definition", d);
         let Some(ws) = self.prepare(d) else { return Vec::new() };
         let found = self
             .with_ctx(ws, |cx, features| {
@@ -712,6 +738,7 @@ impl Providers for DevKit {
     }
 
     fn line_markers(&mut self, d: &Document) -> Vec<LineMarker> {
+        let _timed = Timed::start("line markers", d);
         let Some(ws) = self.prepare(d) else {
             // Switched off: clear what was published.
             let _ = host::publish_diagnostics(&d.path, &[]);
@@ -733,6 +760,7 @@ impl Providers for DevKit {
     }
 
     fn code_actions(&mut self, d: &Document, selection: Range) -> Vec<CodeAction> {
+        let _timed = Timed::start("code actions", d);
         let Some(ws) = self.prepare(d) else { return Vec::new() };
         let problems = self.problems(ws);
         let Some((doc, _)) = &self.last else { return Vec::new() };
@@ -822,6 +850,7 @@ thread_local! {
 
 impl SemanticTokens for DevKit {
     fn semantic_tokens(&mut self, d: &Document) -> Vec<SemanticToken> {
+        let _timed = Timed::start("semantic tokens", d);
         let tokens = self.prepare(d).and_then(|ws| {
             self.with_ctx(ws, |cx, features| {
                 use editor::semantic::{Kind, Mods};
@@ -864,6 +893,7 @@ impl SemanticTokens for DevKit {
 
 impl LanguageFeatures for DevKit {
     fn folding(&mut self, d: &Document) -> Vec<FoldRange> {
+        let _timed = Timed::start("folding", d);
         let folds = self.prepare(d).and_then(|ws| {
             self.with_ctx(ws, |cx, features| {
                 let folds = features.iter().flat_map(|f| f.folding(cx));
@@ -884,6 +914,7 @@ impl LanguageFeatures for DevKit {
     }
 
     fn document_symbols(&mut self, d: &Document) -> Vec<DocumentSymbol> {
+        let _timed = Timed::start("structure", d);
         let symbols = self.prepare(d).and_then(|ws| {
             self.with_ctx(ws, |cx, features| {
                 let symbols = features.iter().flat_map(|f| f.symbols(cx));
@@ -907,6 +938,7 @@ impl LanguageFeatures for DevKit {
         d: &Document,
         at: Position,
     ) -> Vec<openidea_plugin::language_features::Highlight> {
+        let _timed = Timed::start("occurrences", d);
         let highlights = self.prepare(d).and_then(|ws| {
             self.with_ctx(ws, |cx, features| {
                 let at = cx.doc.offset(at);
@@ -999,6 +1031,24 @@ mod tests {
     fn values<'a>(sections: &'a [Section], kind: &str, key: &str) -> Vec<&'a str> {
         let field = |e: &'a [(String, String)]| e.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str());
         sections.iter().filter(|(k, _)| k == kind).filter_map(|(_, e)| field(e)).collect()
+    }
+
+    #[test]
+    fn an_editor_call_close_to_the_limit_is_named_in_the_log() {
+        let host = openidea_plugin::mock::MockHost::install();
+        let ago = |ms: u64| {
+            std::time::Instant::now().checked_sub(std::time::Duration::from_millis(ms)).expect("an earlier instant")
+        };
+        drop(Timed { what: "semantic tokens", bytes: 925 << 10, since: ago(300) });
+        drop(Timed { what: "folding", bytes: 925 << 10, since: ago(20) });
+        let warned: Vec<String> = host
+            .logs()
+            .into_iter()
+            .filter(|(level, _)| matches!(level, LogLevel::Warn))
+            .map(|(_, text)| text)
+            .collect();
+        assert_eq!(warned.len(), 1, "{warned:?}");
+        assert!(warned[0].starts_with("semantic tokens took ") && warned[0].ends_with(" ms on 925 KB"), "{warned:?}");
     }
 
     #[test]
