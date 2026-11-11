@@ -3,7 +3,8 @@ use super::scope::Scopes;
 use super::token::{Tokens, lex};
 use super::tree::{Node, Tree};
 use crate::text::LineIndex;
-use std::cell::OnceCell;
+use std::any::Any;
+use std::cell::{OnceCell, RefCell};
 use std::rc::Rc;
 
 pub struct Source {
@@ -16,6 +17,7 @@ pub struct Source {
     code: Vec<u32>,
     tree: OnceCell<Tree>,
     scopes: OnceCell<Scopes>,
+    models: RefCell<Vec<Rc<dyn Any>>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -93,6 +95,7 @@ impl Source {
             code,
             tree: OnceCell::new(),
             scopes: OnceCell::new(),
+            models: RefCell::default(),
         }
     }
 
@@ -107,6 +110,7 @@ impl Source {
             code: Vec::new(),
             tree: OnceCell::new(),
             scopes: OnceCell::new(),
+            models: RefCell::default(),
         }
     }
 
@@ -126,6 +130,17 @@ impl Source {
     /// The declaration each name refers to, resolved once.
     pub fn scopes(&self) -> &Scopes {
         self.scopes.get_or_init(|| Scopes::new(self.root()))
+    }
+
+    /// What a reader derives from this text, built once and kept as long as the text.
+    pub fn model<M: 'static>(&self, build: impl FnOnce(&Source) -> M) -> Rc<M> {
+        let kept = self.models.borrow().iter().find(|model| model.is::<M>()).cloned();
+        if let Some(model) = kept.and_then(|model| model.downcast::<M>().ok()) {
+            return model;
+        }
+        let model = Rc::new(build(self));
+        self.models.borrow_mut().push(model.clone());
+        model
     }
 
     /// The index in `toks` of the tree token `index`: the token itself, or the code token after it
@@ -424,6 +439,22 @@ fn match_brackets(src: &str, toks: &[Token]) -> Vec<Option<usize>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_model_is_built_once_and_kept_with_its_source() {
+        let s = Source::new("local a = 1");
+        let built = std::cell::Cell::new(0);
+        let count = |src: &Source| {
+            built.set(built.get() + 1);
+            src.toks.len()
+        };
+        let first = s.model(count);
+        let again = s.model(count);
+        assert!(Rc::ptr_eq(&first, &again));
+        assert_eq!((built.get(), *again), (1, 4));
+        assert_eq!(*s.model(|src| src.text.clone()), "local a = 1", "one model per type");
+        assert_eq!(*Source::new("local a").model(count), 2, "and per source");
+    }
 
     #[test]
     fn chains_and_calls() {

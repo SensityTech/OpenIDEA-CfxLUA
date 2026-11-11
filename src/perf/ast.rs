@@ -1,7 +1,6 @@
 use crate::lua::Source;
 use crate::lua::token::T;
 use crate::lua::tree::{Element, N, Node as Syntax, Token};
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -133,28 +132,8 @@ pub struct Ast {
     by_name: HashMap<String, Vec<usize>>,
 }
 
-thread_local! {
-    static CACHE: RefCell<Vec<(usize, u64, Rc<Ast>)>> = const { RefCell::new(Vec::new()) };
-}
-
 pub fn parse(src: &Source) -> Rc<Ast> {
-    let key = (src.text.len(), fnv(&src.text));
-    if let Some(ast) = CACHE.with(|c| c.borrow().iter().find(|(l, h, _)| (*l, *h) == key).map(|(_, _, a)| a.clone())) {
-        return ast;
-    }
-    let ast = Rc::new(Ast::new(src));
-    CACHE.with(|c| {
-        let mut c = c.borrow_mut();
-        if c.len() >= 3 {
-            c.remove(0);
-        }
-        c.push((key.0, key.1, ast.clone()));
-    });
-    ast
-}
-
-fn fnv(text: &str) -> u64 {
-    text.bytes().fold(0xcbf2_9ce4_8422_2325, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3))
+    src.model(Ast::new)
 }
 
 impl Ast {

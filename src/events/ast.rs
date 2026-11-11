@@ -2,7 +2,6 @@ use crate::lua::Source;
 use crate::lua::scope::Scopes;
 use crate::lua::token::T;
 use crate::lua::tree::{N, Node, Token};
-use std::cell::RefCell;
 use std::rc::Rc;
 
 pub const NONE: u32 = u32::MAX;
@@ -243,31 +242,7 @@ pub fn raw_string(src: &Source, tok: usize) -> String {
 }
 
 pub fn parse(src: &Source) -> Rc<Ast> {
-    thread_local! {
-        static CACHE: RefCell<Vec<(u64, Rc<Ast>)>> = const { RefCell::new(Vec::new()) };
-    }
-    let key = fingerprint(&src.text);
-    CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        if let Some((_, ast)) = cache.iter().find(|(k, _)| *k == key) {
-            return ast.clone();
-        }
-        let ast = Rc::new(Ast::parse(src));
-        if cache.len() >= 2 {
-            cache.remove(0);
-        }
-        cache.push((key, ast.clone()));
-        ast
-    })
-}
-
-fn fingerprint(text: &str) -> u64 {
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325 ^ text.len() as u64;
-    for b in text.bytes() {
-        h ^= u64::from(b);
-        h = h.wrapping_mul(0x0100_0000_01b3);
-    }
-    h
+    src.model(Ast::parse)
 }
 
 /// Reads the expressions, statements and functions off the syntax tree, in the order the source
