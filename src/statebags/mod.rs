@@ -372,6 +372,10 @@ impl Feature for StateBagsFeature {
         if completes_at(&cx.doc.src, at) { self.keys_at(cx, at) } else { Vec::new() }
     }
 
+    fn completes_from_index(&self, cx: &Ctx, at: usize) -> bool {
+        completes_at(&cx.doc.src, at)
+    }
+
     fn definition(&self, cx: &Ctx, at: usize) -> Vec<Location> {
         self.with_project(cx, |p| {
             let sites = sites::analyze(&cx.doc.src);

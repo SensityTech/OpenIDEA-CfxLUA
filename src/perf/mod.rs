@@ -65,6 +65,10 @@ impl Feature for PerfFeature {
         self.index.borrow_mut().remove(path);
     }
 
+    fn completes_from_index(&self, _cx: &Ctx, _at: usize) -> bool {
+        false
+    }
+
     fn problems(&self, cx: &Ctx) -> Vec<Problem> {
         if !Self::applies(cx) {
             return Vec::new();

@@ -365,6 +365,10 @@ impl Feature for NuiFeature {
         }
     }
 
+    fn completes_from_index(&self, cx: &Ctx, at: usize) -> bool {
+        cx.doc.kind != FileKind::Lua || cx.doc.src.quoted_at(at).is_some()
+    }
+
     fn definition(&self, cx: &Ctx, at: usize) -> Vec<Location> {
         if !cx.settings.enabled() || !matches!(cx.doc.kind, FileKind::Lua | FileKind::Web) {
             return Vec::new();

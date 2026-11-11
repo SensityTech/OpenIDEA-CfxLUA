@@ -139,7 +139,8 @@ pub struct CommandCx<'a> {
 pub type CommandResult = Result<Option<String>, openidea_plugin::Error>;
 
 // Providers run on the editing path, 50 ms shared by every plugin: project-wide tables are built in
-// index_file / indexed (background work), never in a provider.
+// index_file / indexed (background work), never in a provider. The edited document itself is given to
+// index_file by the first provider that reads those tables, not at every keystroke.
 pub trait Feature {
     fn index_file(&self, _ws: &Workspace, _path: &str, _kind: FileKind, _src: &Source) {}
 
@@ -153,6 +154,12 @@ pub trait Feature {
 
     fn completion(&self, _cx: &Ctx, _at: usize, _trigger: Option<&str>) -> Vec<CompletionItem> {
         Vec::new()
+    }
+
+    /// Whether `completion` at `at` reads what `index_file` keeps of the document, which is then indexed first.
+    /// Asked at every keystroke, before anything is derived from the text: answer from the tokens.
+    fn completes_from_index(&self, _cx: &Ctx, _at: usize) -> bool {
+        true
     }
 
     fn definition(&self, _cx: &Ctx, _at: usize) -> Vec<Location> {

@@ -85,6 +85,10 @@ impl Feature for EditorFeature {
         self.functions.borrow_mut().remove(path);
     }
 
+    fn completes_from_index(&self, _cx: &Ctx, _at: usize) -> bool {
+        false
+    }
+
     fn semantic_tokens(&self, cx: &Ctx) -> Vec<semantic::Token> {
         if !Self::applies(cx) {
             return Vec::new();

@@ -170,6 +170,10 @@ impl Feature for EventsFeature {
         self.with_files(cx, |files| editor::completion(cx, db.as_deref(), files, string, at))
     }
 
+    fn completes_from_index(&self, cx: &Ctx, at: usize) -> bool {
+        cx.doc.src.quoted_at(at).is_some()
+    }
+
     fn definition(&self, cx: &Ctx, at: usize) -> Vec<Location> {
         if !cx.settings.enabled() {
             return Vec::new();

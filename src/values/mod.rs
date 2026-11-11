@@ -304,6 +304,10 @@ impl Feature for ValuesFeature {
         Self::argument_values(cx, at)
     }
 
+    fn completes_from_index(&self, _cx: &Ctx, _at: usize) -> bool {
+        false
+    }
+
     fn intentions(&self, cx: &Ctx, start: usize, _end: usize) -> Vec<Intention> {
         if !Self::applies(cx) {
             return Vec::new();

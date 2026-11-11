@@ -29,6 +29,12 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
 
 ### Fixed
 
+- **Completion that came too late in big files.** Every keystroke made the plugin index the edited file again for
+  all its features (events, NUI, state bags, performance facts) before it listed anything, and the completions of
+  state bag keys and of enumerated values each analysed the whole file first. A name being typed needs none of it.
+  The file is now indexed by the first request that reads those indexes, once the typing pauses, and those two
+  completions analyse the file only where they apply. In a dense 450 KB file the list took the 50 ms the editor
+  waits and now comes in under 10 ms; in files close to 1 MB it never came and now takes about 20 ms.
 - **Completion that came too late on big projects.** Every keystroke in a file that calls events made the plugin
   detect the event functions of the whole project again before it answered: on a 5,000-file project the editor had
   stopped waiting and listed nothing. They are now detected again only when an edit touches one of them, and a

@@ -318,6 +318,10 @@ impl Feature for CoordsFeature {
         self.params.borrow_mut().remove(path);
     }
 
+    fn completes_from_index(&self, _cx: &Ctx, _at: usize) -> bool {
+        false
+    }
+
     fn command(&self, cx: &CommandCx, id: &str, arg: Option<&str>) -> Option<CommandResult> {
         (id == CONVERT_SELECTION).then(|| self.convert_selection(cx, arg))
     }

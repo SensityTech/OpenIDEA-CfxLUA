@@ -47,7 +47,9 @@ Two rules matter more than any other:
 
 1. **Providers run on the editing path.** OpenIDEA drops a completion, definition or gutter result that takes more
    than 50 ms, shared by every plugin. Project-wide tables are built in `Feature::index_file` / `Feature::indexed`
-   (background work), never in a provider.
+   (background work), never in a provider. A completion is asked at every keystroke: it looks at the tokens around
+   the caret before it parses anything, and the edited document only reaches `index_file` when a request reads
+   those tables (`Feature::completes_from_index` says whether a completion does).
 2. **Areas never read the project from the host.** They get a `Workspace`, so every feature is unit-tested in memory
    with `testing::Fixture`:
 

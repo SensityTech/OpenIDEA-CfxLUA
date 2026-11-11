@@ -74,6 +74,10 @@ impl Feature for EscrowFeature {
         facts::forget(path);
     }
 
+    fn completes_from_index(&self, _cx: &Ctx, _at: usize) -> bool {
+        false
+    }
+
     fn problems(&self, cx: &Ctx) -> Vec<Problem> {
         let doc = cx.doc;
         if !cx.settings.enabled() || !matches!(doc.kind, FileKind::Lua | FileKind::Manifest) {

@@ -99,6 +99,14 @@ pub fn all_features() -> Vec<Box<dyn Feature>> {
     ]
 }
 
+/// The document being edited, while some features have not indexed its last text.
+struct Stale {
+    ws: usize,
+    path: String,
+    /// A bit per feature that still has to index it.
+    features: u32,
+}
+
 pub struct DevKit {
     features: Vec<Box<dyn Feature>>,
     docs: docs::Docs,
@@ -106,6 +114,7 @@ pub struct DevKit {
     natives: Natives,
     workspaces: Vec<Workspace>,
     last: Option<(Doc, Option<Vec<Problem>>)>,
+    stale: Option<Stale>,
     unread: Vec<(usize, String)>,
     pending: Vec<(usize, String)>,
     catalogs: Vec<usize>,
@@ -127,6 +136,7 @@ impl Default for DevKit {
             natives: Natives::bundled(),
             workspaces: Vec::new(),
             last: None,
+            stale: None,
             unread: Vec::new(),
             pending: Vec::new(),
             catalogs: Vec::new(),
@@ -338,6 +348,8 @@ impl DevKit {
             for feature in &self.features {
                 feature.index_file(ws, &f.path, f.kind, &src);
             }
+            // The workspace holds what the editor last sent: nothing of that document is left to index.
+            self.stale.take_if(|stale| stale.ws == i && stale.path == path);
             if self.derive.first() == Some(&i) {
                 self.derived = 0;
             } else if !self.derive.contains(&i) {
@@ -481,20 +493,69 @@ impl DevKit {
             return None;
         }
         self.settings.reset();
+        // Another document was left before every feature indexed it: what is asked next may read it.
+        if self.stale.as_ref().is_some_and(|stale| stale.ws != i || stale.path != path) {
+            self.flush_stale();
+        }
         let ws = &mut self.workspaces[i];
         let changed = ws.text(&path) != Some(d.text.as_str());
         ws.set(&path, Some(&d.text));
-        let ws = &self.workspaces[i];
-        let doc = Doc::new(ws, &path, &d.language, d.version, &d.text);
         if changed {
-            for f in &self.features {
-                f.index_file(ws, &path, doc.kind, &doc.src);
-            }
-            // Derived indexes are rebuilt by the next heavy call, never on the editing path.
-            self.mark_derive(i);
+            // Indexed by the first call that reads the indexes: a completion is asked at every keystroke.
+            self.stale = Some(Stale { ws: i, path: path.clone(), features: (1 << self.features.len()) - 1 });
         }
+        let doc = Doc::new(&self.workspaces[i], &path, &d.language, d.version, &d.text);
         self.last = Some((doc, None));
         Some(i)
+    }
+
+    /// The document, indexed by every feature: where an answer that reads the indexes starts.
+    fn prepare_indexed(&mut self, d: &Document) -> Option<usize> {
+        let ws = self.prepare(d)?;
+        self.index_stale(|_, _| true);
+        Some(ws)
+    }
+
+    /// Gives the edited document to the features that have not indexed it, among those `wanted` keeps.
+    fn index_stale(&mut self, wanted: impl Fn(&dyn Feature, &Ctx) -> bool) {
+        let Some(mut stale) = self.stale.take() else { return };
+        let Some((doc, _)) = self.last.as_ref().filter(|(doc, _)| doc.path == stale.path) else {
+            self.stale = Some(stale);
+            return;
+        };
+        let ws = &self.workspaces[stale.ws];
+        let cx = Ctx { doc, ws, settings: &self.settings, natives: &self.natives };
+        let left = stale.features;
+        for (n, feature) in self.features.iter().enumerate() {
+            if stale.features & (1 << n) != 0 && wanted(feature.as_ref(), &cx) {
+                feature.index_file(ws, &doc.path, doc.kind, &doc.src);
+                stale.features &= !(1 << n);
+            }
+        }
+        let (ws, indexed) = (stale.ws, stale.features != left);
+        if stale.features != 0 {
+            self.stale = Some(stale);
+        }
+        if indexed {
+            // Derived indexes are rebuilt by the next heavy call, never on the editing path.
+            self.mark_derive(ws);
+        }
+    }
+
+    /// Before a command, a view or an event reads the indexes: nothing of the edited document is left out.
+    fn flush_stale(&mut self) {
+        self.index_stale(|_, _| true);
+        if let Some(left) = self.stale.take() {
+            self.index_later(left);
+        }
+    }
+
+    /// A document the editor moved away from: the next slices index it from the workspace, under their budget.
+    fn index_later(&mut self, left: Stale) {
+        let entry = (left.ws, left.path);
+        if !self.pending.contains(&entry) {
+            self.pending.push(entry);
+        }
     }
 
     fn with_ctx<R>(&self, ws: usize, f: impl FnOnce(&Ctx, &[Box<dyn Feature>]) -> R) -> Option<R> {
@@ -668,12 +729,14 @@ impl Plugin for DevKit {
     fn run_command(&mut self, id: &str, ctx: &Invocation, arg: Option<&str>) -> Result<Option<String>, Error> {
         self.natives.freeze(false);
         self.settings.reset();
+        self.flush_stale();
         self.step(VIEW);
         self.command(id, ctx, arg)
     }
 
     fn handle_events(&mut self, events: &[Event], ctx: &Invocation) {
         self.natives.freeze(false);
+        self.flush_stale();
         let mut slice = EVENTS;
         for e in events {
             match e {
@@ -718,6 +781,7 @@ impl Providers for DevKit {
     fn completion(&mut self, d: &Document, at: Position, trigger: Option<&str>) -> Vec<CompletionItem> {
         let _timed = Timed::start("completion", d);
         let Some(ws) = self.prepare(d) else { return Vec::new() };
+        self.index_stale(|feature, cx| feature.completes_from_index(cx, cx.doc.offset(at)));
         self.with_ctx(ws, |cx, features| {
             let at = cx.doc.offset(at);
             features.iter().flat_map(|f| f.completion(cx, at, trigger)).collect()
@@ -727,7 +791,7 @@ impl Providers for DevKit {
 
     fn definition(&mut self, d: &Document, at: Position) -> Vec<Location> {
         let _timed = Timed::start("definition", d);
-        let Some(ws) = self.prepare(d) else { return Vec::new() };
+        let Some(ws) = self.prepare_indexed(d) else { return Vec::new() };
         let found = self
             .with_ctx(ws, |cx, features| {
                 let at = cx.doc.offset(at);
@@ -739,7 +803,7 @@ impl Providers for DevKit {
 
     fn line_markers(&mut self, d: &Document) -> Vec<LineMarker> {
         let _timed = Timed::start("line markers", d);
-        let Some(ws) = self.prepare(d) else {
+        let Some(ws) = self.prepare_indexed(d) else {
             // Switched off: clear what was published.
             let _ = host::publish_diagnostics(&d.path, &[]);
             return Vec::new();
@@ -761,7 +825,7 @@ impl Providers for DevKit {
 
     fn code_actions(&mut self, d: &Document, selection: Range) -> Vec<CodeAction> {
         let _timed = Timed::start("code actions", d);
-        let Some(ws) = self.prepare(d) else { return Vec::new() };
+        let Some(ws) = self.prepare_indexed(d) else { return Vec::new() };
         let problems = self.problems(ws);
         let Some((doc, _)) = &self.last else { return Vec::new() };
         let (start, end) = (doc.offset(selection.start), doc.offset(selection.end));
@@ -802,6 +866,7 @@ impl Providers for DevKit {
 impl Views for DevKit {
     fn render(&mut self, view: &str, viewport: Option<Viewport>, ctx: &Invocation) -> Result<View, Error> {
         self.natives.freeze(false);
+        self.flush_stale();
         self.step(VIEW);
         let (ws, doc) = self.command_doc(ctx);
         let cx = CommandCx {
@@ -817,6 +882,7 @@ impl Views for DevKit {
     fn handle(&mut self, view: &str, event: ViewEvent, ctx: &Invocation) -> Result<(), Error> {
         self.natives.freeze(false);
         self.settings.reset();
+        self.flush_stale();
         // Opening the window or searching moves the scan on; rows, details and preferences are answered at once.
         if let ViewEvent::Message(text) = &event
             && serde_json::from_str::<serde_json::Value>(text)
@@ -851,7 +917,7 @@ thread_local! {
 impl SemanticTokens for DevKit {
     fn semantic_tokens(&mut self, d: &Document) -> Vec<SemanticToken> {
         let _timed = Timed::start("semantic tokens", d);
-        let tokens = self.prepare(d).and_then(|ws| {
+        let tokens = self.prepare_indexed(d).and_then(|ws| {
             self.with_ctx(ws, |cx, features| {
                 use editor::semantic::{Kind, Mods};
                 let tokens: Vec<editor::semantic::Token> =
@@ -897,7 +963,7 @@ impl SemanticTokens for DevKit {
 impl LanguageFeatures for DevKit {
     fn folding(&mut self, d: &Document) -> Vec<FoldRange> {
         let _timed = Timed::start("folding", d);
-        let folds = self.prepare(d).and_then(|ws| {
+        let folds = self.prepare_indexed(d).and_then(|ws| {
             self.with_ctx(ws, |cx, features| {
                 let folds = features.iter().flat_map(|f| f.folding(cx));
                 let lines = folds.map(|fold| {
@@ -918,7 +984,7 @@ impl LanguageFeatures for DevKit {
 
     fn document_symbols(&mut self, d: &Document) -> Vec<DocumentSymbol> {
         let _timed = Timed::start("structure", d);
-        let symbols = self.prepare(d).and_then(|ws| {
+        let symbols = self.prepare_indexed(d).and_then(|ws| {
             self.with_ctx(ws, |cx, features| {
                 let symbols = features.iter().flat_map(|f| f.symbols(cx));
                 symbols
@@ -942,7 +1008,7 @@ impl LanguageFeatures for DevKit {
         at: Position,
     ) -> Vec<openidea_plugin::language_features::Highlight> {
         let _timed = Timed::start("occurrences", d);
-        let highlights = self.prepare(d).and_then(|ws| {
+        let highlights = self.prepare_indexed(d).and_then(|ws| {
             self.with_ctx(ws, |cx, features| {
                 let at = cx.doc.offset(at);
                 let highlights = features.iter().flat_map(|f| f.highlights(cx, at));
@@ -1214,6 +1280,97 @@ mod tests {
             assert!(kit.completion(&doc, Position::new(lines - 1, 11), None).is_empty());
             assert!(kit.line_markers(&doc).is_empty());
         }
+    }
+
+    const SHOP_CLIENT: &str = "/project/res/client/main.lua";
+    const SHOP_SERVER: &str = "/project/res/server/main.lua";
+
+    /// A resource whose client triggers an event that nothing handles, read to the end.
+    fn shop_resource(host: &openidea_plugin::mock::MockHost) -> DevKit {
+        let manifest =
+            "fx_version 'cerulean'\ngame 'gta5'\nclient_script 'client/*.lua'\nserver_script 'server/*.lua'\n";
+        host.add_file("res/fxmanifest.lua", manifest);
+        host.add_file("res/client/main.lua", "TriggerServerEvent('shop:sell', 1)\n");
+        host.add_file("res/server/main.lua", "RegisterNetEvent('shop:buy', function(n) end)\n");
+        let mut kit = DevKit::default();
+        kit.activate(&host.context("sensity.cfxlua")).unwrap();
+        while kit.indexing {
+            kit.handle_events(&[Event::EditorFocused(None)], &host.invocation());
+        }
+        kit
+    }
+
+    fn lua(path: &str, version: u64, text: &str) -> Document {
+        Document { path: path.to_owned(), language: "lua".into(), version, text: text.to_owned() }
+    }
+
+    /// The features that have not indexed the document being edited.
+    fn waiting(kit: &DevKit) -> Vec<&'static str> {
+        let left = kit.stale.as_ref().map_or(0, |stale| stale.features);
+        FEATURE_NAMES.iter().enumerate().filter(|(n, _)| left & (1 << n) != 0).map(|(_, name)| *name).collect()
+    }
+
+    #[test]
+    fn a_name_being_typed_is_completed_before_the_document_is_indexed() {
+        let host = openidea_plugin::mock::MockHost::install();
+        let mut kit = shop_resource(&host);
+        let typed = lua(SHOP_SERVER, 2, "GetEnt\nRegisterNetEvent('shop:sell', function(n) end)\n");
+        assert!(kit.completion(&typed, Position::new(0, 6), None).iter().any(|i| i.label == "GetEntityCoords"));
+        assert_eq!(waiting(&kit), ["statebags", "events", "nui", "values", "coords", "perf", "editor", "escrow"]);
+        assert!(!kit.document_highlights(&typed, Position::new(1, 3)).is_empty());
+        assert!(kit.stale.is_none(), "the first call that is not a completion indexes the document");
+        let again = lua(SHOP_SERVER, 3, &typed.text);
+        assert!(!kit.completion(&again, Position::new(0, 6), None).is_empty());
+        assert!(kit.stale.is_none(), "the same text is not indexed twice");
+    }
+
+    #[test]
+    fn a_completion_that_reads_an_index_indexes_the_document_first() {
+        let host = openidea_plugin::mock::MockHost::install();
+        let mut kit = shop_resource(&host);
+        let typed = lua(SHOP_CLIENT, 2, "AddEventHandler('typed:here', function() end)\nTriggerEvent('ty')\n");
+        let labels: Vec<String> =
+            kit.completion(&typed, Position::new(1, 16), None).into_iter().map(|i| i.label).collect();
+        assert!(labels.iter().any(|l| l == "typed:here"), "the event of the line above: {labels:?}");
+        assert_eq!(waiting(&kit), ["statebags", "values", "coords", "perf", "editor", "escrow"]);
+        let typed = lua(SHOP_CLIENT, 3, "LocalPlayer.state.typedKey = 1\nlocal v = LocalPlayer.state.ty\n");
+        let labels: Vec<String> =
+            kit.completion(&typed, Position::new(1, 30), None).into_iter().map(|i| i.label).collect();
+        assert_eq!(labels, ["typedKey"], "the key of the line above");
+        assert_eq!(waiting(&kit), ["events", "nui", "values", "coords", "perf", "editor", "escrow"]);
+    }
+
+    #[test]
+    fn an_edited_document_is_indexed_before_another_one_is_answered() {
+        let host = openidea_plugin::mock::MockHost::install();
+        let mut kit = shop_resource(&host);
+        let client = lua(SHOP_CLIENT, 1, "TriggerServerEvent('shop:sell', 1)\n");
+        assert!(kit.line_markers(&client).is_empty(), "nothing handles the event yet");
+        let typed = lua(SHOP_SERVER, 2, "GetEnt\nRegisterNetEvent('shop:sell', function(n) end)\n");
+        assert!(!kit.completion(&typed, Position::new(0, 6), None).is_empty());
+        assert!(kit.stale.is_some());
+        assert_eq!(kit.line_markers(&client).len(), 1, "the handler typed in the other document");
+        assert!(kit.stale.is_none());
+    }
+
+    #[test]
+    fn an_edited_document_is_indexed_before_an_event_or_a_command() {
+        let host = openidea_plugin::mock::MockHost::install();
+        let mut kit = shop_resource(&host);
+        let inv = host.invocation();
+        for flush in 0..2 {
+            let text = format!("GetEnt\nRegisterNetEvent('shop:sell', function(n) end)\n-- {flush}\n");
+            assert!(!kit.completion(&lua(SHOP_SERVER, 2 + flush, &text), Position::new(0, 6), None).is_empty());
+            assert!(kit.stale.is_some());
+            if flush == 0 {
+                kit.handle_events(&[Event::EditorFocused(None)], &inv);
+            } else {
+                let _ = kit.run_command("show-docs", &inv, None);
+            }
+            assert!(kit.stale.is_none(), "flush {flush}");
+        }
+        let client = lua(SHOP_CLIENT, 1, "TriggerServerEvent('shop:sell', 1)\n");
+        assert_eq!(kit.line_markers(&client).len(), 1);
     }
 
     #[test]
