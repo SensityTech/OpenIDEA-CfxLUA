@@ -10,7 +10,6 @@ pub use web::NUI_EVENT_PREFIX;
 
 use crate::feature::{Ctx, Doc, Feature, Intention, Problem};
 use crate::lua::Source;
-use crate::lua::lexer::Tok;
 use crate::project::FileKind;
 use crate::settings::Settings;
 use crate::text::{file_name, parent};
@@ -181,13 +180,8 @@ impl NuiFeature {
     fn lua_completion(&self, cx: &Ctx, at: usize) -> Vec<CompletionItem> {
         let doc = cx.doc;
         let src = &doc.src;
-        let Some(k) = Self::lua_string(doc, at) else { return Vec::new() };
+        let Some(k) = src.quoted_at(at) else { return Vec::new() };
         let t = src.toks[k];
-        let Tok::Str { closed } = t.kind else { return Vec::new() };
-        let content_end = if closed { t.end - 1 } else { t.end };
-        if at <= t.start || at > content_end {
-            return Vec::new();
-        }
         let keys = read_keys(cx.settings);
         let an = lua::Analysis::new(src);
         let bridge = self.bridge(cx.ws, cx.settings);

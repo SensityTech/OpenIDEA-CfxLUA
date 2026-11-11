@@ -5,7 +5,6 @@ use super::model::{Dirs, EventFn, EventKey, FileInfo, Role, Seg, Site, side_text
 use super::{count, location, md};
 use crate::docs::data::BuiltinEvent;
 use crate::feature::Ctx;
-use crate::lua::lexer::Tok;
 use crate::project::{Game, Side};
 use openidea_plugin::providers::{CompletionItem, CompletionKind, LineMarker};
 use openidea_plugin::{Location, Range};
@@ -240,16 +239,6 @@ fn project_item(label: &str, detail: String, replace: Range, documentation: Opti
     item.sort_text = Some(format!("1{label}"));
     item.documentation = documentation;
     item
-}
-
-/// The quoted string whose content holds the caret: its token.
-pub fn string_at(cx: &Ctx, at: usize) -> Option<usize> {
-    let src = &cx.doc.src;
-    let i = src.tok_at(at)?;
-    let tok = src.toks[i];
-    let Tok::Str { closed } = tok.kind else { return None };
-    let content_end = if closed { tok.end - 1 } else { tok.end };
-    (tok.text(&src.text).starts_with(['\'', '"']) && at > tok.start && at <= content_end).then_some(i)
 }
 
 pub fn completion(

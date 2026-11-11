@@ -1243,6 +1243,10 @@ mod tests {
             stage("documentation comments", &mut || _ = src.docs());
             stage("events model", &mut || _ = events::ast::parse(&src));
             stage("perf model", &mut || _ = perf::ast::parse(&src));
+            let end = typed.len();
+            stage("caret tests of the completions, at the end of the file", &mut || {
+                _ = (src.quoted_at(end), src.names_field(end), src.in_parentheses(end));
+            });
             let ws = kit.workspace_for(&path);
             let ws = &kit.workspaces[ws];
             for (name, feature) in FEATURE_NAMES.iter().zip(all_features()) {

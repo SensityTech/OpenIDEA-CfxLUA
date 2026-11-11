@@ -235,3 +235,21 @@ fn completion_of_enumerated_arguments() {
     let r = run_full(REDM, "SetBlipSprite(blip, <caret>)", Vec::new(), Settings::defaults(), &[]);
     assert!(r.completion().is_empty(), "GTA V tables only");
 }
+
+#[test]
+fn the_token_test_never_hides_a_value() {
+    let text = "IsControlJustPressed(0, INPUT_PICK)\nSetBlipColour(blip, )\nCreateThread(function()\n    \
+                SetBlipColour(blip, col)\n    local x = IsControlPressed(0, )\nend)\n\
+                DrawMarker(1, f(a, { b }), IsControlJustPressed(0, IN), 0.0)\nSetBlipColour(blip, \nlocal done = 1\n\
+                IsControlJustPressed(0, ";
+    let r = run(text);
+    let doc = r.fx.doc(CLIENT);
+    let cx = r.fx.cx(&doc);
+    let mut offered = 0;
+    for at in 0..=text.len() {
+        let values = ValuesFeature::argument_values(&cx, at);
+        assert_eq!(r.feature.completion(&cx, at, None).len(), values.len(), "at {at}: `{}`", &text[..at]);
+        offered += usize::from(!values.is_empty());
+    }
+    assert!(offered > 10, "values are offered at {offered} places of the sample");
+}

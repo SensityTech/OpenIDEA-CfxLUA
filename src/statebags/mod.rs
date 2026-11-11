@@ -3,7 +3,6 @@ pub mod sites;
 use crate::events::{display_path, location, md};
 use crate::feature::{Ctx, Feature, Fix, Problem};
 use crate::lua::Source;
-use crate::lua::lexer::Tok;
 use crate::project::{FileKind, Side};
 use crate::text::edit_distance;
 use crate::workspace::Workspace;
@@ -265,10 +264,57 @@ impl StateBagsFeature {
         }
         Some(f(p))
     }
+
+    /// The keys of the bag whose field or string holds `at`.
+    fn keys_at(&self, cx: &Ctx, at: usize) -> Vec<CompletionItem> {
+        self.with_project(cx, |p| {
+            let src = &cx.doc.src;
+            let ast = crate::events::ast::parse(src);
+            let analyzer = Analyzer::new(src, &ast);
+            let (kind, prefix_start, in_string) = match analyzer.field_at(at) {
+                Some((kind, start)) => (kind, start, false),
+                None => {
+                    let Some(i) = src.quoted_at(at) else { return Vec::new() };
+                    let tok = src.toks[i];
+                    let sites = analyzer.sites();
+                    let Some(site) =
+                        sites.iter().find(|s| s.start == tok.start && matches!(s.element, Element::Str(_)))
+                    else {
+                        return Vec::new();
+                    };
+                    (site.kind, tok.start + 1, true)
+                }
+            };
+            let prefix = &src.text[prefix_start..at];
+            p.known_keys(kind)
+                .into_iter()
+                .filter(|(key, _)| (in_string || sites::is_identifier(key)) && starts_with_ci(key, prefix))
+                .map(|(key, occurrences)| {
+                    let mut item = CompletionItem::new(key, CompletionKind::Property);
+                    let ty = type_text(&writes(&occurrences)).unwrap_or_else(|| "state bag key".into());
+                    let tail = tail_text(cx.ws, &occurrences);
+                    item.detail = Some(if tail.is_empty() { ty } else { format!("{ty} ·{tail}") });
+                    item.sort_text = Some(format!("0{key}"));
+                    item.documentation = Some(key_doc(cx.ws, p, key, kind));
+                    if in_string {
+                        item.replace = Some(cx.doc.range(prefix_start, at));
+                    }
+                    item
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+    }
 }
 
 fn site_at(sites: &[Site], at: usize) -> Option<&Site> {
     sites.iter().find(|s| s.key.is_some() && s.start <= at && at <= s.end)
+}
+
+/// Where a key is completed, read from the tokens: the name of a field or the content of a string, in a file
+/// that may hold a bag.
+fn completes_at(src: &Source, at: usize) -> bool {
+    (src.names_field(at) || src.quoted_at(at).is_some()) && sites::may_hold_bags(&src.text)
 }
 
 fn entries(src: &Source) -> Vec<Entry> {
@@ -322,48 +368,8 @@ impl Feature for StateBagsFeature {
     }
 
     fn completion(&self, cx: &Ctx, at: usize, _trigger: Option<&str>) -> Vec<CompletionItem> {
-        self.with_project(cx, |p| {
-            let src = &cx.doc.src;
-            let ast = crate::events::ast::parse(src);
-            let analyzer = Analyzer::new(src, &ast);
-            let (kind, prefix_start, in_string) = match analyzer.field_at(at) {
-                Some((kind, start)) => (kind, start, false),
-                None => {
-                    let Some(i) = src.tok_at(at) else { return Vec::new() };
-                    let tok = src.toks[i];
-                    let Tok::Str { closed } = tok.kind else { return Vec::new() };
-                    let content_end = if closed { tok.end - 1 } else { tok.end };
-                    if at <= tok.start || at > content_end {
-                        return Vec::new();
-                    }
-                    let sites = analyzer.sites();
-                    let Some(site) =
-                        sites.iter().find(|s| s.start == tok.start && matches!(s.element, Element::Str(_)))
-                    else {
-                        return Vec::new();
-                    };
-                    (site.kind, tok.start + 1, true)
-                }
-            };
-            let prefix = &src.text[prefix_start..at];
-            p.known_keys(kind)
-                .into_iter()
-                .filter(|(key, _)| (in_string || sites::is_identifier(key)) && starts_with_ci(key, prefix))
-                .map(|(key, occurrences)| {
-                    let mut item = CompletionItem::new(key, CompletionKind::Property);
-                    let ty = type_text(&writes(&occurrences)).unwrap_or_else(|| "state bag key".into());
-                    let tail = tail_text(cx.ws, &occurrences);
-                    item.detail = Some(if tail.is_empty() { ty } else { format!("{ty} ·{tail}") });
-                    item.sort_text = Some(format!("0{key}"));
-                    item.documentation = Some(key_doc(cx.ws, p, key, kind));
-                    if in_string {
-                        item.replace = Some(cx.doc.range(prefix_start, at));
-                    }
-                    item
-                })
-                .collect()
-        })
-        .unwrap_or_default()
+        // Asked at every keystroke: the file is only analysed where a key can be named.
+        if completes_at(&cx.doc.src, at) { self.keys_at(cx, at) } else { Vec::new() }
     }
 
     fn definition(&self, cx: &Ctx, at: usize) -> Vec<Location> {

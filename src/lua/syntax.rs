@@ -207,6 +207,39 @@ impl Source {
         (self.toks[i].end >= at).then_some(i)
     }
 
+    /// The quoted string whose content holds `at`: its index in `toks`.
+    pub fn quoted_at(&self, at: usize) -> Option<usize> {
+        let i = self.tok_at(at)?;
+        let t = self.toks[i];
+        let Tok::Str { closed } = t.kind else { return None };
+        let content_end = if closed { t.end - 1 } else { t.end };
+        (at > t.start && at <= content_end).then_some(i)
+    }
+
+    /// Whether `at` is where a field is named: after its dot, or in the name that follows it.
+    pub fn names_field(&self, at: usize) -> bool {
+        let Some(before) = self.tok_before(at) else { return false };
+        self.is_op(before, ".") || (at <= self.toks[before].end && before > 0 && self.is_op(before - 1, "."))
+    }
+
+    /// Whether a parenthesis opened before `at` is still open there: the arguments of a call, or an expression
+    /// between parentheses.
+    pub fn in_parentheses(&self, at: usize) -> bool {
+        let mut i = self.toks.partition_point(|t| t.start < at);
+        while i > 0 {
+            i -= 1;
+            if self.toks[i].kind != Tok::Op {
+                continue;
+            }
+            match self.pair[i] {
+                Some(open) if open < i => i = open,
+                _ if self.is_op(i, "(") => return true,
+                _ => {}
+            }
+        }
+        false
+    }
+
     pub fn in_comment(&self, at: usize) -> bool {
         let i = self.all.partition_point(|t| t.start < at);
         i > 0 && {
@@ -467,6 +500,32 @@ mod tests {
         assert_eq!((built.get(), *again), (1, 4));
         assert_eq!(*s.model(|src| src.text.clone()), "local a = 1", "one model per type");
         assert_eq!(*Source::new("local a").model(count), 2, "and per source");
+    }
+
+    #[test]
+    fn where_the_caret_stands_is_read_from_the_tokens() {
+        let text = "f(a, 'x', { b }, g(1), c)
+bag.state.name = 1
+local s = \"open";
+        let s = Source::new(text);
+        let at = |needle: &str| text.find(needle).unwrap();
+        assert!(s.quoted_at(at("'x'")).is_none(), "before the quote");
+        assert!(s.quoted_at(at("'x'") + 1).is_some() && s.quoted_at(at("'x'") + 2).is_some());
+        assert!(s.quoted_at(at("'x'") + 3).is_none(), "after the closing quote");
+        assert!(s.quoted_at(text.len()).is_some(), "a string left open holds what follows");
+        assert!(s.quoted_at(at("bag")).is_none());
+
+        assert!(s.names_field(at("state")) && s.names_field(at("state") + 3) && s.names_field(at("state") + 5));
+        assert!(s.names_field(at("name")) && s.names_field(at("name") + 4));
+        assert!(!s.names_field(at("bag") + 2) && !s.names_field(at("= 1")) && !s.names_field(0));
+
+        assert!(s.in_parentheses(at("a, ")), "after the parenthesis");
+        assert!(s.in_parentheses(at(" b }")), "in a table of the arguments");
+        assert!(s.in_parentheses(at("1)")), "in a call of the arguments");
+        assert!(s.in_parentheses(at("c)")) && s.in_parentheses(at("c)") + 1), "after a call that is closed");
+        assert!(!s.in_parentheses(at("c)") + 2), "after the call");
+        assert!(!s.in_parentheses(0) && !s.in_parentheses(at("bag")) && !s.in_parentheses(text.len()));
+        assert!(Source::new("f(function() g(1) end, ").in_parentheses(23), "a function among the arguments");
     }
 
     #[test]

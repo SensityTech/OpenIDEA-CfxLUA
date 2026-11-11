@@ -165,7 +165,7 @@ impl Feature for EventsFeature {
             return Vec::new();
         }
         // Asked at every keystroke: only a caret in a string brings the database up to date.
-        let Some(string) = editor::string_at(cx, at) else { return Vec::new() };
+        let Some(string) = cx.doc.src.quoted_at(at) else { return Vec::new() };
         let db = self.db(cx);
         self.with_files(cx, |files| editor::completion(cx, db.as_deref(), files, string, at))
     }

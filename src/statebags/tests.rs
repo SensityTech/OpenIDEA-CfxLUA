@@ -311,3 +311,23 @@ fn reindexing_a_file_updates_the_project() {
     f.forget_file(&path);
     assert!(f.problems(&fx.cx(&doc)).is_empty(), "no write left: nothing checked");
 }
+
+#[test]
+fn the_token_test_never_hides_a_key() {
+    let client = "local v = LocalPlayer?.state?.gr\nprint(v)\nlocal bag = Entity(veh).state\nbag.fu\n\
+                  bag['fu'] = 1\nbag:set('fu', 2, true)\nAddStateBagChangeHandler('wat', nil, function() end)\n\
+                  GlobalState.wea\nGlobalState['wea\nlocal s = LocalPlayer.state.";
+    let fx = fixture(&[MAIN, ("res/client/main.lua", client)]);
+    let f = indexed(&fx);
+    let doc = fx.doc("res/client/main.lua");
+    let cx = fx.cx(&doc);
+    let mut offered = 0;
+    for at in (0..=client.len()).filter(|at| client.is_char_boundary(*at)) {
+        let keys = f.keys_at(&cx, at);
+        assert_eq!(f.completion(&cx, at, None).len(), keys.len(), "at {at}: `{}`", &client[..at]);
+        offered += usize::from(!keys.is_empty());
+    }
+    assert!(offered > 20, "keys are offered at {offered} places of the sample");
+    let plain = fx.doc("res/server/main.lua");
+    assert!(!super::completes_at(&plain.src, SERVER.find("local src").unwrap() + 7), "a name outside any field");
+}

@@ -191,6 +191,35 @@ impl ValuesFeature {
         cx.settings.enabled() && cx.doc.is_lua()
     }
 
+    /// The values of the argument being typed at `at`, when its native takes enumerated ones there.
+    fn argument_values(cx: &Ctx, at: usize) -> Vec<CompletionItem> {
+        let tree = ast::parse(&cx.doc.src);
+        let scope = Scope::new(cx, &tree);
+        let Some(tok) = cx.doc.src.tok_before(at) else { return Vec::new() };
+        let mut n = tree.owner_of(tok);
+        while let Some(node) = n {
+            if let Node::Expr(call) = node
+                && matches!(tree.exprs[call].kind, ExprKind::Call { .. })
+                && let Some(i) = tree.call_args(call).iter().position(|&a| {
+                    let arg = &tree.exprs[a];
+                    arg.start <= at && at <= arg.stop && matches!(arg.kind, ExprKind::Name { .. } | ExprKind::Error)
+                })
+            {
+                let Some(vc) = scope.call_at(call) else { return Vec::new() };
+                let Some(kind) = vc.roles.kind(i) else { return Vec::new() };
+                let arg = &tree.exprs[tree.call_args(call)[i]];
+                let replace = matches!(arg.kind, ExprKind::Name { .. }).then(|| cx.doc.range(arg.start, arg.stop));
+                let argument = decode::argument(i, vc.param(i), &vc.name);
+                return items(kind, vc.game, &argument, replace);
+            }
+            if matches!(node, Node::Stat(_)) {
+                break;
+            }
+            n = tree.parent(node);
+        }
+        Vec::new()
+    }
+
     fn hash_name(&self, hash: i32) -> Option<HashName> {
         if let Some(n) = self.hashes.borrow().find(hash) {
             return Some(HashName { name: n.to_owned(), origin: Origin::Project });
@@ -268,34 +297,11 @@ impl Feature for ValuesFeature {
     }
 
     fn completion(&self, cx: &Ctx, at: usize, _trigger: Option<&str>) -> Vec<CompletionItem> {
-        if !Self::applies(cx) {
+        // Asked at every keystroke: only an argument being typed is worth parsing the file for.
+        if !Self::applies(cx) || !cx.doc.src.in_parentheses(at) {
             return Vec::new();
         }
-        let tree = ast::parse(&cx.doc.src);
-        let scope = Scope::new(cx, &tree);
-        let Some(tok) = cx.doc.src.tok_before(at) else { return Vec::new() };
-        let mut n = tree.owner_of(tok);
-        while let Some(node) = n {
-            if let Node::Expr(call) = node
-                && matches!(tree.exprs[call].kind, ExprKind::Call { .. })
-                && let Some(i) = tree.call_args(call).iter().position(|&a| {
-                    let arg = &tree.exprs[a];
-                    arg.start <= at && at <= arg.stop && matches!(arg.kind, ExprKind::Name { .. } | ExprKind::Error)
-                })
-            {
-                let Some(vc) = scope.call_at(call) else { return Vec::new() };
-                let Some(kind) = vc.roles.kind(i) else { return Vec::new() };
-                let arg = &tree.exprs[tree.call_args(call)[i]];
-                let replace = matches!(arg.kind, ExprKind::Name { .. }).then(|| cx.doc.range(arg.start, arg.stop));
-                let argument = decode::argument(i, vc.param(i), &vc.name);
-                return items(kind, vc.game, &argument, replace);
-            }
-            if matches!(node, Node::Stat(_)) {
-                break;
-            }
-            n = tree.parent(node);
-        }
-        Vec::new()
+        Self::argument_values(cx, at)
     }
 
     fn intentions(&self, cx: &Ctx, start: usize, _end: usize) -> Vec<Intention> {
