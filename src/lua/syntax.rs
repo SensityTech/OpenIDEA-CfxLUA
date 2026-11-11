@@ -1,5 +1,9 @@
-use super::lexer::{Tok, Token, code_tokens, tokenize};
+use super::lexer::{Tok, Token, coarse};
+use super::token::{Tokens, lex};
+use super::tree::{Node, Tree};
 use crate::text::LineIndex;
+use std::cell::OnceCell;
+use std::rc::Rc;
 
 pub struct Source {
     pub text: String,
@@ -7,6 +11,9 @@ pub struct Source {
     pub toks: Vec<Token>,
     pub pair: Vec<Option<usize>>,
     pub lines: LineIndex,
+    fine: Option<Rc<Tokens>>,
+    code: Vec<u32>,
+    tree: OnceCell<Tree>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -61,14 +68,61 @@ pub struct Call {
 
 impl Source {
     pub fn new(text: &str) -> Self {
-        let all = tokenize(text);
-        let toks = code_tokens(&all);
+        let fine = lex(text);
+        let (all, held) = coarse(text, &fine);
+        let mut toks = Vec::with_capacity(all.len());
+        let mut code_of = Vec::with_capacity(all.len() + 1);
+        for token in &all {
+            code_of.push(toks.len() as u32);
+            if !token.is_comment() {
+                toks.push(*token);
+            }
+        }
+        code_of.push(toks.len() as u32);
+        let code = held.iter().map(|at| code_of[*at as usize]).collect();
         let pair = match_brackets(text, &toks);
-        Self { text: text.to_owned(), lines: LineIndex::new(text), all, toks, pair }
+        Self {
+            text: text.to_owned(),
+            lines: LineIndex::new(text),
+            all,
+            toks,
+            pair,
+            fine: Some(Rc::new(fine)),
+            code,
+            tree: OnceCell::new(),
+        }
     }
 
     pub fn plain(text: &str) -> Self {
-        Self { text: text.to_owned(), lines: LineIndex::new(text), all: Vec::new(), toks: Vec::new(), pair: Vec::new() }
+        Self {
+            text: text.to_owned(),
+            lines: LineIndex::new(text),
+            all: Vec::new(),
+            toks: Vec::new(),
+            pair: Vec::new(),
+            fine: None,
+            code: Vec::new(),
+            tree: OnceCell::new(),
+        }
+    }
+
+    /// The syntax tree, parsed once; a source that is not Lua has an empty one.
+    pub fn tree(&self) -> &Tree {
+        self.tree.get_or_init(|| match &self.fine {
+            Some(fine) => Tree::of(&self.text, fine.clone()),
+            None => Tree::parse(""),
+        })
+    }
+
+    pub fn root(&self) -> Node<'_> {
+        let text = if self.fine.is_some() { self.text.as_str() } else { "" };
+        self.tree().root(text)
+    }
+
+    /// The index in `toks` of the tree token `index`: the token itself, or the code token after it
+    /// when it is white space or a comment.
+    pub fn tok_of(&self, index: usize) -> usize {
+        self.code.get(index).map_or(self.toks.len(), |at| *at as usize)
     }
 
     pub fn tok_text(&self, i: usize) -> &str {

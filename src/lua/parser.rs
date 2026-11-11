@@ -1,11 +1,12 @@
 use super::builder::{Bind, Builder, Done, Marker};
-use super::token::{T, lex};
+use super::token::{T, Tokens, lex};
 use super::tree::{N, Tree};
+use std::rc::Rc;
 
 pub const INCREMENT_NOT_SUPPORTED: &str = "'++' is not supported in CfxLua, use 'x += 1'";
 pub const NESTED_TOO_DEEPLY: &str = "Code is nested too deeply to be analysed";
 
-const MAX_DEPTH: usize = 160;
+const MAX_DEPTH: usize = 200;
 
 const STATEMENT_START: &[T] = &[
     T::Do,
@@ -24,28 +25,34 @@ const STATEMENT_START: &[T] = &[
     T::LParen,
 ];
 
-const EXPONENT: u8 = 10;
+const UNARY_PRIORITY: u8 = 12;
 
-fn binary_level(kind: T) -> Option<u8> {
+/// Left and right priorities of a binary operator, as the Lua parser has them: `..` and `^` are
+/// right associative and `^` binds tighter than a unary operator on its left.
+fn binary_priority(kind: T) -> Option<(u8, u8)> {
     Some(match kind {
-        T::Or => 0,
-        T::And => 1,
-        T::Gt | T::Lt | T::Ge | T::Le | T::Ne | T::Eq => 2,
-        T::BitOr => 3,
-        T::BitTilde => 4,
-        T::BitAnd => 5,
-        T::BitLtLt | T::BitRtRt => 6,
-        T::Concat => 7,
-        T::Plus | T::Minus => 8,
-        T::Mult | T::Div | T::DoubleDiv | T::Mod => 9,
-        T::Exp => EXPONENT,
+        T::Or => (1, 1),
+        T::And => (2, 2),
+        T::Gt | T::Lt | T::Ge | T::Le | T::Ne | T::Eq => (3, 3),
+        T::BitOr => (4, 4),
+        T::BitTilde => (5, 5),
+        T::BitAnd => (6, 6),
+        T::BitLtLt | T::BitRtRt => (7, 7),
+        T::Concat => (9, 8),
+        T::Plus | T::Minus => (10, 10),
+        T::Mult | T::Div | T::DoubleDiv | T::Mod => (11, 11),
+        T::Exp => (14, 13),
         _ => return None,
     })
 }
 
 impl Tree {
     pub fn parse(src: &str) -> Tree {
-        let tokens = lex(src);
+        Tree::of(src, Rc::new(lex(src)))
+    }
+
+    /// The tree of `src`, whose tokens are `tokens`.
+    pub fn of(src: &str, tokens: Rc<Tokens>) -> Tree {
         let (nodes, errors) = {
             let mut parser = Parser { b: Builder::new(src, &tokens), depth: 0 };
             parser.file();
@@ -578,13 +585,7 @@ impl Parser<'_> {
     }
 
     fn expr(&mut self) -> Option<Done> {
-        if self.depth >= MAX_DEPTH {
-            return self.swallow();
-        }
-        self.depth += 1;
-        let expr = self.binary(0);
-        self.depth -= 1;
-        expr
+        self.subexpr(0)
     }
 
     fn missing_operand(&mut self) {
@@ -592,54 +593,55 @@ impl Parser<'_> {
         self.b.fail(m, "Expression expected");
     }
 
-    /// Operators of the levels `min` and above, each level left associative. `max` is the level the
-    /// chain is at: once an operator of a level was taken, the tighter levels are closed.
-    fn binary(&mut self, min: u8) -> Option<Done> {
-        let mut left = self.unary()?;
-        let mut max = EXPONENT;
-        while let Some(level) = self.b.tok().and_then(binary_level) {
+    fn nested(&mut self, limit: u8) -> Option<Done> {
+        if self.depth >= MAX_DEPTH {
+            return self.swallow();
+        }
+        self.depth += 1;
+        let expr = self.subexpr(limit);
+        self.depth -= 1;
+        expr
+    }
+
+    /// An operand and the binary operators that bind tighter than `limit`.
+    fn subexpr(&mut self, limit: u8) -> Option<Done> {
+        if self.depth >= MAX_DEPTH {
+            return self.swallow();
+        }
+        let mut left = if matches!(self.b.tok(), Some(T::Not | T::GetN | T::Minus | T::BitTilde)) {
+            let m = self.b.mark();
+            let op = self.b.mark();
+            self.b.advance();
+            self.b.done(op, N::UnaryOp);
+            if self.nested(UNARY_PRIORITY).is_none() {
+                self.missing_operand();
+            }
+            self.b.done(m, N::UnaryExpr)
+        } else {
+            self.depth += 1;
+            let value = self.primary(true).or_else(|| self.closure());
+            self.depth -= 1;
+            value?
+        };
+        // After an operator that lacks its right operand, only looser operators carry on.
+        let mut ceiling = u8::MAX;
+        while let Some((left_priority, right_priority)) = self.b.tok().and_then(binary_priority) {
             // `x++` is not an addition: the statement parser reports it.
-            if level < min || level > max || self.is_increment() {
+            if left_priority <= limit || left_priority >= ceiling || self.is_increment() {
                 break;
             }
             let op = self.b.mark();
             self.b.advance();
             self.b.done(op, N::BinaryOp);
-            let right = if level == EXPONENT { self.unary() } else { self.binary(level + 1) };
+            let right = self.nested(right_priority);
             if right.is_none() {
                 self.missing_operand();
+                ceiling = left_priority;
             }
             let m = self.b.precede(left);
             left = self.b.done(m, N::BinaryExpr);
-            max = level;
-            if right.is_none() {
-                if level == 0 {
-                    break;
-                }
-                max = level - 1;
-            }
         }
         Some(left)
-    }
-
-    fn unary(&mut self) -> Option<Done> {
-        if !matches!(self.b.tok(), Some(T::Not | T::GetN | T::Minus | T::BitTilde)) {
-            return self.primary(true).or_else(|| self.closure());
-        }
-        if self.depth >= MAX_DEPTH {
-            return self.swallow();
-        }
-        let m = self.b.mark();
-        let op = self.b.mark();
-        self.b.advance();
-        self.b.done(op, N::UnaryOp);
-        self.depth += 1;
-        let operand = self.unary();
-        self.depth -= 1;
-        if operand.is_none() {
-            self.missing_operand();
-        }
-        Some(self.b.done(m, N::UnaryExpr))
     }
 
     fn closure(&mut self) -> Option<Done> {

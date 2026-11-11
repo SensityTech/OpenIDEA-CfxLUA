@@ -232,25 +232,54 @@ fn a_broken_statement_stays_inside_its_block() {
     assert_eq!(top[0].children_of(N::Block).count(), 2);
 }
 
-#[test]
-fn operators_bind_like_intellij() {
-    let src = "x = a or b and c < d | e ~ f & g << h .. i + j * k ^ -l";
-    let tree = Tree::parse(src);
-    assert!(!tree.has_errors());
-    let mut node = find(tree.root(src), N::BinaryExpr);
-    let mut ops = Vec::new();
-    loop {
-        ops.push(node.child(N::BinaryOp).map(Node::text).unwrap_or(""));
-        match node.exprs().nth(1) {
-            Some(right) if right.is(N::BinaryExpr) => node = right,
-            _ => break,
-        }
+fn shape(node: Node) -> String {
+    let operator = |kind: N| node.child(kind).map_or("", Node::code);
+    let operands: Vec<String> = node.exprs().map(shape).collect();
+    match node.kind() {
+        N::BinaryExpr => format!("({} {} {})", operands[0], operator(N::BinaryOp), operands.get(1).map_or("?", |s| s)),
+        N::UnaryExpr => format!("({} {})", operator(N::UnaryOp), operands.first().map_or("?", |s| s)),
+        _ => node.code().to_owned(),
     }
-    assert_eq!(ops, ["or", "and", "<", "|", "~", "&", "<<", "..", "+", "*", "^"]);
-    let src = "x = 1 - 2 - 3";
+}
+
+fn value_shape(src: &str) -> String {
     let tree = Tree::parse(src);
-    let outer = find(tree.root(src), N::BinaryExpr);
-    assert_eq!(outer.exprs().next().map(Node::text), Some("1 - 2"));
+    let list = find(tree.root(src), N::ExprList);
+    shape(list.expr().expect("a value"))
+}
+
+#[test]
+fn operators_bind_like_lua() {
+    assert_eq!(
+        value_shape("x = a or b and c < d | e ~ f & g << h .. i + j * k ^ -l"),
+        "(a or (b and (c < (d | (e ~ (f & (g << (h .. (i + (j * (k ^ (- l))))))))))))"
+    );
+    assert_eq!(value_shape("x = 1 - 2 - 3"), "((1 - 2) - 3)");
+    assert_eq!(value_shape("x = a .. b .. c"), "(a .. (b .. c))");
+    assert_eq!(value_shape("x = 2 ^ 3 ^ 2"), "(2 ^ (3 ^ 2))");
+    assert_eq!(value_shape("x = -y ^ 2"), "(- (y ^ 2))");
+    assert_eq!(value_shape("x = not a == b"), "((not a) == b)");
+    assert_eq!(value_shape("x = a * b + c * d"), "((a * b) + (c * d))");
+    assert_eq!(value_shape("x = a + b * c + d"), "((a + (b * c)) + d)");
+    assert_eq!(value_shape("x = #t + 1"), "((# t) + 1)");
+}
+
+#[test]
+fn a_missing_operand_keeps_the_looser_operators() {
+    let src = "x = a * or b";
+    let tree = Tree::parse(src);
+    assert_eq!(errors(&tree, src), ["Expression expected"]);
+    assert_eq!(value_shape(src), "((a * ?) or b)");
+}
+
+#[test]
+fn a_long_chain_of_operators_parses() {
+    let src = format!("x = 1{}", " + 1".repeat(20_000));
+    let tree = Tree::parse(&src);
+    assert!(!tree.has_errors());
+    assert_eq!(tree.root(&src).descendants().filter(|node| node.is(N::BinaryExpr)).count(), 20_000);
+    let src = format!("x = a{}", " .. a".repeat(150));
+    assert!(!Tree::parse(&src).has_errors());
 }
 
 #[test]
@@ -274,6 +303,8 @@ fn deep_nesting_is_reported_not_overflowed() {
         format!("{}x = 1", "if a then ".repeat(5000)),
         format!("x = {}1{}", "f(".repeat(5000), ")".repeat(5000)),
         format!("x = {}1{}", "function() return ".repeat(5000), " end".repeat(5000)),
+        format!("x = a{}", " .. a".repeat(5000)),
+        format!("x = a{}", " ^ a".repeat(5000)),
     ];
     for src in cases {
         let head = src[..20].to_owned();

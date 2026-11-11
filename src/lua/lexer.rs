@@ -1,3 +1,5 @@
+use super::token::{T, Tokens, lex, quoted_end};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tok {
     Name,
@@ -188,134 +190,103 @@ pub fn is_keyword(s: &str) -> bool {
     KEYWORDS.contains(&s)
 }
 
-fn long_bracket(bytes: &[u8], at: usize) -> Option<usize> {
-    if bytes.get(at) != Some(&b'[') {
-        return None;
+fn operators(src: &str, from: usize, to: usize, out: &mut Vec<Token>) {
+    let mut i = from;
+    while i < to {
+        let (kind, len) = match OPS.iter().find(|op| src[i..to].starts_with(*op)) {
+            Some(op) => (Tok::Op, op.len()),
+            // One whole character (non-ASCII identifiers are not Lua).
+            None => (Tok::Unknown, src[i..].chars().next().map_or(1, char::len_utf8)),
+        };
+        out.push(Token { kind, start: i, end: (i + len).min(to) });
+        i += len;
     }
-    let mut i = at + 1;
-    while bytes.get(i) == Some(&b'=') {
-        i += 1;
-    }
-    (bytes.get(i) == Some(&b'[')).then_some(i - at - 1)
 }
 
-fn long_end(src: &str, from: usize, level: usize) -> usize {
-    let close = format!("]{}]", "=".repeat(level));
-    src[from..].find(&close).map_or(src.len(), |i| from + i + close.len())
+fn doc_lines(src: &str, from: usize, to: usize, out: &mut Vec<Token>) {
+    let mut start = from;
+    for line in src[from..to].split_inclusive('\n') {
+        let end = start + line.len();
+        let text = line.trim_end_matches(['\r', '\n']);
+        let indent = text.len() - text.trim_start_matches([' ', '\t', '\x0c']).len();
+        out.push(Token { kind: Tok::LineComment, start: start + indent, end: start + text.len() });
+        start = end;
+    }
 }
 
-pub fn tokenize(src: &str) -> Vec<Token> {
+/// The tokens the features read, white space left out, and for each token of `fine` the index of the
+/// one that holds it here (of the next one for white space).
+pub fn coarse(src: &str, fine: &Tokens) -> (Vec<Token>, Vec<u32>) {
     let bytes = src.as_bytes();
-    let mut out = Vec::with_capacity(src.len() / 4);
+    let mut out: Vec<Token> = Vec::with_capacity(fine.len() / 2 + 1);
+    let mut map: Vec<u32> = Vec::with_capacity(fine.len() + 1);
     let mut i = 0;
-    while i < bytes.len() {
-        let c = bytes[i];
-        let start = i;
-        let kind = match c {
-            b' ' | b'\t' | b'\r' | b'\n' | 0x0b | 0x0c => {
-                i += 1;
+    while i < fine.len() {
+        let (kind, start, end) = (fine.kind(i), fine.start(i), fine.end(i));
+        map.push(out.len() as u32);
+        i += 1;
+        let coarse = match kind {
+            T::Whitespace => continue,
+            T::ShortComment | T::Region | T::EndRegion => Tok::LineComment,
+            T::DocComment => {
+                doc_lines(src, start, end, &mut out);
                 continue;
             }
-            b'-' if bytes.get(i + 1) == Some(&b'-') => {
-                if let Some(level) = long_bracket(bytes, i + 2) {
-                    i = long_end(src, i + 2 + level + 2, level);
-                    Tok::BlockComment
-                } else {
-                    i = src[i..].find('\n').map_or(src.len(), |n| i + n);
-                    Tok::LineComment
-                }
-            }
-            b'/' if bytes.get(i + 1) == Some(&b'*') => {
-                i = src[i + 2..].find("*/").map_or(src.len(), |n| i + 2 + n + 2);
-                Tok::CComment
-            }
-            b'[' if long_bracket(bytes, i).is_some() => {
-                let level = long_bracket(bytes, i).unwrap_or(0);
-                i = long_end(src, i + level + 2, level);
-                Tok::LongStr
-            }
-            b'\'' | b'"' | b'`' => {
-                i += 1;
-                let mut closed = false;
-                while i < bytes.len() {
-                    match bytes[i] {
-                        b'\\' => {
-                            i += match bytes.get(i + 1) {
-                                Some(b'\r') if bytes.get(i + 2) == Some(&b'\n') => 3,
-                                Some(b'z') => {
-                                    // `\z` skips the whitespace after it, newlines included.
-                                    let mut j = i + 2;
-                                    while j < bytes.len() && bytes[j].is_ascii_whitespace() {
-                                        j += 1;
-                                    }
-                                    j - i
-                                }
-                                _ => 2,
-                            };
-                        }
-                        b'\n' => break,
-                        b if b == c => {
-                            i += 1;
-                            closed = true;
-                            break;
-                        }
-                        _ => i += 1,
-                    }
-                }
-                i = i.min(bytes.len());
-                if c == b'`' { Tok::Hash { closed } } else { Tok::Str { closed } }
-            }
-            b'0'..=b'9' => {
-                i = number_end(bytes, i);
-                Tok::Number
-            }
-            b'.' if bytes.get(i + 1).is_some_and(u8::is_ascii_digit) => {
-                i = number_end(bytes, i);
-                Tok::Number
-            }
-            b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
-                while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+            T::BlockComment if bytes[start] == b'/' => Tok::CComment,
+            T::BlockComment => Tok::BlockComment,
+            T::Shebang => {
+                let mut end = end;
+                if i < fine.len() && fine.kind(i) == T::ShebangContent {
+                    map.push(out.len() as u32);
+                    end = fine.end(i);
                     i += 1;
                 }
-                if is_keyword(&src[start..i]) { Tok::Keyword } else { Tok::Name }
+                out.push(Token { kind: Tok::LineComment, start, end });
+                continue;
             }
+            T::ShebangContent => Tok::LineComment,
+            T::Id => Tok::Name,
+            T::Number => Tok::Number,
+            T::String if bytes[start] == b'[' => Tok::LongStr,
+            T::String => Tok::Str { closed: quoted_end(bytes, start).1 },
+            T::HashString => Tok::Hash { closed: quoted_end(bytes, start).1 },
+            _ if kind.is_keyword() => Tok::Keyword,
             _ => {
-                if let Some(op) = OPS.iter().find(|op| src[i..].starts_with(*op)) {
-                    i += op.len();
+                let glued = |j: usize| j < fine.len() && !fine.kind(j).is_trivia() && operator_like(fine.kind(j));
+                if kind != T::BadCharacter && !glued(i) {
                     Tok::Op
                 } else {
-                    // One whole character (non-ASCII identifiers are not Lua).
-                    i += src[i..].chars().next().map_or(1, char::len_utf8);
-                    Tok::Unknown
+                    let first = out.len();
+                    let mut last = i;
+                    while glued(last) {
+                        last += 1;
+                    }
+                    operators(src, start, fine.end(last - 1), &mut out);
+                    let mut at = first;
+                    for j in i..last {
+                        while at + 1 < out.len() && out[at].end <= fine.start(j) {
+                            at += 1;
+                        }
+                        map.push(at as u32);
+                    }
+                    i = last;
+                    continue;
                 }
             }
         };
-        out.push(Token { kind, start, end: i.min(src.len()) });
+        out.push(Token { kind: coarse, start, end });
     }
-    out
+    map.push(out.len() as u32);
+    (out, map)
 }
 
-fn number_end(bytes: &[u8], mut i: usize) -> usize {
-    let hex = bytes[i] == b'0' && matches!(bytes.get(i + 1), Some(b'x' | b'X'));
-    if hex {
-        i += 2;
-    }
-    while i < bytes.len() {
-        let b = bytes[i];
-        let exp = if hex { matches!(b, b'p' | b'P') } else { matches!(b, b'e' | b'E') };
-        if exp && matches!(bytes.get(i + 1), Some(b'+' | b'-')) {
-            i += 2;
-        } else if b.is_ascii_alphanumeric() || b == b'.' || b == b'_' {
-            // `1..2` is a number followed by `..`.
-            if b == b'.' && bytes.get(i + 1) == Some(&b'.') {
-                break;
-            }
-            i += 1;
-        } else {
-            break;
-        }
-    }
-    i
+fn operator_like(kind: T) -> bool {
+    !matches!(kind, T::Id | T::Number | T::String | T::HashString | T::Shebang | T::ShebangContent)
+        && !kind.is_keyword()
+}
+
+pub fn tokenize(src: &str) -> Vec<Token> {
+    coarse(src, &lex(src)).0
 }
 
 pub fn parse_int(text: &str) -> Option<i64> {

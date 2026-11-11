@@ -1,4 +1,5 @@
 use super::token::{T, Tokens};
+use std::rc::Rc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u8)]
@@ -155,7 +156,7 @@ pub(super) struct NodeData {
 }
 
 pub struct Tree {
-    pub(super) tokens: Tokens,
+    pub(super) tokens: Rc<Tokens>,
     pub(super) nodes: Vec<NodeData>,
     pub(super) errors: Vec<(u32, Box<str>)>,
 }
