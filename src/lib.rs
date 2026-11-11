@@ -1224,9 +1224,44 @@ mod tests {
         let files = std::env::var("CFXLUA_FILES").expect("CFXLUA_FILES");
         for (n, file) in files.split(';').filter(|file| !file.is_empty()).enumerate() {
             let text = std::fs::read_to_string(file).expect("a readable file").replace("\r\n", "\n");
-            let typed = format!("{text}\nGetEnt");
-            let at = Position::new(typed.split('\n').count() as u32 - 1, 6);
+            let typed = format!("GetEnt\n{text}");
+            let at = Position::new(0, 6);
+            eprintln!("{} bytes, what reading the file costs, each stage after the ones above it:", typed.len());
+            let stage = |what: &str, run: &mut dyn FnMut()| {
+                let start = std::time::Instant::now();
+                run();
+                eprintln!("  {what}: {:?}", start.elapsed());
+            };
+            let mut fine = None;
+            stage("lexer", &mut || fine = Some(lua::token::lex(&typed)));
+            stage("tokens of the features", &mut || _ = lua::lexer::coarse(&typed, fine.as_ref().unwrap()));
+            let mut src = None;
+            stage("source (lexer, tokens, brackets, lines)", &mut || src = Some(Source::new(&typed)));
+            let src = src.unwrap();
+            stage("tree", &mut || _ = src.tree());
+            stage("scopes", &mut || _ = src.scopes());
+            stage("documentation comments", &mut || _ = src.docs());
+            stage("events model", &mut || _ = events::ast::parse(&src));
+            stage("perf model", &mut || _ = perf::ast::parse(&src));
+            let ws = kit.workspace_for(&path);
+            let ws = &kit.workspaces[ws];
+            for (name, feature) in FEATURE_NAMES.iter().zip(all_features()) {
+                stage(&format!("index {name}"), &mut || feature.index_file(ws, &slash(&path), FileKind::Lua, &src));
+            }
             let doc = Document { path: path.clone(), language: "lua".into(), version: (n + 2) as _, text: typed };
+            eprintln!("{} bytes, what completing the name costs, feature by feature:", doc.text.len());
+            let start = std::time::Instant::now();
+            let ws = kit.prepare(&doc).expect("a document the plugin reads");
+            eprintln!("  document: {:?}", start.elapsed());
+            kit.with_ctx(ws, |cx, features| {
+                let at = cx.doc.offset(at);
+                for (name, feature) in FEATURE_NAMES.iter().zip(features) {
+                    let start = std::time::Instant::now();
+                    let count = feature.completion(cx, at, None).len();
+                    eprintln!("  {name}: {count} in {:?}", start.elapsed());
+                }
+            });
+            kit.last = None;
             eprintln!("{} bytes, what the editor asks after an edit, in its order:", doc.text.len());
             let mut timed = |what: &str, run: &mut dyn FnMut(&mut DevKit) -> usize| {
                 let start = std::time::Instant::now();
