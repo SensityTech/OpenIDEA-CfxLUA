@@ -77,6 +77,32 @@ impl Fixture {
     }
 }
 
+/// The text files under `root`, by their path from it: a project on the disk, for a measurement.
+pub fn files_under(root: &std::path::Path) -> Vec<(String, String)> {
+    fn walk(dir: &std::path::Path, root: &std::path::Path, out: &mut Vec<(String, String)>) {
+        for entry in std::fs::read_dir(dir).unwrap().flatten() {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') || name == "node_modules" {
+                continue;
+            }
+            if path.is_dir() {
+                walk(&path, root, out);
+            } else if let Ok(text) = std::fs::read_to_string(&path) {
+                out.push((crate::text::slash(&path.strip_prefix(root).unwrap().to_string_lossy()), text));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(root, root, &mut out);
+    out
+}
+
+/// The project a measurement is asked to read: `CFXLUA_PROJECT`.
+pub fn real_project() -> Vec<(String, String)> {
+    files_under(std::path::Path::new(&std::env::var("CFXLUA_PROJECT").expect("CFXLUA_PROJECT")))
+}
+
 pub fn language_of(path: &str) -> &'static str {
     let ext = path.rsplit_once('.').map_or("", |(_, e)| e).to_ascii_lowercase();
     match ext.as_str() {

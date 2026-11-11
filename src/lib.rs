@@ -1216,17 +1216,6 @@ mod tests {
         }
     }
 
-    fn demo_files(dir: &std::path::Path, root: &std::path::Path, out: &mut Vec<(String, String)>) {
-        for entry in std::fs::read_dir(dir).unwrap().flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                demo_files(&path, root, out);
-            } else if let Ok(text) = std::fs::read_to_string(&path) {
-                out.push((slash(&path.strip_prefix(root).unwrap().to_string_lossy()), text));
-            }
-        }
-    }
-
     #[test]
     #[ignore = "measurement: CFXLUA_FILES=<file>;<file> cargo test --release --lib edit_cost_of_real_files -- --ignored --nocapture"]
     fn edit_cost_of_real_files() {
@@ -1257,9 +1246,7 @@ mod tests {
     #[test]
     #[ignore = "measurement: CFXLUA_PROJECT=<dir> cargo test --release --lib edit_cost_in_a_real_project -- --ignored --nocapture"]
     fn edit_cost_in_a_real_project() {
-        let root = std::path::PathBuf::from(std::env::var("CFXLUA_PROJECT").expect("CFXLUA_PROJECT"));
-        let mut all = Vec::new();
-        demo_files(&root, &root, &mut all);
+        let all = testing::real_project();
         let host = openidea_plugin::mock::MockHost::install();
         for (rel, text) in &all {
             host.add_file(rel, text);
@@ -1318,24 +1305,7 @@ mod tests {
     #[test]
     #[ignore = "measurement: CFXLUA_PROJECT=<dir> cargo test --release --lib index_cost_of_a_real_project -- --ignored --nocapture"]
     fn index_cost_of_a_real_project() {
-        fn walk(dir: &std::path::Path, root: &std::path::Path, out: &mut Vec<(String, String)>) {
-            for entry in std::fs::read_dir(dir).unwrap().flatten() {
-                let path = entry.path();
-                let name = entry.file_name().to_string_lossy().into_owned();
-                if name.starts_with('.') || name == "node_modules" {
-                    continue;
-                }
-                if path.is_dir() {
-                    walk(&path, root, out);
-                } else if let Ok(text) = std::fs::read_to_string(&path) {
-                    out.push((slash(&path.strip_prefix(root).unwrap().to_string_lossy()), text));
-                }
-            }
-        }
-        let root = std::path::PathBuf::from(std::env::var("CFXLUA_PROJECT").expect("CFXLUA_PROJECT"));
-        let mut all = Vec::new();
-        walk(&root, &root, &mut all);
-        let files: Vec<(String, String)> = all
+        let files: Vec<(String, String)> = testing::real_project()
             .into_iter()
             .filter(|(p, t)| project::file_kind(p) != FileKind::Other && t.len() <= workspace::MAX_FILE)
             .collect();
@@ -1419,9 +1389,8 @@ mod tests {
     #[ignore = "measurement: cargo test --release --lib index_cost_of_a_large_project -- --ignored --nocapture"]
     fn index_cost_of_a_large_project() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let mut lua = Vec::new();
-        demo_files(&root.join("data/runtime"), &root.join("data/runtime"), &mut lua);
-        demo_files(&root.join("examples"), &root.join("examples"), &mut lua);
+        let mut lua = testing::files_under(&root.join("data/runtime"));
+        lua.extend(testing::files_under(&root.join("examples")));
         let bodies: Vec<String> = lua.into_iter().filter(|(p, _)| p.ends_with(".lua")).map(|(_, t)| t).collect();
         let mut files = Vec::new();
         for r in 0..150 {
@@ -1520,8 +1489,7 @@ mod tests {
     #[test]
     fn demo_resources_end_to_end() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples");
-        let mut files = Vec::new();
-        demo_files(&root, &root, &mut files);
+        let files = testing::files_under(&root);
         let refs: Vec<(&str, &str)> = files.iter().map(|(p, t)| (p.as_str(), t.as_str())).collect();
         let ws = Workspace::from_files("/demo", &refs);
         let features = all_features();
