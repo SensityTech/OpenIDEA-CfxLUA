@@ -319,3 +319,90 @@ fn the_structure_lists_declarations_with_what_they_hold() {
         ]
     );
 }
+
+#[test]
+#[ignore = "measurement: CFXLUA_FILES=<file>;<file> cargo test --release --lib editor_cost_of_real_files -- --ignored --nocapture"]
+fn editor_cost_of_real_files() {
+    let files = std::env::var("CFXLUA_FILES").expect("CFXLUA_FILES");
+    for path in files.split(';').filter(|path| !path.is_empty()) {
+        let text = std::fs::read_to_string(path).expect("a readable file");
+        let longest = text.lines().map(str::len).max().unwrap_or(0);
+        let fx = fixture(&text, "");
+        let feature = EditorFeature::default();
+        fx.index(&feature);
+        let timed = |what: &str, run: &dyn Fn() -> usize| {
+            let start = std::time::Instant::now();
+            let count = run();
+            eprintln!("  {what}: {count} in {:?}", start.elapsed());
+        };
+        eprintln!("{} bytes, {} lines, longest line {longest} bytes", text.len(), text.lines().count());
+        timed("parse (nodes)", &|| crate::lua::tree::Tree::parse(&text).len());
+        let doc = fx.doc(CLIENT);
+        let cx = fx.cx(&doc);
+        timed("tree + scopes (declarations)", &|| doc.src.scopes().decls().len());
+        timed("semantic tokens", &|| feature.semantic_tokens(&cx).len());
+        let tokens = feature.semantic_tokens(&cx);
+        timed("their ranges", &|| {
+            tokens.iter().filter(|token| doc.range(token.start, token.end).end.character < u32::MAX).count()
+        });
+        timed("folds", &|| feature.folding(&cx).len());
+        timed("structure", &|| feature.symbols(&cx).len());
+        timed("syntax problems", &|| crate::syntax::check(&doc.src).len());
+    }
+}
+
+#[test]
+#[ignore = "measurement: CFXLUA_PROJECT=<dir> cargo test --release --lib syntax_problems_of_a_real_project -- --ignored --nocapture"]
+fn syntax_problems_of_a_real_project() {
+    fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') || name == "node_modules" {
+                continue;
+            }
+            if path.is_dir() {
+                walk(&path, out);
+            } else if name.ends_with(".lua") {
+                out.push(path);
+            }
+        }
+    }
+    let root = std::path::PathBuf::from(std::env::var("CFXLUA_PROJECT").expect("CFXLUA_PROJECT"));
+    let mut paths = Vec::new();
+    walk(&root, &mut paths);
+    let (mut files, mut flagged) = (0, 0);
+    let mut by_message: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    for path in &paths {
+        let Ok(text) = std::fs::read_to_string(path) else { continue };
+        if text.len() > crate::workspace::MAX_FILE || crate::project::is_escrowed(&text) {
+            continue;
+        }
+        files += 1;
+        let src = source(&text);
+        let problems: Vec<_> =
+            crate::syntax::check(&src).into_iter().filter(|p| p.code == crate::syntax::errors::CODE).collect();
+        if problems.is_empty() {
+            continue;
+        }
+        flagged += 1;
+        if std::env::var("CFXLUA_SHAPES").is_ok() {
+            // The kinds of the tokens around each problem, never their text.
+            let tokens = src.tree().tokens();
+            for problem in &problems {
+                let at = tokens.at(problem.start).unwrap_or(0);
+                let around: Vec<&str> = (at.saturating_sub(6)..(at + 8).min(tokens.len()))
+                    .filter(|i| tokens.kind(*i) != crate::lua::token::T::Whitespace)
+                    .map(|i| tokens.kind(i).name())
+                    .collect();
+                eprintln!("  line {}: {}", src.lines.line_of(problem.start) + 1, around.join(" "));
+            }
+        }
+        for problem in &problems {
+            // The symbol of an "Unexpected symbol" is a piece of the file: only the kind of error is kept.
+            let message = problem.message.split('\'').next().unwrap_or_default().trim().to_owned();
+            *by_message.entry(message).or_default() += 1;
+        }
+    }
+    eprintln!("{files} files, {flagged} with syntax problems: {by_message:?}");
+}
