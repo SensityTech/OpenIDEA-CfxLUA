@@ -28,6 +28,7 @@ kinds = [
     "semantic-tokens",
     "folding",
     "document-symbols",
+    "document-highlights",
 ]
 languages = ["lua"]
 

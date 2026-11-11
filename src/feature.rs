@@ -182,4 +182,8 @@ pub trait Feature {
     fn symbols(&self, _cx: &Ctx) -> Vec<crate::editor::symbols::Symbol> {
         Vec::new()
     }
+
+    fn highlights(&self, _cx: &Ctx, _at: usize) -> Vec<crate::editor::highlights::Highlight> {
+        Vec::new()
+    }
 }

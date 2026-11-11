@@ -186,6 +186,42 @@ fn blocks_tables_comments_and_regions_fold() {
     );
 }
 
+/// The highlighted texts with the caret before the `nth` occurrence of `needle`, with their access.
+fn highlighted(text: &str, needle: &str, nth: usize) -> Vec<String> {
+    let src = source(text);
+    let at = text.match_indices(needle).nth(nth).map(|(at, _)| at).expect("needle");
+    let line = |at: usize| text[..at].matches('\n').count() + 1;
+    super::highlights::highlights(&src, at)
+        .iter()
+        .map(|h| format!("{}@{} {:?}", &text[h.start..h.end], line(h.start), h.access))
+        .collect()
+}
+
+#[test]
+fn the_uses_of_a_name_are_highlighted_with_their_access() {
+    let text = "local n = 1\nn = n + 1\nfunction f(n) return n end\nprint(n)";
+    assert_eq!(highlighted(text, "n +", 0), ["n@1 Write", "n@2 Write", "n@2 Read", "n@4 Read"]);
+    assert_eq!(highlighted(text, "n)", 0), ["n@3 Write", "n@3 Read"]);
+    let text = "total = 0\nfunction add() total += 1 end\nprint(total, other)";
+    assert_eq!(highlighted(text, "total", 2), ["total@1 Write", "total@2 Write", "total@3 Read"]);
+}
+
+#[test]
+fn members_are_matched_on_the_object_they_are_read_from() {
+    let text =
+        "Config.debug = true\nif Config.debug then print(Other.debug, Config?.debug) end\nfunction Config.debug() end";
+    assert_eq!(highlighted(text, "debug", 1), ["debug@1 Write", "debug@2 Read", "debug@2 Read", "debug@3 Write"]);
+}
+
+#[test]
+fn return_break_and_operators() {
+    let text = "function f()\n  if a then return 1 end\n  local g = function() return 2 end\n  return 3\nend";
+    assert_eq!(highlighted(text, "return", 2), ["return 1@2 Text", "return 3@4 Text"]);
+    let text = "while a do\n  for i = 1, 2 do break end\nend";
+    assert_eq!(highlighted(text, "break", 0), ["for@2 Text", "end@2 Text", "break@2 Text"]);
+    assert_eq!(highlighted("x = a + b * c", "+", 0), ["a + b * c@1 Text"]);
+}
+
 /// The outline as `depth name detail kind`.
 fn outlined(text: &str) -> Vec<String> {
     let symbols = super::symbols::symbols(&source(text));

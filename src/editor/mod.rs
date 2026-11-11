@@ -1,4 +1,5 @@
 pub mod folding;
+pub mod highlights;
 pub mod semantic;
 pub mod symbols;
 
@@ -98,5 +99,9 @@ impl Feature for EditorFeature {
 
     fn symbols(&self, cx: &Ctx) -> Vec<symbols::Symbol> {
         if Self::applies(cx) { symbols::symbols(&cx.doc.src) } else { Vec::new() }
+    }
+
+    fn highlights(&self, cx: &Ctx, at: usize) -> Vec<highlights::Highlight> {
+        if Self::applies(cx) { highlights::highlights(&cx.doc.src, at) } else { Vec::new() }
     }
 }

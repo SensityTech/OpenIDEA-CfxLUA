@@ -894,6 +894,31 @@ impl LanguageFeatures for DevKit {
         });
         symbols.unwrap_or_default()
     }
+
+    fn document_highlights(
+        &mut self,
+        d: &Document,
+        at: Position,
+    ) -> Vec<openidea_plugin::language_features::Highlight> {
+        let highlights = self.prepare(d).and_then(|ws| {
+            self.with_ctx(ws, |cx, features| {
+                let at = cx.doc.offset(at);
+                let highlights = features.iter().flat_map(|f| f.highlights(cx, at));
+                highlights
+                    .map(|highlight| openidea_plugin::language_features::Highlight {
+                        range: cx.doc.range(highlight.start, highlight.end),
+                        kind: match highlight.access {
+                            editor::highlights::Access::Text => "text",
+                            editor::highlights::Access::Read => "read",
+                            editor::highlights::Access::Write => "write",
+                        }
+                        .to_owned(),
+                    })
+                    .collect::<Vec<_>>()
+            })
+        });
+        highlights.unwrap_or_default()
+    }
 }
 
 register_plugin!(DevKit, providers, views, language_features);
