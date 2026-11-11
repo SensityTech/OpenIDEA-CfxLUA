@@ -27,8 +27,8 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   A native of several games now has one signature in the definitions (parameters some games lack are optional), and
   this plugin leaves the natives and runtime API lua-language-server loads to it. The file's header says which games
   and runtime parts it holds; this plugin still completes the natives of a game it lacks.
-- **Natives listed twice again after a restart.** OpenIDEA does not list hidden folders such as `.cfxlua/`, so the
-  plugin only knew the definitions once their file was saved. It now reads them by name when it starts (the files the
+- **Natives listed twice again after a restart.** OpenIDEA does not list a `.cfxlua/` that Git ignores (before
+  0.1.39, any hidden folder), so the plugin only knew the definitions once their file was saved. It now reads them by name when it starts (the files the
   command wrote, and `natives.lua` in each library folder) and after a repository change, and reads `.luarc.json`
   again when you switch editor, so an edit made outside the IDE is followed.
 - A native of FiveM and RedM could get two parameters of the same name in the definitions (four of them, when both
@@ -39,6 +39,8 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
 
 ### Changed
 
+- **OpenIDEA 0.1.40 or newer is required.** The plugin is built against plugin API 1.4 (it was 1.0); its features are
+  unchanged.
 - The **lua-language-server config (.luarc.json)** template ignores `.cfxlua` as project code (it stays a library)
   and lets completion list up to 1,000 items: lua-language-server stops at 100, which could hide the native you type.
   In an existing `.luarc.json`, add `".cfxlua"` to `workspace.ignoreDir` and `"completion.maxSuggestCount": 1000`.

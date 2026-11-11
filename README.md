@@ -8,7 +8,7 @@
 <p align="center">
   <a href="https://github.com/SensityTech/OpenIDEA-CfxLUA/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/SensityTech/OpenIDEA-CfxLUA/actions/workflows/ci.yml/badge.svg"></a>
   <a href="LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-blue.svg"></a>
-  <a href="https://github.com/l0ng-ai/openidea/tree/main/plugins"><img alt="OpenIDEA plugin API 1.0" src="https://img.shields.io/badge/OpenIDEA%20plugin%20API-1.0-6f42c1.svg"></a>
+  <a href="https://github.com/l0ng-ai/openidea/tree/main/plugins"><img alt="OpenIDEA plugin API 1.4" src="https://img.shields.io/badge/OpenIDEA%20plugin%20API-1.4-6f42c1.svg"></a>
   <img alt="Written in Rust" src="https://img.shields.io/badge/written%20in-Rust-dea584.svg">
 </p>
 
@@ -176,7 +176,7 @@ The tool window follows the IDE theme ([light theme](assets/screenshots/tool-win
 
 | | |
 |---|---|
-| [OpenIDEA](https://github.com/l0ng-ai/openidea/releases/latest) 0.1.37 or newer | The IDE (plugin API 1.0). |
+| [OpenIDEA](https://github.com/l0ng-ai/openidea/releases/latest) 0.1.40 or newer | The IDE (plugin API 1.4). |
 | [lua-language-server](https://luals.github.io/#install) on your `PATH` | OpenIDEA's Lua support: types of your own code, hover, signature help, references. OpenIDEA-CfxLUA feeds it the natives and the runtime API ([see below](#working-with-lua-language-server)). |
 
 Install lua-language-server with `winget install LuaLS.lua-language-server`, `brew install lua-language-server`, your
@@ -208,10 +208,6 @@ the publisher's key, shows *Signed by sensity* and offers each new version as an
 OpenIDEA reads one marketplace at a time and trusts the publishers it lists: while this one is set, a package signed
 by another publisher is refused. Leave the URL empty to go back to OpenIDEA's default marketplace. For the same
 reason, the package file of a release is not signed: OpenIDEA's default marketplace does not list `sensity`.
-
-The marketplace copy is signed on Windows. On Linux and macOS, OpenIDEA computes another digest for the same files
-until [l0ng-ai/openidea#1258](https://github.com/l0ng-ai/openidea/issues/1258) is fixed, and refuses it: install the
-package file there.
 
 ## Getting started
 
@@ -324,19 +320,24 @@ program it found: after an artifacts update, approve it again in **Settings › 
 
 ## Known limitations
 
-OpenIDEA's plugin API is a preview and does not offer everything yet. Where something is missing, the plugin uses
-the closest equivalent:
+The plugin was first written for plugin API 1.0 and does not use everything OpenIDEA 0.1.40 offers yet. Until it
+does, it keeps these equivalents:
 
-| Not available to plugins | Instead |
+| Not done yet | Instead |
 |---|---|
 | Hover / quick documentation popups | Documentation in completion, **CfxLua: Show Documentation**, the tool window |
 | Inlay hints | Hint-level problems carrying the decoded value |
 | Rename and Find Usages | Go to Definition lists every match |
 | Creating files (New Resource) | One **New** template per file |
 | Opening links from the tool window | URLs are shown with a copy button |
-| File icons by side (a plugin's file icons match file names only) | `client.lua`, `cl_*.lua`, `*_client.lua`… (and the server and shared equivalents) get the side icons; a `client/main.lua` keeps the Lua icon, and the status bar shows its side |
 | Opening the tool window from a command | **CfxLua: Show Documentation** shows the entry in the tool window and sums it up in a notification |
 | A plugin icon in **Settings › Plugins** | The generic plugin icon |
+
+OpenIDEA does not offer these to plugins:
+
+| Not available to plugins | Instead |
+|---|---|
+| File icons by side (a plugin's file icons match file names only) | `client.lua`, `cl_*.lua`, `*_client.lua`… (and the server and shared equivalents) get the side icons; a `client/main.lua` keeps the Lua icon, and the status bar shows its side |
 | Merging a plugin's completion with lua-language-server's | Once lua-language-server loads the generated definitions, their natives and runtime API are left to it |
 
 ## Building from source
@@ -350,8 +351,8 @@ scripts/build.sh --pack          # dist/plugin.wasm and dist/sensity.cfxlua-<ver
 ```
 
 On Windows, `scripts\build.ps1 -Pack` does the same, and `scripts\build.ps1 -Link` links the repository folder into
-OpenIDEA for development (then **Settings › Plugins › Reload** after each build). Linking needs an OpenIDEA with plugin
-API 1.0 built with `pnpm tauri build`: `pnpm tauri dev` builds keep their data, linked folders included, apart.
+OpenIDEA for development (then **Settings › Plugins › Reload** after each build). The link is written for the installed
+OpenIDEA: `pnpm tauri dev` builds keep their data, linked folders included, apart.
 
 The plugin is built with the [OpenIDEA plugin SDK](https://github.com/l0ng-ai/openidea/tree/main/sdk/rust/openidea-plugin)
 (see the [plugin documentation](https://github.com/l0ng-ai/openidea/tree/main/plugins)).

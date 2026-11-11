@@ -149,8 +149,10 @@ dependencies = [
 [[package]]
 name = "openidea-plugin"
 version = "0.1.0"
-source = "git+https://github.com/l0ng-ai/openidea?rev=859f63454eed53ae97eb5881d5f076504848a6aa#859f63454eed53ae97eb5881d5f076504848a6aa"
+source = "git+https://github.com/l0ng-ai/openidea?rev=37c2a6048eea89d4f6db645622612358b643862b#37c2a6048eea89d4f6db645622612358b643862b"
 dependencies = [
+ "serde",
+ "serde_json",
  "wit-bindgen",
 ]
 

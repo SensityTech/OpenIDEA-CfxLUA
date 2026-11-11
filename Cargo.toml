@@ -14,9 +14,9 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-# The OpenIDEA plugin SDK (API openidea:plugin@1.0). Not published on crates.io:
-# pinned to the revision of the IDE the plugin is built and tested against.
-openidea-plugin = { git = "https://github.com/l0ng-ai/openidea", rev = "859f63454eed53ae97eb5881d5f076504848a6aa" }
+# The OpenIDEA plugin SDK (API openidea:plugin@1.4). Not published on crates.io:
+# pinned to the revision of OpenIDEA 0.1.40, the release the plugin is built and tested against.
+openidea-plugin = { git = "https://github.com/l0ng-ai/openidea", rev = "37c2a6048eea89d4f6db645622612358b643862b" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }

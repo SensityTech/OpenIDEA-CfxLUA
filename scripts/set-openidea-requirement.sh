@@ -8,17 +8,19 @@ cd "$(dirname "$0")/.."
 
 target="${1:?usage: scripts/set-openidea-requirement.sh source|<version>}"
 repo=https://github.com/l0ng-ai/openidea
+api="$(sed -n 's/^engines\.openidea = "^\([0-9][0-9.]*\)"$/\1/p' plugin.toml)"
+[ -n "$api" ] || { echo "set-openidea-requirement: plugin.toml has no engines.openidea = \"^X.Y\" line" >&2; exit 1; }
 
 if [ "$target" = source ]; then
   rev="$(sed -n 's|^source = "git+https://github.com/l0ng-ai/openidea?rev=\([0-9a-f]*\)#.*|\1|p' Cargo.lock | head -1)"
   [ -n "$rev" ] || { echo "set-openidea-requirement: no OpenIDEA SDK revision in Cargo.lock" >&2; exit 1; }
   short="${rev:0:7}"
-  readme="| [OpenIDEA]($repo) built from source at [\`$short\`]($repo/commit/$rev) | The IDE with plugin API 1.0, which no OpenIDEA release has yet and later revisions may still change. Check out that revision, then \`pnpm install\` and \`pnpm tauri build\` (Rust, Node 22.18+, pnpm). |"
-  contributing="- [OpenIDEA]($repo) built from source at \`$short\` (plugin API 1.0 is in no release yet, and later revisions may change it) to try the plugin."
-  guide="- OpenIDEA built from source at revision \`$short\`: the plugin needs plugin API 1.0, which no OpenIDEA release has yet and later revisions may still change;"
+  readme="| [OpenIDEA]($repo) built from source at [\`$short\`]($repo/commit/$rev) | The IDE with plugin API $api, which no OpenIDEA release has yet and later revisions may still change. Check out that revision, then \`pnpm install\` and \`pnpm tauri build\` (Rust, Node 22.18+, pnpm). |"
+  contributing="- [OpenIDEA]($repo) built from source at \`$short\` (plugin API $api is in no release yet, and later revisions may change it) to try the plugin."
+  guide="- OpenIDEA built from source at revision \`$short\`: the plugin needs plugin API $api, which no OpenIDEA release has yet and later revisions may still change;"
 else
   [[ "$target" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "set-openidea-requirement: $target is not a version" >&2; exit 1; }
-  readme="| [OpenIDEA]($repo/releases/latest) $target or newer | The IDE (plugin API 1.0). |"
+  readme="| [OpenIDEA]($repo/releases/latest) $target or newer | The IDE (plugin API $api). |"
   contributing="- [OpenIDEA]($repo) $target or newer to try the plugin."
   guide="- OpenIDEA $target or newer;"
 fi

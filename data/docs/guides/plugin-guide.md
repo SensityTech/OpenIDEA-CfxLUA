@@ -9,7 +9,7 @@ report. This guide describes what it does and where to find it.
 
 OpenIDEA-CfxLUA needs two things:
 
-- OpenIDEA 0.1.37 or newer;
+- OpenIDEA 0.1.40 or newer;
 - [lua-language-server](https://luals.github.io/#install) on your `PATH` (restart OpenIDEA after installing it).
 
 The plugin brings the Cfx.re knowledge; lua-language-server brings the Lua engine (see *Working with
@@ -89,7 +89,7 @@ The **CfxLua** tool window (its button is on the left tool window bar) has seven
 
 **Insert** buttons put a call, an event handler, a directive or an example at the caret of the editor you were in.
 **Copy** buttons copy a name, a signature, a hash or an example. Online documentation links show their address with a
-copy button, because the tool window cannot open a browser. **A-** / **A+** change the reading size.
+copy button: the plugin does not open the browser yet. **A-** / **A+** change the reading size.
 
 **CfxLua: Show Documentation** (editor context menu, Find Action, or a key you bind in **Settings › Keymap**) shows
 in the tool window the native, built-in event, backtick hash literal or manifest directive at the caret, and sums it
