@@ -964,6 +964,22 @@ const _: () = {
 mod tests {
     use super::*;
 
+    const FEATURE_NAMES: [&str; 13] = [
+        "natives",
+        "runtime",
+        "manifest",
+        "statebags",
+        "events",
+        "nui",
+        "values",
+        "coords",
+        "perf",
+        "syntax",
+        "editor",
+        "escrow",
+        "luals",
+    ];
+
     type Section = (String, Vec<(String, String)>);
 
     fn manifest_sections() -> Vec<Section> {
@@ -1159,6 +1175,33 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "measurement: CFXLUA_FILES=<file>;<file> cargo test --release --lib edit_cost_of_real_files -- --ignored --nocapture"]
+    fn edit_cost_of_real_files() {
+        let host = openidea_plugin::mock::MockHost::install();
+        let (mut kit, path, _) = windows_server_resource(&host);
+        let files = std::env::var("CFXLUA_FILES").expect("CFXLUA_FILES");
+        for (n, file) in files.split(';').filter(|file| !file.is_empty()).enumerate() {
+            let text = std::fs::read_to_string(file).expect("a readable file").replace("\r\n", "\n");
+            let typed = format!("{text}\nGetEnt");
+            let at = Position::new(typed.split('\n').count() as u32 - 1, 6);
+            let doc = Document { path: path.clone(), language: "lua".into(), version: (n + 2) as _, text: typed };
+            eprintln!("{} bytes, what the editor asks after an edit, in its order:", doc.text.len());
+            let mut timed = |what: &str, run: &mut dyn FnMut(&mut DevKit) -> usize| {
+                let start = std::time::Instant::now();
+                let count = run(&mut kit);
+                eprintln!("  {what}: {count} in {:?}", start.elapsed());
+            };
+            timed("completion", &mut |kit| kit.completion(&doc, at, None).len());
+            timed("occurrences", &mut |kit| kit.document_highlights(&doc, at).len());
+            timed("line markers and problems", &mut |kit| kit.line_markers(&doc).len());
+            timed("code actions", &mut |kit| kit.code_actions(&doc, Range::new(at, at)).len());
+            timed("semantic tokens", &mut |kit| kit.semantic_tokens(&doc).len());
+            timed("folding", &mut |kit| kit.folding(&doc).len());
+            timed("structure", &mut |kit| kit.document_symbols(&doc).len());
+        }
+    }
+
+    #[test]
     #[ignore = "measurement: CFXLUA_PROJECT=<dir> cargo test --release --lib index_cost_of_a_real_project -- --ignored --nocapture"]
     fn index_cost_of_a_real_project() {
         fn walk(dir: &std::path::Path, root: &std::path::Path, out: &mut Vec<(String, String)>) {
@@ -1186,8 +1229,8 @@ mod tests {
         let refs: Vec<(&str, &str)> = files.iter().map(|(p, t)| (p.as_str(), t.as_str())).collect();
         let ws = Workspace::from_files("/real", &refs);
         let features = all_features();
-        let names =
-            ["natives", "runtime", "manifest", "statebags", "events", "nui", "values", "coords", "perf", "syntax"];
+        let names = FEATURE_NAMES;
+        assert_eq!(names.len(), features.len(), "one name per feature, in the order of all_features()");
         let mut parse_time = std::time::Duration::ZERO;
         let mut index_time = vec![std::time::Duration::ZERO; features.len()];
         for f in ws.files() {
@@ -1213,6 +1256,18 @@ mod tests {
         let edited = format!("{text}\nlocal typed = 1\n");
         let mut ws = ws;
         ws.set(&path, Some(&edited));
+        let timed = |what: &str, run: &dyn Fn() -> usize| {
+            let start = std::time::Instant::now();
+            let count = run();
+            eprintln!("keystroke, {} bytes, {what}: {count} in {:?}", edited.len(), start.elapsed());
+        };
+        timed("tokens", &|| parse(project::file_kind(&path), &edited).toks.len());
+        let models = parse(project::file_kind(&path), &edited);
+        timed("tree (nodes)", &|| models.tree().len());
+        timed("scopes (declarations)", &|| models.scopes().decls().len());
+        timed("events model (expressions)", &|| events::ast::Ast::parse(&models).exprs.len());
+        timed("perf model (expressions)", &|| perf::ast::Ast::new(&models).exprs.len());
+        timed("syntax problems", &|| syntax::check(&models).len());
         let src = parse(project::file_kind(&path), &edited);
         for (feature, name) in features.iter().zip(names) {
             let start = std::time::Instant::now();
@@ -1262,8 +1317,8 @@ mod tests {
             files.len(),
             start.elapsed() - indexed
         );
-        let names =
-            ["natives", "runtime", "manifest", "statebags", "events", "nui", "values", "coords", "perf", "syntax"];
+        let names = FEATURE_NAMES;
+        assert_eq!(names.len(), features.len(), "one name per feature, in the order of all_features()");
         let (path, text) =
             files.iter().find(|(p, t)| p.starts_with("res7/client/") && t.contains("TriggerServerEvent")).unwrap();
         let path = format!("/big/{path}");
