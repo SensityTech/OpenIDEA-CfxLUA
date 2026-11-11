@@ -205,7 +205,7 @@ impl Spec {
         kind: FnKind,
         origin: Origin,
         file: Option<Rc<str>>,
-        offset: Option<u32>,
+        nth: u32,
         defined_side: Side,
         param_count: Option<usize>,
         vararg: bool,
@@ -240,7 +240,7 @@ impl Spec {
             payload_fixed: None,
             wire: self.wire,
             file,
-            offset,
+            nth,
             kind,
             defined_side: side,
             redefinition: kind == FnKind::Global && is_standard_name(path),
@@ -334,7 +334,7 @@ pub fn settings_helper(line: &str) -> Option<EventFn> {
         return None;
     }
     let spec = Spec::parse(&line[split..], None, true)?;
-    Some(spec.to_function(path, FnKind::of_path(path), Origin::Settings, None, None, Side::Unknown, None, true))
+    Some(spec.to_function(path, FnKind::of_path(path), Origin::Settings, None, 0, Side::Unknown, None, true))
 }
 
 #[cfg(test)]
@@ -386,15 +386,14 @@ mod tests {
             FnKind::Field,
             Origin::Annotation,
             None,
-            Some(0),
+            0,
             Side::Server,
             Some(3),
             false,
         );
         assert_eq!(format(&f), "handler net server key(1, 2) callback(3) inject(1)");
         let t = Spec::parse("trigger client key(1) payload(...)", Some(&names(&["name"])), true).unwrap();
-        let f =
-            t.to_function("SrvHelper.C", FnKind::Field, Origin::Annotation, None, None, Side::Server, Some(1), true);
+        let f = t.to_function("SrvHelper.C", FnKind::Field, Origin::Annotation, None, 0, Side::Server, Some(1), true);
         assert_eq!(format(&f), "trigger client key(1) payload(...)");
         assert_eq!(f.required_side, Some(Side::Server));
         assert_eq!(format(&EventFn::alias("RegisterEventAlias")), "alias wire(1)");

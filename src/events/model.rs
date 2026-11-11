@@ -153,7 +153,8 @@ pub struct EventFn {
     pub payload_fixed: Option<usize>,
     pub wire: Option<usize>,
     pub file: Option<Rc<str>>,
-    pub offset: Option<u32>,
+    /// Which definition of `path` in `file`, from 0: an edit above it leaves the function the same.
+    pub nth: u32,
     pub kind: FnKind,
     pub defined_side: Side,
     pub redefinition: bool,
@@ -179,7 +180,7 @@ impl EventFn {
             payload_fixed: None,
             wire: None,
             file: None,
-            offset: None,
+            nth: 0,
             kind: FnKind::Global,
             defined_side: Side::Unknown,
             redefinition: false,

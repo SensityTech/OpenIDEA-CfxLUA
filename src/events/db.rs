@@ -227,6 +227,8 @@ pub struct Db {
     handled_namespaces: HashSet<String>,
     functions: HashMap<String, Vec<Rc<EventFn>>>,
     standard: HashMap<String, Rc<EventFn>>,
+    /// The names of the functions whose calls the detection of the event functions read.
+    fetched: BTreeSet<String>,
 }
 
 pub fn reaches(t: &Site, h: &Site) -> bool {
@@ -321,6 +323,7 @@ impl Db {
     }
 }
 
+/// A file and the place of a function among those of its facts.
 type FnId<'a> = (&'a str, u32);
 
 #[derive(Clone, Copy)]
@@ -333,6 +336,10 @@ struct Ref<'a> {
 impl<'a> Ref<'a> {
     fn function(&self) -> Option<&'a FunctionInfo> {
         self.facts.function_of(self.record)
+    }
+
+    fn function_id(&self) -> Option<FnId<'a>> {
+        self.record.function.map(|i| (self.file, i))
     }
 }
 
@@ -348,12 +355,13 @@ struct Builder<'a> {
     scopes: Scopes<'a>,
     config: &'a Config,
     standard: HashMap<String, Rc<EventFn>>,
-    paths: HashMap<&'a str, Rc<str>>,
+    paths: RefCell<HashMap<&'a str, Rc<str>>>,
     explicit: Vec<Rc<EventFn>>,
     explicit_ids: HashSet<FnId<'a>>,
     settings_paths: HashSet<String>,
     detected: Vec<Option<(FnId<'a>, Rc<EventFn>)>>,
     detected_index: HashMap<FnId<'a>, usize>,
+    helper_ids: HashSet<FnId<'a>>,
     functions: HashMap<String, Vec<Rc<EventFn>>>,
     fetched: HashMap<String, Rc<Vec<Ref<'a>>>>,
     keys: RefCell<HashSet<Rc<EventKey>>>,
@@ -366,20 +374,21 @@ impl<'a> Builder<'a> {
             scopes: Scopes::new(ws),
             config,
             standard: standard().into_iter().map(|f| (f.path.clone(), Rc::new(f))).collect(),
-            paths: files.keys().map(|p| (p.as_str(), Rc::from(p.as_str()))).collect(),
+            paths: RefCell::default(),
             explicit: Vec::new(),
             explicit_ids: HashSet::new(),
             settings_paths: HashSet::new(),
             detected: Vec::new(),
             detected_index: HashMap::new(),
+            helper_ids: HashSet::new(),
             functions: HashMap::new(),
             fetched: HashMap::new(),
             keys: RefCell::default(),
         }
     }
 
-    fn path(&self, file: &str) -> Rc<str> {
-        self.paths.get(file).cloned().unwrap_or_else(|| Rc::from(file))
+    fn path(&self, file: &'a str) -> Rc<str> {
+        self.paths.borrow_mut().entry(file).or_insert_with(|| Rc::from(file)).clone()
     }
 
     fn rebuild_lookup(&mut self) {
@@ -396,16 +405,17 @@ impl<'a> Builder<'a> {
         if let Some(r) = self.fetched.get(name) {
             return r.clone();
         }
-        let files = self.files;
-        let refs: Vec<Ref<'a>> = files
-            .iter()
+        let refs = Rc::new(Self::calls(name, self.files.iter()));
+        self.fetched.insert(name.to_owned(), refs.clone());
+        refs
+    }
+
+    fn calls(name: &str, files: impl Iterator<Item = (&'a String, &'a FileFacts)>) -> Vec<Ref<'a>> {
+        files
             .flat_map(|(file, facts)| {
                 facts.calls_named(name).map(move |record| Ref { file: file.as_str(), record, facts })
             })
-            .collect();
-        let refs = Rc::new(refs);
-        self.fetched.insert(name.to_owned(), refs.clone());
-        refs
+            .collect()
     }
 
     fn resolve(&self, r: &Ref, info: &FileInfo) -> Option<(Rc<EventFn>, usize)> {
@@ -413,8 +423,7 @@ impl<'a> Builder<'a> {
         self.scopes.resolve(&self.functions, &self.standard, r.record, r.file, info, self_class)
     }
 
-    /// The explicit and detected event functions; returns the names of every function whose calls make sites.
-    fn detect(&mut self) -> BTreeSet<String> {
+    fn declare(&mut self) {
         for line in &self.config.helpers {
             if let Some(f) = settings_helper(line) {
                 self.settings_paths.insert(f.path.clone());
@@ -432,9 +441,14 @@ impl<'a> Builder<'a> {
                 self.explicit.push(Rc::new(EventFn::alias(a)));
             }
         }
+    }
+
+    /// The explicit and detected event functions; returns the names of every function whose calls make sites.
+    fn detect(&mut self) -> BTreeSet<String> {
+        self.declare();
         let files = self.files;
         for (file, facts) in files {
-            for info in &facts.functions {
+            for (i, info) in facts.functions.iter().enumerate() {
                 let Some(annotation) = &info.annotation else { continue };
                 if self.settings_paths.contains(&info.path) {
                     continue;
@@ -446,21 +460,17 @@ impl<'a> Builder<'a> {
                     info.kind,
                     Origin::Annotation,
                     Some(self.path(file)),
-                    Some(info.offset),
+                    info.nth,
                     side,
                     Some(info.params.len()),
                     info.vararg,
                 );
                 self.explicit.push(Rc::new(f));
-                self.explicit_ids.insert((file.as_str(), info.offset));
+                self.explicit_ids.insert((file.as_str(), i as u32));
             }
         }
         self.explicit.sort_by(|a, b| {
-            (a.file.as_deref().unwrap_or(""), a.offset, &a.path).cmp(&(
-                b.file.as_deref().unwrap_or(""),
-                b.offset,
-                &b.path,
-            ))
+            (a.file.as_deref().unwrap_or(""), a.nth, &a.path).cmp(&(b.file.as_deref().unwrap_or(""), b.nth, &b.path))
         });
         self.rebuild_lookup();
 
@@ -476,12 +486,11 @@ impl<'a> Builder<'a> {
             for name in &pending {
                 fetched.insert(name.clone());
                 for r in self.fetch(name).iter() {
-                    let Some(info) = r.function() else { continue };
+                    let (Some(id), Some(info)) = (r.function_id(), r.function()) else { continue };
                     // only arguments computed from parameters may form a helper's key
-                    if !r.record.args.iter().any(|a| matches!(a, Arg::Template(_) | Arg::Tainted(_))) {
+                    if !r.record.forwards_params() {
                         continue;
                     }
-                    let id = (r.file, info.offset);
                     let k = *inner_index.entry(id).or_insert_with(|| {
                         inner.push((id, info, Vec::new()));
                         inner.len() - 1
@@ -494,19 +503,37 @@ impl<'a> Builder<'a> {
             }
             pending = self.functions.keys().filter(|k| !fetched.contains(*k)).cloned().collect();
         }
+        self.helper_ids = self.explicit_ids.iter().chain(self.detected_index.keys()).copied().collect();
         fetched
+    }
+
+    /// Takes the event functions of `db` for what `detect` would find: no edit touched what it reads.
+    fn resume(&mut self, db: &Db, changed: &BTreeSet<String>) {
+        self.declare();
+        self.functions = db.functions.clone();
+        self.standard = db.standard.clone();
+        let files = self.files;
+        for h in &db.helpers {
+            let edited = h.file.as_deref().filter(|f| changed.contains(*f));
+            let Some((file, facts)) = edited.and_then(|f| files.get_key_value(f)) else { continue };
+            if let Some(i) = facts.functions.iter().position(|f| f.path == h.path && f.nth == h.nth) {
+                self.helper_ids.insert((file.as_str(), i as u32));
+            }
+        }
     }
 
     /// Grouped by file, in call order within a file, so that the sites of one file can be replaced alone.
     fn sites(&mut self, fetched: &BTreeSet<String>, only: Option<&BTreeSet<String>>) -> (Vec<Site>, Vec<DynamicSite>) {
         let mut sites = Vec::new();
         let mut dynamic = Vec::new();
+        let files = self.files;
         for name in fetched {
+            let refs = match only {
+                Some(only) => Rc::new(Self::calls(name, only.iter().filter_map(|f| files.get_key_value(f)))),
+                None => self.fetch(name),
+            };
             let mut last: Option<(&str, FileInfo)> = None;
-            for r in self.fetch(name).iter() {
-                if only.is_some_and(|files| !files.contains(r.file)) {
-                    continue;
-                }
+            for r in refs.iter() {
                 let info = match &last {
                     Some((file, info)) if *file == r.file => info.clone(),
                     _ => self.scopes.info(r.file),
@@ -528,11 +555,7 @@ impl<'a> Builder<'a> {
             self.detected.iter().flatten().map(|(_, f)| f.clone()).filter(|f| !self.settings_paths.contains(&f.path)),
         );
         helpers.sort_by(|a, b| {
-            (&a.path, a.file.as_deref().unwrap_or(""), a.offset).cmp(&(
-                &b.path,
-                b.file.as_deref().unwrap_or(""),
-                b.offset,
-            ))
+            (&a.path, a.file.as_deref().unwrap_or(""), a.nth).cmp(&(&b.path, b.file.as_deref().unwrap_or(""), b.nth))
         });
         helpers
     }
@@ -541,8 +564,8 @@ impl<'a> Builder<'a> {
         let fetched = self.detect();
         let (sites, dynamic) = self.sites(&fetched, None);
         let helpers = self.helper_list();
-        let mut db =
-            Db { helpers, sites, dynamic, functions: self.functions, standard: self.standard, ..Db::default() };
+        let (functions, standard) = (self.functions, self.standard);
+        let mut db = Db { helpers, sites, dynamic, functions, standard, fetched, ..Db::default() };
         db.index_keys();
         db.index_derived();
         db
@@ -592,7 +615,7 @@ impl<'a> Builder<'a> {
         let mut contributions = Vec::new();
         for r in calls {
             let Some((target, shift)) = self.resolve(r, &info) else { continue };
-            if target.file.as_deref() == Some(id.0) && target.offset == Some(id.1) {
+            if target.file.as_deref() == Some(id.0) && target.path == function.path && target.nth == function.nth {
                 continue;
             }
             let args = &r.record.args[shift.min(r.record.args.len())..];
@@ -606,7 +629,7 @@ impl<'a> Builder<'a> {
         let first = contributions.first()?;
         let mut base = EventFn::base(&function.path, Role::Register, first.key.clone(), Origin::Detected);
         base.file = Some(self.path(id.0));
-        base.offset = Some(function.offset);
+        base.nth = function.nth;
         base.kind = function.kind;
         base.defined_side = info.side;
         base.redefinition = function.kind == FnKind::Global && is_standard_name(&function.path);
@@ -649,16 +672,14 @@ impl<'a> Builder<'a> {
         Some(EventFn { key: r.key.clone(), net: true, required_side: r.target.required_side, ..base })
     }
 
-    fn is_helper(&self, file: &'a str, function: &FunctionInfo) -> bool {
-        let id = (file, function.offset);
-        self.detected_index.contains_key(&id)
-            || self.explicit_ids.contains(&id)
-            || self.settings_paths.contains(&function.path)
+    fn is_helper(&self, r: &Ref<'a>) -> bool {
+        r.function_id().is_some_and(|id| self.helper_ids.contains(&id))
+            || r.function().is_some_and(|f| self.settings_paths.contains(&f.path))
     }
 
     fn site(
         &self,
-        r: &Ref,
+        r: &Ref<'a>,
         f: &Rc<EventFn>,
         role: Role,
         key: EventKey,
@@ -693,7 +714,7 @@ impl<'a> Builder<'a> {
 
     fn add_sites(
         &self,
-        r: &Ref,
+        r: &Ref<'a>,
         f: Rc<EventFn>,
         shift: usize,
         info: FileInfo,
@@ -756,7 +777,7 @@ impl<'a> Builder<'a> {
         let net = role == Role::Register || (role == Role::Handler && f.net);
         if parts.iter().any(Option::is_none) {
             // the plumbing of a helper is described by the helper itself
-            if parameter_dependent && r.function().is_some_and(|func| self.is_helper(r.file, func)) {
+            if parameter_dependent && self.is_helper(r) {
                 return;
             }
             dynamic.push(DynamicSite {
@@ -784,7 +805,7 @@ impl<'a> Builder<'a> {
         sites.push(site);
     }
 
-    fn add_alias_sites(&self, r: &Ref, f: &Rc<EventFn>, args: &[Arg], info: &FileInfo, sites: &mut Vec<Site>) {
+    fn add_alias_sites(&self, r: &Ref<'a>, f: &Rc<EventFn>, args: &[Arg], info: &FileInfo, sites: &mut Vec<Site>) {
         let wire_index = f.wire.unwrap_or(0);
         let Some(Arg::Str { value: wire, lit: wire_lit }) = args.get(wire_index) else { return };
         let key_args: Vec<Option<&Arg>> = if f.key.components.is_empty() {
@@ -942,22 +963,55 @@ fn payload_arity(f: &EventFn, args: &[Arg], record: &CallRecord) -> Option<usize
     Some(payload.len())
 }
 
+fn annotated(facts: &FileFacts) -> impl Iterator<Item = &FunctionInfo> {
+    facts.functions.iter().filter(|f| f.annotation.is_some())
+}
+
 impl Db {
-    /// The database after the Lua files `changed` were edited, re-resolving only their calls. `None` when the edit
-    /// changed the event functions, which every file depends on: build it again.
+    fn forwarding<'a>(&'a self, facts: &'a FileFacts) -> impl Iterator<Item = (&'a CallRecord, &'a FunctionInfo)> + 'a {
+        let read = |c: &&CallRecord| c.forwards_params() && self.fetched.contains(c.simple_name());
+        facts.calls.iter().filter(read).filter_map(|c| Some((c, facts.function_of(c)?)))
+    }
+
+    /// Whether the detection of the event functions reads the same in two versions of a file, wherever the code
+    /// stands in each: the annotated functions, and the calls of event functions that forward parameters.
+    pub fn detects_alike(&self, old: &FileFacts, new: &FileFacts) -> bool {
+        if !annotated(old).eq(annotated(new)) {
+            return false;
+        }
+        let (mut a, mut b) = (self.forwarding(old), self.forwarding(new));
+        loop {
+            match (a.next(), b.next()) {
+                (None, None) => return true,
+                (Some((call, function)), Some((other, same))) if call.alike(other) && function == same => {}
+                _ => return false,
+            }
+        }
+    }
+
+    /// The database after the Lua files `changed` were edited, re-resolving only their calls. The event functions,
+    /// which every file depends on, are detected again when `redetect` says an edit touched what the detection
+    /// reads: `None` when they changed, build it again.
     pub fn update(
         mut self,
         ws: &Workspace,
         files: &BTreeMap<String, FileFacts>,
         config: &Config,
         changed: &BTreeSet<String>,
+        redetect: bool,
     ) -> Option<Db> {
         let mut builder = Builder::new(ws, files, config);
-        let fetched = builder.detect();
-        if builder.helper_list() != self.helpers {
-            return None;
+        if redetect {
+            let fetched = builder.detect();
+            if builder.helper_list() != self.helpers {
+                return None;
+            }
+            self.fetched = fetched;
+        } else {
+            builder.resume(&self, changed);
         }
-        let (fresh, fresh_dynamic) = builder.sites(&fetched, Some(changed));
+        let (fresh, fresh_dynamic) = builder.sites(&self.fetched, Some(changed));
+        (self.functions, self.standard) = (builder.functions, builder.standard);
         self.replace_sites(changed, fresh);
         self.dynamic.retain(|d| !changed.contains(&*d.file));
         self.dynamic.extend(fresh_dynamic);

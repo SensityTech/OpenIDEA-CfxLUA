@@ -48,6 +48,8 @@ struct Project {
     dirty: bool,
     /// Lua files whose facts changed since the last build.
     changed: BTreeSet<String>,
+    /// One of those changes touched what the detection of the event functions reads.
+    redetect: bool,
     /// A manifest changed: sides and resources may differ everywhere.
     manifests_changed: bool,
     db: Option<Rc<Db>>,
@@ -64,12 +66,24 @@ impl Project {
             .take()
             .filter(|_| incremental)
             .and_then(|db| Rc::try_unwrap(db).ok())
-            .and_then(|db| db.update(ws, &self.files, &config, &self.changed));
+            .and_then(|db| db.update(ws, &self.files, &config, &self.changed, self.redetect));
         self.db = Some(Rc::new(updated.unwrap_or_else(|| Db::build(ws, &self.files, &config))));
         self.config = config;
         self.dirty = false;
         self.changed.clear();
+        self.redetect = false;
         self.manifests_changed = false;
+    }
+
+    /// The facts of a Lua file were replaced or removed: `old` is what the database may still hold.
+    fn edited(&mut self, path: &str, old: Option<FileFacts>) {
+        let none = FileFacts::default();
+        if let Some(db) = &self.db {
+            let new = self.files.get(path).unwrap_or(&none);
+            self.redetect |= !db.detects_alike(old.as_ref().unwrap_or(&none), new);
+        }
+        self.changed.insert(path.to_owned());
+        self.dirty = true;
     }
 }
 
@@ -112,9 +126,8 @@ impl Feature for EventsFeature {
             FileKind::Lua => {
                 let facts = flow::facts(src);
                 if p.files.get(path) != Some(&facts) {
-                    p.files.insert(path.to_owned(), facts);
-                    p.changed.insert(path.to_owned());
-                    p.dirty = true;
+                    let old = p.files.insert(path.to_owned(), facts);
+                    p.edited(path, old);
                 }
             }
             FileKind::Manifest => {
@@ -128,9 +141,8 @@ impl Feature for EventsFeature {
     fn forget_file(&self, path: &str) {
         let manifest = crate::project::file_kind(path) == FileKind::Manifest;
         for p in self.projects.borrow_mut().values_mut() {
-            if p.files.remove(path).is_some() {
-                p.changed.insert(path.to_owned());
-                p.dirty = true;
+            if let Some(old) = p.files.remove(path) {
+                p.edited(path, Some(old));
             }
             if manifest {
                 p.manifests_changed = true;

@@ -114,7 +114,8 @@ pub struct FunctionInfo {
     pub kind: FnKind,
     pub params: Vec<String>,
     pub vararg: bool,
-    pub offset: u32,
+    /// Which definition of `path` in the file, from 0.
+    pub nth: u32,
     pub annotation: Option<String>,
 }
 
@@ -153,6 +154,13 @@ impl Arg {
             _ => None,
         }
     }
+
+    fn alike(&self, other: &Arg) -> bool {
+        match (self, other) {
+            (Arg::Str { value: a, .. }, Arg::Str { value: b, .. }) => a == b,
+            _ => self == other,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -177,6 +185,23 @@ impl CallRecord {
 
     pub fn receiver(&self) -> Option<&str> {
         if self.colon { self.callee.rsplit_once(':').map(|(r, _)| r) } else { None }
+    }
+
+    /// Whether an argument is computed from the parameters of the function the call is in.
+    pub fn forwards_params(&self) -> bool {
+        self.args.iter().any(|a| matches!(a, Arg::Template(_) | Arg::Tainted(_)))
+    }
+
+    /// The same call, wherever it stands in its file.
+    pub fn alike(&self, other: &CallRecord) -> bool {
+        self.callee == other.callee
+            && self.colon == other.colon
+            && self.original == other.original
+            && self.last_arg_multi == other.last_arg_multi
+            && self.local_receiver == other.local_receiver
+            && self.receiver_class == other.receiver_class
+            && self.args.len() == other.args.len()
+            && self.args.iter().zip(&other.args).all(|(a, b)| a.alike(b))
     }
 }
 
@@ -680,23 +705,19 @@ impl<'a> Analysis<'a> {
         Ev { src: self.src, ast: self.ast, file: (env.root != NONE).then_some(&self.file_env) }
     }
 
-    fn add_named(&mut self, func: u32, path: String, kind: FnKind, offset: usize, owner: u32) {
+    fn add_named(&mut self, func: u32, path: String, kind: FnKind, owner: u32) {
         let f = self.ast.func(func);
         let info = FunctionInfo {
             path,
             kind,
             params: f.params.iter().map(|&d| self.src.tok_text(self.ast.decl(d).tok as usize).to_owned()).collect(),
             vararg: f.vararg,
-            offset: offset as u32,
+            nth: 0,
             annotation: annotation(self.src, owner as usize),
         };
         self.named[func as usize] = Some(self.functions.len() as u32);
         self.named_func.push(func);
         self.functions.push(info);
-    }
-
-    fn tok_start(&self, tok: u32) -> usize {
-        self.src.toks[tok as usize].start
     }
 
     fn add_table_fields(&mut self, prefix: &str, table: u32) {
@@ -705,7 +726,7 @@ impl<'a> Analysis<'a> {
         for f in fields {
             if let (Some(name), ExprKind::Func(func)) = (f.name, ast.kind(f.value)) {
                 let path = format!("{prefix}.{}", self.src.tok_text(name as usize));
-                self.add_named(*func, path, FnKind::Field, self.tok_start(name), f.first);
+                self.add_named(*func, path, FnKind::Field, f.first);
             }
         }
     }
@@ -718,32 +739,20 @@ impl<'a> Analysis<'a> {
                 StmtKind::Function { target: Some(t), func } => match ast.kind(*t) {
                     ExprKind::Name(_) => {
                         let tok = ast.expr(*t).first;
-                        self.add_named(
-                            *func,
-                            src.tok_text(tok as usize).to_owned(),
-                            FnKind::Global,
-                            self.tok_start(tok),
-                            stmt.first,
-                        );
+                        self.add_named(*func, src.tok_text(tok as usize).to_owned(), FnKind::Global, stmt.first);
                     }
                     ExprKind::Index(obj, Key::Field(Some(n)) | Key::Method(Some(n))) => {
                         let Some(prefix) = ast.path(src, *obj) else { continue };
                         let method = matches!(ast.kind(*t), ExprKind::Index(_, Key::Method(_)));
                         let (sep, kind) = if method { (':', FnKind::Method) } else { ('.', FnKind::Field) };
                         let path = format!("{prefix}{sep}{}", src.tok_text(*n as usize));
-                        self.add_named(*func, path, kind, self.tok_start(*n), stmt.first);
+                        self.add_named(*func, path, kind, stmt.first);
                     }
                     _ => {}
                 },
                 StmtKind::LocalFunction { decl, func } if top(*func) => {
                     let tok = ast.decl(*decl).tok;
-                    self.add_named(
-                        *func,
-                        src.tok_text(tok as usize).to_owned(),
-                        FnKind::Local,
-                        self.tok_start(tok),
-                        stmt.first,
-                    );
+                    self.add_named(*func, src.tok_text(tok as usize).to_owned(), FnKind::Local, stmt.first);
                 }
                 StmtKind::Local { names, values, .. } => {
                     for (&v, &n) in values.iter().zip(names) {
@@ -751,7 +760,7 @@ impl<'a> Analysis<'a> {
                         let name = src.tok_text(tok as usize);
                         match ast.kind(v) {
                             ExprKind::Func(f) if top(*f) => {
-                                self.add_named(*f, name.to_owned(), FnKind::Local, self.tok_start(tok), stmt.first)
+                                self.add_named(*f, name.to_owned(), FnKind::Local, stmt.first)
                             }
                             ExprKind::Table(_) => self.add_table_fields(name, v),
                             _ => {}
@@ -768,7 +777,7 @@ impl<'a> Analysis<'a> {
                                     _ => Some(FnKind::Field),
                                 };
                                 if let (Some(kind), Some(path)) = (named, ast.path(src, t)) {
-                                    self.add_named(*f, path, kind, ast.start(src, t), stmt.first);
+                                    self.add_named(*f, path, kind, stmt.first);
                                 }
                             }
                             ExprKind::Table(_) => {
@@ -782,6 +791,19 @@ impl<'a> Analysis<'a> {
                 }
                 _ => {}
             }
+        }
+        let mut defined: HashMap<&str, u32> = HashMap::new();
+        let nths: Vec<u32> = self
+            .functions
+            .iter()
+            .map(|f| {
+                let n = defined.entry(f.path.as_str()).or_default();
+                *n += 1;
+                *n - 1
+            })
+            .collect();
+        for (f, nth) in self.functions.iter_mut().zip(nths) {
+            f.nth = nth;
         }
     }
 

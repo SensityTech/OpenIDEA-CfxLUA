@@ -2,7 +2,7 @@ use super::EventsFeature;
 use super::db::{Config, Db};
 use super::model::{Dirs, EventKey, Origin, Role, Site};
 use super::spec::format;
-use crate::feature::Ctx;
+use crate::feature::{Ctx, Feature};
 use crate::settings::Settings;
 use crate::testing::Fixture;
 use serde_json::Value;
@@ -450,29 +450,152 @@ fn updating_edited_files_matches_a_full_build() {
     let mut files: std::collections::BTreeMap<String, super::flow::FileFacts> =
         lua.iter().map(|p| (p.clone(), super::flow::facts(&crate::lua::Source::new(fx.ws.text(p).unwrap())))).collect();
     let mut db = Db::build(&fx.ws, &files, &config);
-    let mut incremental = 0;
-    for (n, path) in lua.iter().cycle().take(lua.len() * 6).enumerate() {
+    let (mut incremental, mut undetected) = (0, 0);
+    for (n, path) in lua.iter().cycle().take(lua.len() * 7).enumerate() {
         let text = fx.ws.text(path).unwrap().to_owned();
         let at = text.char_indices().map(|(i, _)| i).nth(n * 7 % text.chars().count().max(1)).unwrap_or(0);
-        let edited = match n % 6 {
+        let edited = match n % 7 {
             0 => format!("local typed = 1\n{text}"),
             1 => format!("{}\n{}", &text[..at], &text[at..]),
             2 => format!("{} x{}", &text[..at], &text[at..]),
             3 => text.replacen("'", "'renamed_", 1),
             4 => text.lines().skip(1).collect::<Vec<_>>().join("\n"),
+            5 => format!("function Typed{n}(a)\n    Unrelated(a)\nend\n{text}"),
             _ => format!("{text}\nTriggerServerEvent('late:{n}')\n"),
         };
-        files.insert(path.clone(), super::flow::facts(&crate::lua::Source::new(&edited)));
+        let facts = super::flow::facts(&crate::lua::Source::new(&edited));
+        let old = files.insert(path.clone(), facts).unwrap();
+        let redetect = !db.detects_alike(&old, &files[path]);
         let changed = std::collections::BTreeSet::from([path.clone()]);
         let full = Db::build(&fx.ws, &files, &config);
-        db = match db.update(&fx.ws, &files, &config, &changed) {
+        db = match db.update(&fx.ws, &files, &config, &changed, redetect) {
             Some(updated) => {
                 incremental += 1;
-                assert_eq!(updated.dump(), full.dump(), "edit {n} of {path}");
+                undetected += usize::from(!redetect);
+                assert_eq!(updated.dump(), full.dump(), "edit {n} of {path}, detected again: {redetect}");
                 updated
             }
-            None => full,
+            None => {
+                assert!(redetect, "edit {n} of {path}: only a new detection gives the database up");
+                full
+            }
         };
     }
-    assert!(incremental > lua.len(), "most edits update in place ({incremental})");
+    assert!(incremental > lua.len() * 4, "most edits update in place ({incremental})");
+    assert!(undetected > lua.len() * 3, "most edits leave the event functions alone ({undetected})");
+}
+
+fn facts_of(text: &str) -> super::flow::FileFacts {
+    super::flow::facts(&crate::lua::Source::new(text))
+}
+
+#[test]
+fn the_detection_runs_again_only_for_what_it_reads() {
+    let fx = project(&[]);
+    let db = db(&fx);
+    let helper = fx.ws.text(&Fixture::path("studio/client/helper.lua")).unwrap();
+    let old = facts_of(helper);
+    let same = |edited: String| db.detects_alike(&old, &facts_of(&edited));
+    assert!(same(format!("local typed = 1\n\n{helper}")), "the functions only moved");
+    assert!(same(helper.replace("local queue = {}", "local queue = {}\nlocal function Typed(a)\n    Other(a)\nend")));
+    assert!(same(helper.replace("callback(table.unpack(args))", "callback(table.unpack(args))\n        print(eName)")));
+    assert!(!same(helper.replace("RegisterNetEvent(wire)", "RegisterNetEvent(eName)")), "another key");
+    assert!(!same(
+        helper.replace("MyHelper.AddQueueEventHandler(eType, eName, cb)", "MyHelper.AddQueued(eType, eName, cb)")
+    ));
+    assert!(!same(format!("---@cfx.event handler key(1)\nfunction Typed(name) end\n{helper}")), "an annotation");
+    assert!(!same(format!("function Typed(name)\n    TriggerEvent(name)\nend\n{helper}")), "a new event function");
+    assert!(!db.detects_alike(&old, &facts_of("")), "the file is gone");
+    let plain = facts_of("TriggerEvent('a')\nfunction F(x) Other(x) end");
+    assert!(db.detects_alike(&facts_of(""), &plain), "a new file that forwards nothing to an event function");
+}
+
+#[test]
+fn an_edit_above_an_event_function_updates_the_database_in_place() {
+    let fx = project(&[]);
+    let feature = indexed(&fx);
+    let doc = fx.doc("standard_res/client.lua");
+    assert!(feature.db(&fx.cx(&doc)).is_some());
+    let path = Fixture::path("studio/server/helper.lua");
+    let edit = |text: &str| {
+        feature.index_file(&fx.ws, &path, crate::project::FileKind::Lua, &crate::lua::Source::new(text));
+        let redetect = feature.projects.borrow()[&fx.ws.root].redetect;
+        (redetect, feature.db(&fx.cx(&doc)).unwrap().dump())
+    };
+    let rebuilt = |text: &str| db(&project(&[("studio/server/helper.lua", text)])).dump();
+
+    let moved = format!("local typed = 1\n\n{}", fx.ws.text(&path).unwrap());
+    let (redetect, updated) = edit(&moved);
+    assert!(!redetect, "the event functions of the file only moved");
+    assert_eq!(updated, rebuilt(&moved));
+    assert!(updated.contains("SrvHelper.AddHouseEventHandler"));
+
+    let renamed = moved.replace("function SrvHelper.TriggerClientEvent(", "function SrvHelper.Emit(");
+    let (redetect, updated) = edit(&renamed);
+    assert!(redetect, "an event function was renamed");
+    assert_eq!(updated, rebuilt(&renamed));
+    assert!(!updated.contains("SrvHelper.TriggerClientEvent"));
+}
+
+#[test]
+#[ignore = "verification: CFXLUA_PROJECT=<dir> cargo test --release --lib updating_a_real_project_matches_a_full_build -- --ignored --nocapture"]
+fn updating_a_real_project_matches_a_full_build() {
+    use crate::project::{FileKind, file_kind, is_escrowed};
+    let all: Vec<(String, String)> = crate::testing::real_project()
+        .into_iter()
+        .filter(|(p, t)| file_kind(p) != FileKind::Other && t.len() <= crate::workspace::MAX_FILE)
+        .collect();
+    let refs: Vec<(&str, &str)> = all.iter().map(|(p, t)| (p.as_str(), t.as_str())).collect();
+    let ws = crate::workspace::Workspace::from_files("/real", &refs);
+    let facts = |text: &str| {
+        let src = if is_escrowed(text) { crate::lua::Source::plain(text) } else { crate::lua::Source::new(text) };
+        super::flow::facts(&src)
+    };
+    let lua: Vec<(&str, &str)> = ws
+        .files()
+        .filter(|f| f.kind == FileKind::Lua)
+        .filter_map(|f| Some((f.path.as_str(), f.text.as_deref()?)))
+        .collect();
+    let mut files: std::collections::BTreeMap<String, super::flow::FileFacts> =
+        lua.iter().map(|(p, t)| ((*p).to_owned(), facts(t))).collect();
+    let config = Config::default();
+    let mut db = Db::build(&ws, &files, &config);
+    let step = (lua.len() / 150).max(1);
+    let (mut kept, mut detected, mut rebuilt) = (0, 0, 0);
+    for (n, (path, text)) in lua.iter().enumerate().filter(|(n, _)| n % step == 0) {
+        let middle = (0..=text.len() / 2).rev().find(|&i| text.is_char_boundary(i)).unwrap_or(0);
+        let edited = match n / step % 5 {
+            0 => format!("local typed = 1\n{text}"),
+            1 => format!("{}\n\n{}", &text[..middle], &text[middle..]),
+            2 => format!("{text}\nTriggerServerEvent('typed:{n}')\n"),
+            3 => format!("function Typed{n}(payload)\n    TriggerEvent('typed:{n}', payload)\nend\n{text}"),
+            _ => format!("function Typed{n}(name)\n    TriggerEvent(name)\nend\n{text}\nTyped{n}('typed:{n}')\n"),
+        };
+        let old = files.insert((*path).to_owned(), facts(&edited)).unwrap();
+        let redetect = !db.detects_alike(&old, &files[*path]);
+        let changed = std::collections::BTreeSet::from([(*path).to_owned()]);
+        let full = Db::build(&ws, &files, &config);
+        db = match db.update(&ws, &files, &config, &changed, redetect) {
+            Some(updated) => {
+                assert!(updated.dump() == full.dump(), "edit {n}: the update is not what a full build gives");
+                if redetect {
+                    detected += 1;
+                } else {
+                    kept += 1;
+                }
+                updated
+            }
+            None => {
+                assert!(redetect, "edit {n}: only a new detection gives the database up");
+                rebuilt += 1;
+                full
+            }
+        };
+    }
+    eprintln!(
+        "{} Lua files, {} sites, one file in {step} edited: {kept} updated without detecting, {detected} after \
+         detecting again, {rebuilt} rebuilt",
+        lua.len(),
+        db.sites.len()
+    );
 }
