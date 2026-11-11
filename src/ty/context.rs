@@ -98,6 +98,7 @@ pub struct Cx<'a> {
     busy: RefCell<Vec<Elem>>,
     cache: RefCell<HashMap<(Asked, i32, bool), Ty>>,
     sources: RefCell<HashMap<FileId, Option<Rc<Source>>>>,
+    home: Option<(FileId, &'a Source)>,
 }
 
 impl<'a> Cx<'a> {
@@ -114,10 +115,18 @@ impl<'a> Cx<'a> {
             busy: RefCell::default(),
             cache: RefCell::default(),
             sources: RefCell::default(),
+            home: None,
         }
     }
 
-    pub fn source(&self, file: FileId) -> Option<Rc<Source>> {
+    /// The same question, asked about the file `file` whose text is `src`: the document being edited or the
+    /// file being declared, read as it is given and not through `files`.
+    pub fn at_home(mut self, file: FileId, src: &'a Source) -> Cx<'a> {
+        self.home = Some((file, src));
+        self
+    }
+
+    fn source(&self, file: FileId) -> Option<Rc<Source>> {
         if let Some(known) = self.sources.borrow().get(&file) {
             return known.clone();
         }
@@ -126,12 +135,22 @@ impl<'a> Cx<'a> {
         source
     }
 
+    /// Runs `read` on the text of `file`; `None` when the file cannot be read.
+    pub fn read<R>(&self, file: FileId, read: impl FnOnce(&Source) -> R) -> Option<R> {
+        match self.home {
+            Some((home, src)) if home == file => Some(read(src)),
+            _ => self.source(file).map(|src| read(&src)),
+        }
+    }
+
     /// Runs `read` on the node `node` of the Lua tree of `file`; `None` when the file has no such node.
     pub fn at<R>(&self, file: FileId, node: u32, read: impl FnOnce(Psi) -> R) -> Option<R> {
-        let src = self.source(file)?;
-        let root = src.root();
-        ((node as usize) < root.tree().len())
-            .then(|| read(Psi { file, src: &src, node: root.tree().node(root.source(), node) }))
+        let found = self.read(file, |src| {
+            let root = src.root();
+            let known = (node as usize) < root.tree().len();
+            known.then(|| read(Psi { file, src, node: root.tree().node(root.source(), node) }))
+        });
+        found.flatten()
     }
 
     /// Which value of a multiple result is asked for: its rank, or a negative number for all of them.

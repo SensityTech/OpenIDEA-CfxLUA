@@ -2,8 +2,9 @@
 //! JetBrains plugin, asked as "which members does the expression before the caret have".
 
 use super::context::{Cx, Files, Options, Psi};
+use super::expressions::assigned_name;
 use super::{FileId, Function, Param, Ty, declarations, display, members, psi};
-use crate::index::{Index, declare};
+use crate::index::{Found, Index, MemberKind, declare};
 use crate::lua::Source;
 use crate::lua::tree::{N, Node};
 use std::rc::Rc;
@@ -610,4 +611,61 @@ fn declare_cost_of_real_files() {
         project.sources.len()
     );
     eprintln!("{members} members under {owners} class names, {classes} classes, {aliases} aliases: {kinds:?}");
+}
+
+/// For each member of the main file that keeps its type, that type and the one reading the file gives.
+fn kept_and_read(project: &Project) -> Vec<(String, String, String)> {
+    let cx = project.cx();
+    let (file, _) = project.main();
+    let declared = project.index.file(file).expect("the file");
+    let mut out = Vec::new();
+    for member in declared.members.iter().filter(|member| member.ty.is_some() && member.kind != MemberKind::DocField) {
+        let found = Found { file, member };
+        let read = match member.kind {
+            MemberKind::Global => cx.at(file, member.node, |def| assigned_name(&cx, def)),
+            _ => cx.at(file, member.node, |psi| cx.with_value(0, || cx.infer(psi))),
+        };
+        let kept = members::declared_type(&cx, found);
+        out.push((member.name.to_string(), display(&kept), display(&read.expect("the node"))));
+    }
+    out
+}
+
+#[test]
+fn the_type_a_file_keeps_for_a_member_is_the_one_reading_it_gives() {
+    let shapes = Project::new(&[(
+        "shapes.lua",
+        "local M = {}\nM.count = 1\nM.name = 'shop'\nM.open = true\nM.none = nil\nM.items = {}\n\
+         M.buy = function(item, amount) return amount end\nM.computed = M.count + 1\nM.called = tostring(1)\n\
+         ---@type Shop[]\nM.all = fetch()\n---@param id number\n---@return Shop\nfunction M.find(id) end\n\
+         function M:close(...) end\n\nConfig = { debug = false, .ready, ['key'] = 2, rate = 1.5, list = { 1 }, cb = print }\n\
+         ---@class Shop\nShop = {}\n---@type number\nLimit = compute()\nFlag = true\nLater = compute()\na, b = 1\n\
+         ---@class Bank\nBank = make()\n",
+    )]);
+    let kept = kept_and_read(&shapes);
+    for (name, kept, read) in &kept {
+        assert_eq!(kept, read, "{name}");
+    }
+    let names: Vec<&str> = kept.iter().map(|(name, _, _)| name.as_str()).collect();
+    for stated in ["count", "name", "open", "none", "items", "buy", "all", "find", "close", "debug", "ready", "key"] {
+        assert!(names.contains(&stated), "{stated} says its type: {names:?}");
+    }
+    for stated in ["rate", "list", "Config", "Shop", "Limit", "Flag", "Bank", "a"] {
+        assert!(names.contains(&stated), "{stated} says its type: {names:?}");
+    }
+    for read in ["computed", "called", "cb", "Later", "b"] {
+        assert!(!names.contains(&read), "{read} has to be inferred: {names:?}");
+    }
+    let shown = |wanted: &str| kept.iter().find(|(name, _, _)| name == wanted).map(|(_, kept, _)| kept.as_str());
+    assert_eq!(shown("buy"), Some("fun(item: any, amount: any): any"));
+    assert_eq!(shown("find"), Some("fun(id: number): Shop"));
+    assert_eq!(shown("all"), Some("Shop[]"));
+    assert_eq!(shown("ready"), Some("boolean"));
+    assert_eq!(shown("Limit"), Some("number"));
+    assert_eq!(shown("Shop"), Some("Shop|table|[global Shop]"));
+    assert_eq!(shown("Bank"), Some("[global Bank]|Bank"), "a union comes before the type it is joined to");
+
+    for (name, kept, read) in kept_and_read(&Project::new(&[("synthlib.lua", LIBRARY)])) {
+        assert_eq!(kept, read, "{name}");
+    }
 }

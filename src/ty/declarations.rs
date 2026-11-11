@@ -112,11 +112,13 @@ pub fn function(cx: &Cx, owner: Psi) -> Ty {
 
 /// The function of the code that starts at `func.at`.
 pub fn function_at<R>(cx: &Cx, func: FuncRef, read: impl FnOnce(Psi) -> R) -> Option<R> {
-    let src = cx.source(func.file)?;
-    let inner = src.root().tree().node_at(src.root().source(), func.at as usize);
-    let starts = |node: &Node| psi::is_function(*node) && node.code_range().0 == func.at as usize;
-    let owner = std::iter::once(inner).chain(inner.ancestors()).find(starts)?;
-    Some(read(Psi { file: func.file, src: &src, node: owner }))
+    let found = cx.read(func.file, |src| {
+        let inner = src.root().tree().node_at(src.root().source(), func.at as usize);
+        let starts = |node: &Node| psi::is_function(*node) && node.code_range().0 == func.at as usize;
+        let owner = std::iter::once(inner).chain(inner.ancestors()).find(starts)?;
+        Some(read(Psi { file: func.file, src, node: owner }))
+    });
+    found.flatten()
 }
 
 /// The `return` statements of a function: those of its body and of the blocks nested in it, not those of

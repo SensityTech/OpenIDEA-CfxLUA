@@ -46,7 +46,8 @@ pub struct Member {
     pub kind: MemberKind,
     /// The node that declares it: of the documentation tree for a `DocField`, of the Lua tree otherwise.
     pub node: u32,
-    /// The type a `DocField` declares.
+    /// Its type, when the statement that declares it tells it: an annotation, a function, a literal, a
+    /// table. Without it the type is inferred in the declaring file, when asked for.
     pub ty: Option<Ty>,
     pub is_static: bool,
     pub deprecated: bool,

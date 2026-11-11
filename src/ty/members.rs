@@ -2,7 +2,7 @@
 //! (`LuaShortNamesManager`, `ClassMemberChain`, `LuaCatsIndexSignatures`, `TyAliasSubstitutor`).
 
 use super::context::{Cx, Psi};
-use super::expressions::assigned_name;
+use super::expressions::{assigned_name, global_type};
 use super::{ANONYMOUS, Class, Detail, DocField, G, GLOBAL, Ty};
 use crate::index::{Found, MemberKind, declare};
 use crate::lua::Source;
@@ -59,7 +59,7 @@ fn written(class: &Ty) -> Option<&[DocField]> {
     }
 }
 
-/// The type of a member.
+/// The type of a member: the one its file kept when it declared it, or else what reading the file gives.
 pub fn type_of(cx: &Cx, member: &Member) -> Ty {
     match member {
         Member::Written(field) => field.ty.clone(),
@@ -78,7 +78,14 @@ pub fn declared_type(cx: &Cx, found: Found) -> Ty {
     if found.member.kind != MemberKind::Global {
         return type_of(cx, &Member::Declared(found));
     }
-    cx.at(found.file, found.member.node, |def| assigned_name(cx, def)).unwrap_or(Ty::Unknown)
+    let Some(known) = &found.member.ty else {
+        return cx.at(found.file, found.member.node, |def| assigned_name(cx, def)).unwrap_or(Ty::Unknown);
+    };
+    let mut ty = known.clone();
+    if !matches!(ty, Ty::Primitive(_)) {
+        ty.add(&global_type(cx, &found.member.name, false));
+    }
+    ty
 }
 
 /// The declarations of the global `name` the project knows, as seen from the file of `from`: members of

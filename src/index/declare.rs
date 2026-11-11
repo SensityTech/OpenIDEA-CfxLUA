@@ -61,13 +61,51 @@ impl Declaring<'_, '_> {
         self.src.comment_of(node).map_or(Visibility::Public, |comment| tags::visibility(comment.0))
     }
 
-    fn member(&mut self, owners: Vec<Rc<str>>, name: &str, kind: MemberKind, node: Node, documented: Node) {
+    /// The type of what a node writes, read from the file alone.
+    fn alone(&self, node: Node) -> Ty {
+        self.cx.in_file_alone(|| self.cx.with_value(0, || self.cx.infer(self.psi(node))))
+    }
+
+    /// The type of a value that says it by the way it is written: a literal, a function, a table.
+    fn written(&self, value: Option<Node>) -> Option<Ty> {
+        let value = value.filter(|value| matches!(value.kind(), N::LiteralExpr | N::ClosureExpr | N::TableExpr))?;
+        Some(self.alone(value))
+    }
+
+    /// The type of a target of an assignment, when nothing but the statement is needed to know it: its
+    /// annotation, or a value that says its type. `class` tells whether a class the comment declares counts.
+    fn assigned(&self, stat: Node, target: Node, class: bool) -> Option<Ty> {
+        let reader = Reader::new(self.file);
+        let comment = self.src.comment_of(stat);
+        let annotated =
+            comment.and_then(|comment| if class { reader.declared(comment) } else { reader.typed(comment) });
+        let value = stat.child(N::ExprList).and_then(|values| values.exprs().nth(psi::rank(target)));
+        match annotated {
+            // A global keeps the table it is given next to the class that annotates it.
+            Some(annotated)
+                if class && (annotated.is_invalid() || value.is_some_and(|value| value.is(N::TableExpr))) =>
+            {
+                Some(annotated.union(&self.written(value)?))
+            }
+            Some(annotated) => Some(annotated),
+            None => self.written(value),
+        }
+    }
+
+    fn member(
+        &mut self,
+        owners: Vec<Rc<str>>,
+        name: &str,
+        kind: MemberKind,
+        (node, documented): (Node, Node),
+        ty: Option<Ty>,
+    ) {
         self.out.members.push(Member {
             owners,
             name: name.into(),
             kind,
             node: node.id(),
-            ty: None,
+            ty,
             is_static: kind == MemberKind::Method && psi::is_static(node),
             deprecated: self.deprecated(documented),
             visibility: self.visibility(documented),
@@ -76,7 +114,7 @@ impl Declaring<'_, '_> {
 
     /// The names of the classes the file alone gives to an expression.
     fn classes(&self, expr: Node) -> Vec<Rc<str>> {
-        let ty = self.cx.in_file_alone(|| self.cx.with_value(0, || self.cx.infer(self.psi(expr))));
+        let ty = self.alone(expr);
         let mut names: Vec<Rc<str>> = Vec::new();
         for class in ty.each().iter().filter_map(Ty::class_name) {
             if !names.iter().any(|name| **name == *class) {
@@ -95,7 +133,8 @@ impl Declaring<'_, '_> {
         if owners.is_empty() {
             owners.push(on.code().into());
         }
-        self.member(owners, name, MemberKind::Method, node, node);
+        let ty = self.alone(node);
+        self.member(owners, name, MemberKind::Method, (node, node), Some(ty));
     }
 
     fn assignment(&mut self, stat: Node) {
@@ -103,7 +142,8 @@ impl Declaring<'_, '_> {
             match target.kind() {
                 N::NameExpr if !resolve::is_local(self.psi(target)) => {
                     let module = self.module.clone();
-                    self.member(vec![module], target.code(), MemberKind::Global, target, stat);
+                    let ty = self.assigned(stat, target, true);
+                    self.member(vec![module], target.code(), MemberKind::Global, (target, stat), ty);
                 }
                 N::IndexExpr => {
                     let (Some(on), Some(name)) = (psi::prefix(target), psi::member_name(self.src, target)) else {
@@ -111,7 +151,8 @@ impl Declaring<'_, '_> {
                     };
                     let owners = self.classes(on);
                     if !owners.is_empty() {
-                        self.member(owners, &name, MemberKind::Field, target, stat);
+                        let ty = self.assigned(stat, target, false);
+                        self.member(owners, &name, MemberKind::Field, (target, stat), ty);
                     }
                 }
                 _ => {}
@@ -123,7 +164,13 @@ impl Declaring<'_, '_> {
         let owner: Rc<str> = table_type_name(self.file, table.code_range().0).into();
         for field in table.children_of(N::TableField) {
             if let Some(name) = psi::field_name(self.src, field) {
-                self.member(vec![owner.clone()], &name, MemberKind::TableField, field, field);
+                let annotated = self.src.comment_of(field).and_then(|comment| Reader::new(self.file).typed(comment));
+                let ty = match annotated {
+                    Some(annotated) => Some(annotated),
+                    None if psi::is_set_field(field) => Some(Ty::BOOLEAN),
+                    None => self.written(psi::field_value(field)),
+                };
+                self.member(vec![owner.clone()], &name, MemberKind::TableField, (field, field), ty);
             }
         }
     }
@@ -204,8 +251,8 @@ pub fn declare(cx: &Cx, file: FileId, src: &Source) -> Declared {
             N::ClassMethodDef => declaring.method(node),
             N::FuncDef => {
                 if let Some(name) = psi::function_name(node).filter(|_| node.child(N::FuncBody).is_some()) {
-                    let module = declaring.module.clone();
-                    declaring.member(vec![module], name, MemberKind::Function, node, node);
+                    let (module, ty) = (declaring.module.clone(), declaring.alone(node));
+                    declaring.member(vec![module], name, MemberKind::Function, (node, node), Some(ty));
                 }
             }
             N::AssignStat => declaring.assignment(node),
