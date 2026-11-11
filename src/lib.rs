@@ -1255,6 +1255,67 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "measurement: CFXLUA_PROJECT=<dir> cargo test --release --lib edit_cost_in_a_real_project -- --ignored --nocapture"]
+    fn edit_cost_in_a_real_project() {
+        let root = std::path::PathBuf::from(std::env::var("CFXLUA_PROJECT").expect("CFXLUA_PROJECT"));
+        let mut all = Vec::new();
+        demo_files(&root, &root, &mut all);
+        let host = openidea_plugin::mock::MockHost::install();
+        for (rel, text) in &all {
+            host.add_file(rel, text);
+        }
+        let mut kit = DevKit::default();
+        let start = std::time::Instant::now();
+        kit.activate(&host.context("sensity.cfxlua")).unwrap();
+        let activation = start.elapsed();
+        let mut batches = 0;
+        while kit.indexing && batches < 5_000 {
+            kit.handle_events(&[Event::EditorFocused(None)], &host.invocation());
+            batches += 1;
+        }
+        eprintln!(
+            "{} files: activation {activation:?}, read in {:?} over {batches} event batches",
+            all.len(),
+            start.elapsed()
+        );
+        let small = |(p, t): &&(String, String)| {
+            p.ends_with(".lua") && !p.ends_with("fxmanifest.lua") && (4_000..8_000).contains(&t.len())
+        };
+        let (rel, text) = all.iter().find(small).expect("a small script");
+        let path = format!("/project/{rel}");
+        for typed in ["GetEnt", "GetEnti", "GetEntit"] {
+            let text = format!("{text}\n{typed}");
+            let at = Position::new(text.split('\n').count() as u32 - 1, typed.len() as u32);
+            let doc = Document { path: path.clone(), language: "lua".into(), version: typed.len() as _, text };
+            eprintln!("{} bytes, `{typed}` typed:", doc.text.len());
+            let mut timed = |what: &str, run: &mut dyn FnMut(&mut DevKit) -> usize| {
+                let start = std::time::Instant::now();
+                let count = run(&mut kit);
+                eprintln!("  {what}: {count} in {:?}", start.elapsed());
+            };
+            timed("workspace", &mut |kit| kit.workspace_for(&doc.path));
+            timed("prioritize", &mut |kit| {
+                let ws = kit.workspace_for(&doc.path);
+                kit.prioritize(ws, &doc.path);
+                0
+            });
+            timed("step", &mut |kit| {
+                kit.step(EDIT);
+                0
+            });
+            timed("status", &mut |kit| {
+                kit.update_status(Some(&doc.path));
+                0
+            });
+            timed("prepare", &mut |kit| kit.prepare(&doc).unwrap_or(0));
+            timed("completion", &mut |kit| kit.completion(&doc, at, None).len());
+            timed("occurrences", &mut |kit| kit.document_highlights(&doc, at).len());
+            timed("line markers and problems", &mut |kit| kit.line_markers(&doc).len());
+            timed("semantic tokens", &mut |kit| kit.semantic_tokens(&doc).len());
+        }
+    }
+
+    #[test]
     #[ignore = "measurement: CFXLUA_PROJECT=<dir> cargo test --release --lib index_cost_of_a_real_project -- --ignored --nocapture"]
     fn index_cost_of_a_real_project() {
         fn walk(dir: &std::path::Path, root: &std::path::Path, out: &mut Vec<(String, String)>) {
@@ -1328,6 +1389,29 @@ mod tests {
             let indexed = start.elapsed();
             feature.indexed(&ws);
             eprintln!("keystroke {name}: index_file {indexed:?}, indexed {:?}", start.elapsed() - indexed);
+        }
+        // What completing a native name costs in a small file of this project, feature by feature.
+        let (path, text) = files
+            .iter()
+            .filter(|(p, t)| p.ends_with(".lua") && !p.ends_with("fxmanifest.lua") && (4_000..8_000).contains(&t.len()))
+            .find(|(p, _)| ws.resource_of(&format!("/real/{p}")).is_some())
+            .expect("a small script of a resource");
+        let path = format!("/real/{path}");
+        let typed = format!("{text}\nGetEnt");
+        let (settings, natives) = (Settings::defaults(), Natives::bundled());
+        let start = std::time::Instant::now();
+        let doc = Doc::new(&ws, &path, "lua", 2, &typed);
+        eprintln!("completion in {} bytes: document {:?}", typed.len(), start.elapsed());
+        let cx = Ctx { doc: &doc, ws: &ws, settings: &settings, natives: &natives };
+        let start = std::time::Instant::now();
+        let games = ws.detected_games();
+        eprintln!("completion: {} detected games in {:?}", games.len(), start.elapsed());
+        for round in ["first", "second"] {
+            for (feature, name) in features.iter().zip(names) {
+                let start = std::time::Instant::now();
+                let count = feature.completion(&cx, typed.len(), None).len();
+                eprintln!("completion, {round} call, {name}: {count} in {:?}", start.elapsed());
+            }
         }
     }
 
