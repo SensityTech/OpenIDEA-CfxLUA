@@ -2,7 +2,8 @@
 // the editor: semantic tokens, folds, structure and the occurrences of a word, then what the editor asks after an
 // edit, at its own delays. The calls run under the host's limits for editor calls, so a provider that is too slow
 // answers nothing here as it would in the IDE. The host then stops waiting at its deadline and the time printed is
-// its wait, not what the provider costs: `--patient` lifts the deadline to show that cost.
+// its wait, not what the provider costs: `--patient` lifts the deadline to show that cost. An entry of the structure
+// that its parent does not hold fails the check: the IDE would list it at the top.
 // No project is open in this host, so the plugin loads no native catalog: natives come back as unknown globals and
 // completion lists none. What is timed is the reading of the file itself.
 // Built like scripts/openidea-start-check.rs, as an example of OpenIDEA's `ide-host` crate:
@@ -92,7 +93,16 @@ fn check(dir: &Path, limits: Limits, package: &Path, file: &Path, word: Option<&
 
     let start = Instant::now();
     let symbols = host.language_document_symbols(&doc);
-    println!("structure: {} ({:?})", symbols.len(), start.elapsed());
+    // The IDE nests an entry only under a parent that comes before it and whose range holds its own.
+    let held = |index: usize, parent: u32| {
+        let (entry, holder) = (&symbols[index], symbols.get(parent as usize));
+        holder.is_some_and(|holder| {
+            (parent as usize) < index && holder.range.start <= entry.range.start && entry.range.end <= holder.range.end
+        })
+    };
+    let loose =
+        symbols.iter().enumerate().filter(|(index, entry)| entry.parent.is_some_and(|p| !held(*index, p))).count();
+    println!("structure: {} ({:?}), {loose} outside their parent", symbols.len(), start.elapsed());
     for symbol in &symbols {
         let mut depth = 0;
         let mut parent = symbol.parent;
@@ -144,6 +154,9 @@ fn check(dir: &Path, limits: Limits, package: &Path, file: &Path, word: Option<&
     }
     if coloured == 0 {
         return Err("no semantic token came back after the edit".to_owned());
+    }
+    if loose > 0 {
+        return Err(format!("{loose} entries of the structure are not inside their parent: the IDE lists them flat"));
     }
     Ok(())
 }
