@@ -160,6 +160,7 @@ impl DevKit {
         paths.sort();
         paths.dedup();
         let ws = &mut self.workspaces[i];
+        let pending = self.unread.len();
         for path in paths {
             ws.set(&path, None);
             if project::file_kind(&path) != FileKind::Other {
@@ -181,7 +182,7 @@ impl DevKit {
         self.catalogs.push(i);
         self.indexing = true;
         self.read_luals(i);
-        host::log(LogLevel::Info, &format!("{} files of {root} to read", self.unread.len()));
+        host::log(LogLevel::Info, &format!("{} files of {root} to read", self.unread.len() - pending));
     }
 
     fn step(&mut self, slice: Slice) {
