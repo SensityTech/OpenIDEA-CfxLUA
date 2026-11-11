@@ -2,7 +2,8 @@ use crate::lua::Source;
 use crate::lua::token::T;
 use crate::lua::tree::{N, Node};
 
-/// An entry of the structure view; `parent` indexes the list and comes before its children.
+/// An entry of the structure view; `parent` indexes the list, comes before its children and is written
+/// around them.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Symbol {
     pub name: String,
@@ -31,6 +32,12 @@ struct Element {
     range: (usize, usize),
     selection: (usize, usize),
     children: Vec<usize>,
+    /// The name as the code writes it, for an element declared away from what holds it.
+    written: Option<String>,
+    /// Named on the way to a member (`a` and `b` of `a.b.c = 1`), never declared here.
+    implied: bool,
+    /// A variable that another variable or a class holds.
+    field: bool,
 }
 
 /// The names visible where the walk stands: those of an element, on top of its parents'.
@@ -78,6 +85,11 @@ fn selection(node: Node) -> (usize, usize) {
     node.token(T::Id).map_or(node.code_range(), |id| id.range())
 }
 
+/// The text of `node` without its spaces and comments.
+fn written(node: Node) -> String {
+    node.all_tokens().filter(|token| !token.kind().is_trivia()).map(|token| token.text()).collect()
+}
+
 impl Outline {
     fn create(&mut self, kind: Kind, name: &str, detail: String, node: Node) -> usize {
         self.elements.push(Element {
@@ -87,8 +99,20 @@ impl Outline {
             range: node.code_range(),
             selection: selection(node),
             children: Vec::new(),
+            written: None,
+            implied: false,
+            field: false,
         });
         self.elements.len() - 1
+    }
+
+    /// A variable reaches to the end of its value: the fields of a table are written inside it.
+    fn reach(&mut self, element: usize, value: Option<Node>) {
+        if let Some(value) = value {
+            let end = value.code_range().1;
+            let range = &mut self.elements[element].range;
+            range.1 = range.1.max(end);
+        }
     }
 
     /// Adds `element` where the walk stands; a name already listed there is replaced in place.
@@ -145,11 +169,13 @@ impl Outline {
                 (Some(found), _) => found,
                 (None, None) => {
                     let created = self.create(Kind::GlobalVar, name, String::new(), part);
+                    self.elements[created].implied = true;
                     self.add(created);
                     created
                 }
                 (None, Some(owner)) => {
                     let created = self.create(Kind::LocalVar, name, String::new(), part);
+                    self.elements[created].implied = true;
                     self.elements[owner].children.push(created);
                     created
                 }
@@ -202,8 +228,12 @@ impl Outline {
                 (None, Some(Kind::Class | Kind::LocalVar)) => self.create(Kind::LocalVar, name, String::new(), target),
                 (None, _) => self.create(Kind::GlobalVar, name, String::new(), target),
             };
+            self.reach(child, value);
             match owner {
-                Some(owner) => self.elements[owner].children.push(child),
+                Some(owner) => {
+                    self.elements[child].written = Some(written(target));
+                    self.elements[owner].children.push(child);
+                }
                 None => self.add(child),
             }
             if let Some(closure) = closure {
@@ -225,6 +255,7 @@ impl Outline {
                         Some(class) => self.create(Kind::Class, class, String::new(), name),
                         None => self.create(Kind::LocalVar, name.code(), String::new(), name),
                     };
+                    self.reach(element, values.get(i).copied());
                     self.add_as(element, name.code().to_owned());
                     if let Some(table) = values.get(i).filter(|value| value.is(N::TableExpr)) {
                         self.table(*table, element);
@@ -249,6 +280,7 @@ impl Outline {
                 let Some(owner) = self.compound(object) else { return };
                 let element = self.create(Kind::Method, name.text(), params(node), node);
                 self.elements[element].selection = name.range();
+                self.elements[element].written = Some(written(path));
                 self.elements[owner].children.push(element);
                 self.inside(element, node.child(N::FuncBody));
             }
@@ -289,13 +321,62 @@ impl Outline {
         }
     }
 
-    fn list(&self, element: usize, parent: Option<u32>, nested: bool, out: &mut Vec<Symbol>) {
+    /// Marks the variables that another variable or a class holds.
+    fn mark_fields(&mut self, element: usize, nested: bool) {
+        self.elements[element].field = nested;
+        let nested = !matches!(self.elements[element].kind, Kind::GlobalFunction | Kind::LocalFunction | Kind::Method);
+        for i in 0..self.elements[element].children.len() {
+            self.mark_fields(self.elements[element].children[i], nested);
+        }
+    }
+
+    /// OpenIDEA nests an entry only inside what is written around it. An element declared away from what
+    /// holds it (`function a:b()` after `a`) moves to what is written around it, under the name the code gives
+    /// it, and what was only named on the way to a member is not listed. Gives the elements left at the top.
+    fn rehome(&mut self, top: Vec<usize>) -> Vec<usize> {
+        let mut found: Vec<(usize, Option<usize>)> = Vec::new();
+        let mut pending: Vec<(usize, Option<usize>)> = top.into_iter().rev().map(|element| (element, None)).collect();
+        while let Some((element, holder)) = pending.pop() {
+            found.push((element, holder));
+            pending.extend(self.elements[element].children.iter().rev().map(|child| (*child, Some(element))));
+        }
+        let inside = |outer: (usize, usize), inner: (usize, usize)| outer.0 <= inner.0 && inner.1 <= outer.1;
+        found.retain(|(element, _)| !self.elements[*element].implied);
+        found.sort_by_key(|(element, _)| {
+            let (start, end) = self.elements[*element].range;
+            (start, std::cmp::Reverse(end))
+        });
+        for (element, _) in &found {
+            self.elements[*element].children.clear();
+        }
+        let mut top = Vec::new();
+        let mut around: Vec<usize> = Vec::new();
+        for (element, holder) in found {
+            let range = self.elements[element].range;
+            while around.last().is_some_and(|outer| !inside(self.elements[*outer].range, range)) {
+                around.pop();
+            }
+            let stays = holder.filter(|h| !self.elements[*h].implied && inside(self.elements[*h].range, range));
+            let renamed = self.elements[element].written.take().filter(|_| stays.is_none());
+            if let Some(name) = renamed {
+                self.elements[element].name = name;
+            }
+            match stays.or(around.last().copied()) {
+                Some(holder) => self.elements[holder].children.push(element),
+                None => top.push(element),
+            }
+            around.push(element);
+        }
+        top
+    }
+
+    fn list(&self, element: usize, parent: Option<u32>, out: &mut Vec<Symbol>) {
         let e = &self.elements[element];
         let kind = match e.kind {
             Kind::GlobalFunction | Kind::LocalFunction => "function",
             Kind::Method => "method",
             Kind::Class => "class",
-            Kind::LocalVar if nested => "field",
+            Kind::LocalVar if e.field => "field",
             Kind::GlobalVar | Kind::LocalVar => "variable",
         };
         let index = out.len() as u32;
@@ -307,23 +388,44 @@ impl Outline {
             selection: e.selection,
             parent,
         });
-        let nested = !matches!(e.kind, Kind::GlobalFunction | Kind::LocalFunction | Kind::Method);
         for child in &e.children {
-            self.list(*child, Some(index), nested, out);
+            self.list(*child, Some(index), out);
         }
+    }
+
+    /// What the file declares, as the JetBrains plugin holds it, and the elements at its top.
+    fn of(src: &Source) -> (Outline, Vec<usize>) {
+        let mut outline =
+            Outline { elements: Vec::new(), contexts: vec![Context { element: None, names: Vec::new() }] };
+        outline.block(src.root());
+        let top: Vec<usize> = outline.contexts[0].names.iter().map(|(_, element)| *element).collect();
+        for element in &top {
+            outline.mark_fields(*element, false);
+        }
+        (outline, top)
+    }
+
+    fn listed(mut self, top: Vec<usize>) -> Vec<Symbol> {
+        let mut out = Vec::new();
+        for element in top {
+            self.compress(element);
+            self.list(element, None, &mut out);
+        }
+        out
     }
 }
 
 /// The structure view of the JetBrains plugin: what the file declares, functions holding what
 /// their body declares, tables their named fields.
+#[cfg(test)]
+pub fn as_intellij(src: &Source) -> Vec<Symbol> {
+    let (outline, top) = Outline::of(src);
+    outline.listed(top)
+}
+
+/// The structure view: the entries of the JetBrains plugin, each under what is written around it.
 pub fn symbols(src: &Source) -> Vec<Symbol> {
-    let mut outline = Outline { elements: Vec::new(), contexts: vec![Context { element: None, names: Vec::new() }] };
-    outline.block(src.root());
-    let top: Vec<usize> = outline.contexts[0].names.iter().map(|(_, element)| *element).collect();
-    let mut out = Vec::new();
-    for element in top {
-        outline.compress(element);
-        outline.list(element, None, false, &mut out);
-    }
-    out
+    let (mut outline, top) = Outline::of(src);
+    let top = outline.rehome(top);
+    outline.listed(top)
 }

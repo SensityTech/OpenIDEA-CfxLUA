@@ -17,8 +17,9 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   comments).
 - **Folding, structure and occurrences from the plugin**, for a project without lua-language-server: blocks, tables,
   long comments, long strings and `--region` fold; the structure view lists functions, methods, variables and table
-  fields; the caret on a name highlights its uses in the file (written or read), on `return` the exits of the
-  function, on `break` the ends of its loop.
+  fields, each under what is written around it (a method declared after its table is listed as `Table:method()`);
+  the caret on a name highlights its uses in the file (written or read), on `return` the exits of the function, on
+  `break` the ends of its loop.
 
 ### Fixed
 

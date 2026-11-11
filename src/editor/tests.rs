@@ -222,9 +222,8 @@ fn return_break_and_operators() {
     assert_eq!(highlighted("x = a + b * c", "+", 0), ["a + b * c@1 Text"]);
 }
 
-/// The outline as `depth name detail kind`.
-fn outlined(text: &str) -> Vec<String> {
-    let symbols = super::symbols::symbols(&source(text));
+/// Each entry as `depth name detail kind`.
+fn depths(symbols: &[super::symbols::Symbol]) -> Vec<String> {
     symbols
         .iter()
         .map(|symbol| {
@@ -237,6 +236,29 @@ fn outlined(text: &str) -> Vec<String> {
             format!("{depth} {}{} {}", symbol.name, symbol.detail, symbol.kind)
         })
         .collect()
+}
+
+/// The outline of the JetBrains plugin.
+fn outlined(text: &str) -> Vec<String> {
+    depths(&super::symbols::as_intellij(&source(text)))
+}
+
+/// The outline OpenIDEA is given: every parent comes first and is written around its children.
+fn listed(text: &str) -> Vec<String> {
+    let symbols = super::symbols::symbols(&source(text));
+    for (index, symbol) in symbols.iter().enumerate() {
+        if let Some(parent) = symbol.parent {
+            let holder = &symbols[parent as usize];
+            assert!((parent as usize) < index, "{} comes before {}", symbol.name, holder.name);
+            assert!(
+                holder.range.0 <= symbol.range.0 && symbol.range.1 <= holder.range.1,
+                "{} in {}",
+                symbol.name,
+                holder.name
+            );
+        }
+    }
+    depths(&symbols)
 }
 
 /// The fixture of the JetBrains plugin's structure view, whose comments say what each line gives.
@@ -316,6 +338,83 @@ fn the_structure_lists_declarations_with_what_they_hold() {
             "1 Locale.fr field",
             "0 <anonymous>(cb) function",
             "1 state variable",
+        ]
+    );
+}
+
+#[test]
+fn an_entry_declared_away_from_its_holder_is_listed_where_it_is_written() {
+    let text = "local M = { name = 1, run = function(a) end }\nlocal function helper(x, ...)\n  local inner = 2\nend\n\
+                function Start() local hidden end\nfunction M.sub.go(self) local step end\nfunction M:stop() end\n\
+                Config = { debug = true }\nConfig.Locale.fr = {}\nOnReady(function(cb) local state end)\nM = nil";
+    assert_eq!(
+        listed(text),
+        [
+            "0 M variable",
+            "1 name field",
+            "1 run(a) function",
+            "0 helper(x, ...) function",
+            "1 inner variable",
+            "0 Start() function",
+            "0 M.sub.go(self) method",
+            "1 step variable",
+            "0 M:stop() method",
+            "0 Config.debug variable",
+            "0 Config.Locale.fr field",
+            "0 <anonymous>(cb) function",
+            "1 state variable",
+        ]
+    );
+    assert_eq!(
+        listed("Config.debug = true\nConfig.zones = { a = 1, b = 2 }"),
+        ["0 Config.debug variable", "0 Config.zones variable", "1 a field", "1 b field"]
+    );
+    assert_eq!(
+        listed(
+            "function Open()\n  self.name = 1\nend\nlocal t = {}\nlocal function fill()\n  t.x = function() local y end\nend"
+        ),
+        ["0 Open() function", "0 t variable", "0 fill() function", "1 t.x() function", "2 y variable"]
+    );
+}
+
+#[test]
+fn the_intellij_fixture_as_openidea_nests_it() {
+    assert_eq!(
+        listed(include_str!("testdata/structure.lua")),
+        [
+            "0 Emmy2 class",
+            "1 name field",
+            "1 age field",
+            "1 doit() method",
+            "0 f variable",
+            "0 e:sayHello() method",
+            "0 a variable",
+            "0 globalFunc() function",
+            "0 globalFuncWithArgs(a, b, c) function",
+            "0 localFunc() function",
+            "0 localFunc2() function",
+            "1 localFuncNestedInLocalFunc2() function",
+            "1 bobby variable",
+            "1 e.baz() method",
+            "0 d variable",
+            "1 foo() function",
+            "1 bar(a, b) function",
+            "0 g variable",
+            "0 A.B.C.doit() method",
+            "0 A.B.C.doitAgain() function",
+            "0 A.B.C.var field",
+            "0 globalVar variable",
+            "0 globalFunc2() function",
+            "1 j variable",
+            "0 globalTable variable",
+            "1 a() function",
+            "0 globalC2 variable",
+            "0 xyz variable",
+            "0 <anonymous>() function",
+            "1 a variable",
+            "1 F variable",
+            "1 A.x() function",
+            "2 x variable",
         ]
     );
 }
