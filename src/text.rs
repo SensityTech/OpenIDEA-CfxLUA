@@ -7,6 +7,40 @@ pub struct LineIndex {
     len: usize,
 }
 
+pub struct Cursor<'a> {
+    index: &'a LineIndex,
+    text: &'a str,
+    line: usize,
+    at: usize,
+    character: u32,
+}
+
+impl Cursor<'_> {
+    pub fn position(&mut self, at: usize) -> Position {
+        let at = floor_char_boundary(self.text, at.min(self.text.len()));
+        if at < self.at {
+            self.line = self.index.line_of(at);
+            self.at = self.index.starts[self.line];
+            self.character = 0;
+        }
+        while self.index.starts.get(self.line + 1).is_some_and(|next| *next <= at) {
+            self.line += 1;
+            self.at = self.index.starts[self.line];
+            self.character = 0;
+        }
+        let gap = &self.text[self.at..at];
+        self.character +=
+            if gap.is_ascii() { gap.len() as u32 } else { gap.chars().map(|c| c.len_utf16() as u32).sum() };
+        self.at = at;
+        Position::new(self.line as u32, self.character)
+    }
+
+    pub fn range(&mut self, start: usize, end: usize) -> Range {
+        let start = self.position(start);
+        Range::new(start, self.position(end))
+    }
+}
+
 impl LineIndex {
     pub fn new(text: &str) -> Self {
         let mut starts = vec![0];
@@ -44,6 +78,11 @@ impl LineIndex {
 
     pub fn range(&self, text: &str, start: usize, end: usize) -> Range {
         Range::new(self.position(text, start), self.position(text, end))
+    }
+
+    /// Positions for offsets asked in increasing order: each one is counted from the one before.
+    pub fn cursor<'a>(&'a self, text: &'a str) -> Cursor<'a> {
+        Cursor { index: self, text, line: 0, at: 0, character: 0 }
     }
 
     pub fn offset(&self, text: &str, pos: Position) -> usize {
@@ -125,6 +164,17 @@ pub fn file_name(path: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_cursor_gives_the_positions_of_increasing_offsets() {
+        let text = "ab\n\u{e9}t\u{e9} \u{1f600}x\r\nlast";
+        let index = LineIndex::new(text);
+        let mut cursor = index.cursor(text);
+        for at in (0..=text.len()).filter(|at| text.is_char_boundary(*at)) {
+            assert_eq!(cursor.position(at), index.position(text, at), "offset {at}");
+        }
+        assert_eq!(cursor.position(1), index.position(text, 1), "an offset before the last one starts over");
+    }
 
     #[test]
     fn positions_round_trip_with_utf16() {

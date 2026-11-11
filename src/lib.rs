@@ -810,48 +810,54 @@ impl Views for DevKit {
     }
 }
 
+/// What the SDK's enums cannot say about a token: a kind in its place, modifiers on top of its own.
+type BeyondSdk = (Option<&'static str>, &'static [&'static str]);
+
 thread_local! {
-    /// The token types and modifiers of the last answer, by the names the editor styles: the SDK's
-    /// enums lack `self-keyword`, `global` and `mutable`, which the plugin API accepts as strings.
-    static TOKEN_NAMES: std::cell::RefCell<Vec<(&'static str, Vec<&'static str>)>> =
-        const { std::cell::RefCell::new(Vec::new()) };
+    /// For each token of the last answer, the names the editor styles that the SDK's enums lack
+    /// (`self-keyword`, `global`, `mutable`): the plugin API takes any LSP name.
+    static TOKEN_NAMES: std::cell::RefCell<Vec<BeyondSdk>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 impl SemanticTokens for DevKit {
     fn semantic_tokens(&mut self, d: &Document) -> Vec<SemanticToken> {
         let tokens = self.prepare(d).and_then(|ws| {
             self.with_ctx(ws, |cx, features| {
+                use editor::semantic::{Kind, Mods};
                 let tokens: Vec<editor::semantic::Token> =
                     features.iter().flat_map(|f| f.semantic_tokens(cx)).collect();
-                tokens.into_iter().map(|token| (cx.doc.range(token.start, token.end), token)).collect::<Vec<_>>()
+                let mut cursor = cx.doc.src.lines.cursor(cx.doc.text());
+                let mut names = Vec::with_capacity(tokens.len());
+                let mut out = Vec::with_capacity(tokens.len());
+                for token in &tokens {
+                    let kind = match token.kind {
+                        Kind::Variable => TokenKind::Variable,
+                        Kind::Parameter | Kind::SelfName => TokenKind::Parameter,
+                        Kind::Function => TokenKind::Function,
+                        Kind::Method => TokenKind::Method,
+                        Kind::Property => TokenKind::Property,
+                        Kind::Hash => TokenKind::String,
+                    };
+                    let modifiers = [
+                        (Mods::DECLARATION, TokenModifier::Declaration),
+                        (Mods::STATIC, TokenModifier::Static),
+                        (Mods::DEPRECATED, TokenModifier::Deprecated),
+                        (Mods::LIBRARY, TokenModifier::DefaultLibrary),
+                    ];
+                    let modifiers = modifiers.into_iter().filter(|(flag, _)| token.mods.has(*flag)).map(|(_, m)| m);
+                    names.push(token.beyond_sdk());
+                    out.push(SemanticToken {
+                        range: cursor.range(token.start, token.end),
+                        kind,
+                        modifiers: modifiers.collect(),
+                    });
+                }
+                (out, names)
             })
         });
-        let tokens = tokens.unwrap_or_default();
-        TOKEN_NAMES.with(|names| {
-            *names.borrow_mut() = tokens.iter().map(|(_, token)| (token.kind_name(), token.modifier_names())).collect();
-        });
+        let (tokens, names) = tokens.unwrap_or_default();
+        TOKEN_NAMES.with(|kept| *kept.borrow_mut() = names);
         tokens
-            .into_iter()
-            .map(|(range, token)| {
-                use editor::semantic::{Kind, Mods};
-                let kind = match token.kind {
-                    Kind::Variable => TokenKind::Variable,
-                    Kind::Parameter | Kind::SelfName => TokenKind::Parameter,
-                    Kind::Function => TokenKind::Function,
-                    Kind::Method => TokenKind::Method,
-                    Kind::Property => TokenKind::Property,
-                    Kind::Hash => TokenKind::String,
-                };
-                let modifiers = [
-                    (Mods::DECLARATION, TokenModifier::Declaration),
-                    (Mods::STATIC, TokenModifier::Static),
-                    (Mods::DEPRECATED, TokenModifier::Deprecated),
-                    (Mods::LIBRARY, TokenModifier::DefaultLibrary),
-                ];
-                let modifiers = modifiers.into_iter().filter(|(flag, _)| token.mods.has(*flag)).map(|(_, m)| m);
-                SemanticToken { range, kind, modifiers: modifiers.collect() }
-            })
-            .collect()
     }
 }
 
@@ -940,8 +946,10 @@ const _: () = {
                     return;
                 }
                 for (token, (kind, modifiers)) in tokens.iter_mut().zip(names.iter()) {
-                    token.kind = (*kind).to_owned();
-                    token.modifiers = modifiers.iter().map(|modifier| (*modifier).to_owned()).collect();
+                    if let Some(kind) = kind {
+                        token.kind = (*kind).to_owned();
+                    }
+                    token.modifiers.extend(modifiers.iter().map(|modifier| (*modifier).to_owned()));
                 }
             });
             tokens

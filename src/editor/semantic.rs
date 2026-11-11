@@ -70,6 +70,21 @@ impl Token {
         }
     }
 
+    /// What the SDK's enums cannot say: the kind to send in place of the SDK's, and the modifiers
+    /// to add to the SDK's.
+    pub fn beyond_sdk(&self) -> (Option<&'static str>, &'static [&'static str]) {
+        let kind = (self.kind == Kind::SelfName).then_some("self-keyword");
+        let modifiers: &[&str] =
+            match (self.kind == Kind::Hash, self.mods.has(Mods::GLOBAL), self.mods.has(Mods::UPVALUE)) {
+                (true, ..) => &["byte-string"],
+                (false, true, true) => &["global", "mutable"],
+                (false, true, false) => &["global"],
+                (false, false, true) => &["mutable"],
+                (false, false, false) => &[],
+            };
+        (kind, modifiers)
+    }
+
     pub fn modifier_names(&self) -> Vec<&'static str> {
         let mut out = Vec::new();
         let names = [
