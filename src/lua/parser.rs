@@ -46,6 +46,19 @@ fn binary_priority(kind: T) -> Option<(u8, u8)> {
     })
 }
 
+/// For the keyword that opens a construct: the keywords to step over, and those that close it.
+/// The block after `then` stops at `else` and `elseif` only when it is the block being delimited.
+fn closers(begin: T, outer: bool) -> Option<(&'static [T], &'static [T])> {
+    Some(match begin {
+        T::Do | T::Else | T::Function => (&[], &[T::End]),
+        T::Repeat => (&[], &[T::Until]),
+        T::If => (&[T::Then, T::Else, T::ElseIf], &[T::End]),
+        T::Then if outer => (&[], &[T::Else, T::ElseIf, T::End]),
+        T::Then => (&[T::Else, T::ElseIf], &[T::End]),
+        _ => return None,
+    })
+}
+
 impl Tree {
     pub fn parse(src: &str) -> Tree {
         Tree::of(src, Rc::new(lex(src)))
@@ -103,6 +116,11 @@ impl Parser<'_> {
     /// `++` written as two adjacent `+`: CfxLua has no increment operator.
     fn is_increment(&mut self) -> bool {
         self.b.at(T::Plus) && self.b.raw(1) == Some(T::Plus)
+    }
+
+    /// `//=`, `%=` and `..=`, which CfxLua does not have: the operator glued to `=`.
+    fn is_missing_compound(&mut self) -> bool {
+        matches!(self.b.tok(), Some(T::DoubleDiv | T::Mod | T::Concat)) && self.b.raw(1) == Some(T::Assign)
     }
 
     fn error_increment(&mut self) -> Done {
@@ -438,6 +456,16 @@ impl Parser<'_> {
                 let m = self.b.precede(expr);
                 return Some(self.finish_stat(m, N::CompoundAssignStat));
             }
+            if self.is_missing_compound() {
+                let op = self.b.token_text();
+                let m = self.b.mark();
+                self.b.advance();
+                self.b.advance();
+                self.b.fail(m, format!("'{op}=' is not supported in CfxLua, use 'x = x {op} y'"));
+                self.expect_expr();
+                let m = self.b.precede(expr);
+                return Some(self.finish_stat(m, N::CompoundAssignStat));
+            }
             let mut targets = false;
             while self.b.eat(T::Comma) {
                 targets = true;
@@ -485,7 +513,7 @@ impl Parser<'_> {
         let begin = if begin == T::RParen { T::Function } else { begin };
         let start = self.b.position();
         let outer = self.b.limit();
-        self.match_start(true, 0, begin);
+        self.skip_block(begin);
         let end = self.b.position();
         self.b.enter(start, end);
         if self.depth >= MAX_DEPTH {
@@ -511,45 +539,32 @@ impl Parser<'_> {
         Some(self.b.fail(m, NESTED_TOO_DEEPLY))
     }
 
-    fn match_start(&mut self, advanced: bool, level: usize, begin: T) -> bool {
-        if level > MAX_DEPTH {
-            return false;
-        }
-        match begin {
-            T::Do | T::Else | T::Function => self.match_end(advanced, level, &[], &[T::End]),
-            T::Repeat => self.match_end(advanced, level, &[], &[T::Until]),
-            T::If => self.match_end(advanced, level, &[T::Then, T::Else, T::ElseIf], &[T::End]),
-            T::Then if level == 0 => self.match_end(advanced, level, &[], &[T::Else, T::ElseIf, T::End]),
-            T::Then => self.match_end(advanced, level, &[T::Else, T::ElseIf], &[T::End]),
-            _ => false,
-        }
-    }
-
-    fn match_end(&mut self, advanced: bool, level: usize, skips: &[T], types: &[T]) -> bool {
-        if !advanced {
-            self.b.advance();
-        }
-        loop {
-            let Some(mut kind) = self.b.tok() else { return false };
-            while !skips.contains(&kind) {
-                if types.contains(&kind) {
-                    if level != 0 {
-                        self.b.advance();
-                    }
-                    return true;
+    /// Moves to the keyword that closes the block opened by `begin`, or to the end of the input.
+    /// Each keyword that opens a construct on the way is matched with the one that closes it.
+    fn skip_block(&mut self, begin: T) {
+        let Some(first) = closers(begin, true) else { return };
+        let mut open = vec![first];
+        while let (Some(kind), Some((skips, ends))) = (self.b.tok(), open.last().copied()) {
+            let outer = open.len() == 1;
+            if skips.contains(&kind) {
+                self.b.advance();
+            } else if ends.contains(&kind) {
+                if outer {
+                    return;
                 }
-                if kind == T::Until {
-                    return true;
+                self.b.advance();
+                open.pop();
+            } else if kind == T::Until {
+                if outer {
+                    return;
                 }
-                if !self.match_start(false, level + 1, kind) {
-                    break;
-                }
-                match self.b.tok() {
-                    Some(next) => kind = next,
-                    None => return false,
+                open.pop();
+            } else {
+                self.b.advance();
+                if let Some(inner) = closers(kind, false) {
+                    open.push(inner);
                 }
             }
-            self.b.advance();
         }
     }
 
@@ -626,8 +641,8 @@ impl Parser<'_> {
         // After an operator that lacks its right operand, only looser operators carry on.
         let mut ceiling = u8::MAX;
         while let Some((left_priority, right_priority)) = self.b.tok().and_then(binary_priority) {
-            // `x++` is not an addition: the statement parser reports it.
-            if left_priority <= limit || left_priority >= ceiling || self.is_increment() {
+            // `x++` is not an addition and `x //= 1` not a division: the statement parser reports them.
+            if left_priority <= limit || left_priority >= ceiling || self.is_increment() || self.is_missing_compound() {
                 break;
             }
             let op = self.b.mark();

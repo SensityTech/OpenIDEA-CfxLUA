@@ -1,9 +1,9 @@
 use crate::lua::Source;
 use crate::lua::lexer::Tok;
+use crate::lua::token::T;
+use crate::lua::tree::{N, Node, Token};
 
 pub type Span = (usize, usize);
-
-const MAX_DEPTH: usize = 120;
 
 pub const COMPOUND_OPS: &[&str] = &["+=", "-=", "*=", "/=", "<<=", ">>=", "&=", "|=", "^=", "//=", "%=", "..="];
 
@@ -66,21 +66,10 @@ pub struct Func {
 
 impl Tree {
     pub fn new(src: &Source) -> Self {
-        let mut p = Parser { src, n: src.toks.len(), funcs: Vec::new(), stack: Vec::new(), depth: 0 };
-        let mut stmts = Vec::new();
-        let mut i = 0;
-        loop {
-            let b = p.block(i, &[]);
-            stmts.extend(b.stmts);
-            if b.end >= p.n {
-                break;
-            }
-            // A stray `end` / `else` / `until` at the top level.
-            stmts.push(Stmt { start: b.end, end: b.end + 1, kind: Kind::Error });
-            i = b.end + 1;
-        }
-        let block = Block { stmts, end: p.n };
-        let funcs = p.funcs;
+        let mut lower = Lower { src, funcs: Vec::new(), stack: Vec::new() };
+        let mut block = lower.block(src.root());
+        block.end = src.toks.len();
+        let funcs = lower.funcs;
         let mut owner = vec![0u32; src.toks.len()];
         for (k, f) in funcs.iter().enumerate() {
             for o in &mut owner[f.kw.min(src.toks.len())..f.next.min(src.toks.len())] {
@@ -129,311 +118,84 @@ impl Stmt {
     }
 }
 
-struct Parser<'a> {
+/// Reads the statements and functions off the syntax tree, as spans of `Source::toks`.
+struct Lower<'a> {
     src: &'a Source,
-    n: usize,
     funcs: Vec<Func>,
     stack: Vec<usize>,
-    depth: usize,
 }
 
-const END: &[&str] = &["end"];
-const IF_TERMS: &[&str] = &["end", "else", "elseif"];
-const UNTIL: &[&str] = &["until"];
-const BLOCK_ENDS: &[&str] = &["end", "else", "elseif", "until"];
-
-impl Parser<'_> {
-    fn text(&self, i: usize) -> &str {
-        self.src.tok_text(i)
+impl<'a> Lower<'a> {
+    fn tok(&self, token: Token) -> usize {
+        self.src.tok_of(token.index())
     }
 
-    fn kind(&self, i: usize) -> Option<Tok> {
-        self.src.toks.get(i).map(|t| t.kind)
+    fn at(&self, node: Node, kind: T) -> Option<usize> {
+        node.token(kind).map(|token| self.tok(token))
     }
 
-    fn kw(&self, i: usize, kw: &str) -> bool {
-        self.src.is_kw(i, kw)
-    }
-
-    fn op(&self, i: usize, op: &str) -> bool {
-        self.src.is_op(i, op)
-    }
-
-    fn name(&self, i: usize) -> bool {
-        self.src.is_name(i)
-    }
-
-    fn block(&mut self, mut i: usize, terms: &[&str]) -> Block {
-        if self.depth >= MAX_DEPTH {
-            return Block { stmts: Vec::new(), end: self.skip_flat(i, terms) };
-        }
-        self.depth += 1;
-        let mut stmts = Vec::new();
-        while i < self.n {
-            if self.kind(i) == Some(Tok::Keyword) && BLOCK_ENDS.contains(&self.text(i)) {
-                if terms.contains(&self.text(i)) || terms.is_empty() {
-                    break;
-                }
-                stmts.push(Stmt { start: i, end: i + 1, kind: Kind::Error });
-                i += 1;
-                continue;
-            }
-            if self.op(i, ";") {
-                i += 1;
-                continue;
-            }
-            let s = self.stmt(i);
-            i = s.end.max(i + 1);
-            stmts.push(s);
-        }
-        self.depth -= 1;
-        Block { stmts, end: i.min(self.n) }
-    }
-
-    fn skip_flat(&self, mut i: usize, terms: &[&str]) -> usize {
-        let mut depth = 0usize;
-        while i < self.n {
-            if self.kind(i) == Some(Tok::Keyword) {
-                match self.text(i) {
-                    "function" | "if" | "do" | "repeat" => depth += 1,
-                    t @ ("end" | "until") => {
-                        if depth == 0 && terms.contains(&t) {
-                            return i;
-                        }
-                        depth = depth.saturating_sub(1);
-                    }
-                    t @ ("else" | "elseif") if depth == 0 && terms.contains(&t) => return i,
-                    _ => {}
-                }
-            }
-            i += 1;
-        }
-        self.n
-    }
-
-    fn after_end(&self, at: usize) -> usize {
-        if self.kw(at, "end") { at + 1 } else { at }
-    }
-
-    fn stmt(&mut self, i: usize) -> Stmt {
-        if self.kind(i) == Some(Tok::Keyword) {
-            match self.text(i) {
-                "local" => return self.local(i),
-                "function" => return self.function_stmt(i),
-                "if" => return self.if_stmt(i),
-                "while" => {
-                    let c = self.expr(i + 1);
-                    let from = if self.kw(c, "do") { c + 1 } else { c };
-                    let body = self.block(from, END);
-                    let end = self.after_end(body.end);
-                    return Stmt { start: i, end, kind: Kind::While { cond: (i + 1, c), body } };
-                }
-                "do" => {
-                    let body = self.block(i + 1, END);
-                    let end = self.after_end(body.end);
-                    return Stmt { start: i, end, kind: Kind::Do(body) };
-                }
-                "for" => return self.for_stmt(i),
-                "repeat" => {
-                    let body = self.block(i + 1, UNTIL);
-                    let (cond, end) = if self.kw(body.end, "until") {
-                        let c = self.expr(body.end + 1);
-                        ((body.end + 1, c), c.max(body.end + 1))
-                    } else {
-                        ((body.end, body.end), body.end)
-                    };
-                    return Stmt { start: i, end, kind: Kind::Repeat { body, cond } };
-                }
-                "return" => {
-                    let at_end = i + 1 >= self.n
-                        || self.op(i + 1, ";")
-                        || (self.kind(i + 1) == Some(Tok::Keyword) && BLOCK_ENDS.contains(&self.text(i + 1)));
-                    let (exprs, mut end) = if at_end { (Vec::new(), i + 1) } else { self.expr_list(i + 1) };
-                    end = end.max(i + 1);
-                    if self.op(end, ";") {
-                        end += 1;
-                    }
-                    return Stmt { start: i, end, kind: Kind::Return { exprs } };
-                }
-                "break" => return Stmt { start: i, end: i + 1, kind: Kind::Break },
-                "goto" => {
-                    let end = if self.name(i + 1) { i + 2 } else { i + 1 };
-                    return Stmt { start: i, end, kind: Kind::Goto };
-                }
-                _ => {}
+    fn span(&self, node: Node) -> Span {
+        match (node.first_token(), node.last_token()) {
+            (Some(first), Some(last)) => (self.tok(first), self.tok(last) + 1),
+            _ => {
+                let at = self.src.tok_of(node.token_span().0);
+                (at, at)
             }
         }
-        if self.op(i, "::") {
-            let end = if self.name(i + 1) && self.op(i + 2, "::") { i + 3 } else { i + 1 };
-            return Stmt { start: i, end, kind: Kind::Label };
-        }
-        self.expr_stmt(i)
     }
 
-    fn local(&mut self, i: usize) -> Stmt {
-        if self.kw(i + 1, "function") {
-            if self.name(i + 2) {
-                let func = self.func(i + 1, i + 3);
-                return Stmt { start: i, end: self.funcs[func].next, kind: Kind::LocalFunction { name: i + 2, func } };
-            }
-            let func = self.func(i + 1, i + 2);
-            return Stmt { start: i, end: self.funcs[func].next, kind: Kind::Error };
-        }
-        let mut names = Vec::new();
-        let mut j = i + 1;
-        while self.name(j) {
-            let tok = j;
-            j += 1;
-            let attr = if self.op(j, "<") && self.name(j + 1) && self.op(j + 2, ">") {
-                j += 3;
-                Some((j - 3, j - 1))
+    fn spans(&self, list: Option<Node>) -> Vec<Span> {
+        list.into_iter().flat_map(Node::exprs).map(|expr| self.span(expr)).collect()
+    }
+
+    /// The functions written in `node`, in source order; a function holds its own.
+    fn closures(&mut self, node: Node<'a>) {
+        let mut id = node.id();
+        while id < node.next_id() {
+            let inner = node.tree().node(node.source(), id);
+            if inner.is(N::FuncBody) {
+                self.func(inner);
+                id = inner.next_id();
             } else {
-                None
-            };
-            names.push(LocalName { tok, attr });
-            if self.op(j, ",") && self.name(j + 1) {
-                j += 1;
-            } else {
-                break;
+                id += 1;
             }
         }
-        if names.is_empty() {
-            return Stmt { start: i, end: i + 1, kind: Kind::Error };
-        }
-        if self.op(j, "=") {
-            let (values, end) = self.expr_list(j + 1);
-            return Stmt { start: i, end: end.max(j + 1), kind: Kind::Local { names, values, unpack: false } };
-        }
-        if self.kw(j, "in") {
-            let e = self.expr(j + 1);
-            let values = if e > j + 1 { vec![(j + 1, e)] } else { Vec::new() };
-            return Stmt { start: i, end: e.max(j + 1), kind: Kind::Local { names, values, unpack: true } };
-        }
-        Stmt { start: i, end: j, kind: Kind::Local { names, values: Vec::new(), unpack: false } }
     }
 
-    fn function_stmt(&mut self, i: usize) -> Stmt {
-        let mut j = i + 1;
-        if self.name(j) {
-            j += 1;
-            while self.op(j, ".") && self.name(j + 1) {
-                j += 2;
-            }
-            if self.op(j, ":") && self.name(j + 1) {
-                j += 2;
-            }
-        }
-        let func = self.func(i, j);
-        Stmt { start: i, end: self.funcs[func].next, kind: Kind::Function { name: (i + 1, j), func } }
-    }
-
-    fn if_stmt(&mut self, i: usize) -> Stmt {
-        let mut conds = Vec::new();
-        let mut blocks = Vec::new();
-        let mut has_else = false;
-        let mut at = i;
-        let end;
-        loop {
-            let c = self.expr(at + 1);
-            conds.push((at + 1, c));
-            let from = if self.kw(c, "then") { c + 1 } else { c };
-            let b = self.block(from, IF_TERMS);
-            let stop = b.end;
-            blocks.push(b);
-            if self.kw(stop, "elseif") {
-                at = stop;
-                continue;
-            }
-            if self.kw(stop, "else") {
-                has_else = true;
-                let b = self.block(stop + 1, END);
-                end = self.after_end(b.end);
-                blocks.push(b);
-            } else {
-                end = self.after_end(stop);
-            }
-            break;
-        }
-        Stmt { start: i, end, kind: Kind::If { conds, blocks, has_else } }
-    }
-
-    fn for_stmt(&mut self, i: usize) -> Stmt {
-        let mut vars = Vec::new();
-        let mut j = i + 1;
-        let exprs;
-        if self.name(j) && self.op(j + 1, "=") {
-            vars.push(j);
-            let (e, end) = self.expr_list(j + 2);
-            exprs = e;
-            j = end;
-        } else {
-            while self.name(j) {
-                vars.push(j);
-                j += 1;
-                if self.op(j, ",") {
-                    j += 1;
-                } else {
-                    break;
-                }
-            }
-            if self.kw(j, "in") {
-                let (e, end) = self.expr_list(j + 1);
-                exprs = e;
-                j = end;
-            } else {
-                exprs = Vec::new();
-            }
-        }
-        let from = if self.kw(j, "do") { j + 1 } else { j };
-        let body = self.block(from, END);
-        let end = self.after_end(body.end);
-        Stmt { start: i, end, kind: Kind::For { vars, exprs, body } }
-    }
-
-    fn expr_stmt(&mut self, i: usize) -> Stmt {
-        let e = self.suffixed(i);
-        if e == i {
-            // Nothing a statement starts with: a table or a parenthesis still holds closures.
-            let end = if self.op(i, "{") || self.op(i, "[") { self.group(i) } else { i + 1 };
-            return Stmt { start: i, end, kind: Kind::Error };
-        }
-        if self.op(e, ",") || self.op(e, "=") || self.kw(e, "in") {
-            let mut targets = vec![(i, e)];
-            let mut j = e;
-            while self.op(j, ",") {
-                let t = self.suffixed(j + 1);
-                if t == j + 1 {
-                    break;
-                }
-                targets.push((j + 1, t));
-                j = t;
-            }
-            if self.op(j, "=") {
-                let (values, end) = self.expr_list(j + 1);
-                return Stmt { start: i, end: end.max(j + 1), kind: Kind::Assign { targets, values, unpack: false } };
-            }
-            if self.kw(j, "in") {
-                let v = self.expr(j + 1);
-                let values = if v > j + 1 { vec![(j + 1, v)] } else { Vec::new() };
-                return Stmt { start: i, end: v.max(j + 1), kind: Kind::Assign { targets, values, unpack: true } };
-            }
-            return Stmt { start: i, end: e, kind: Kind::Expr((i, e)) };
-        }
-        if self.kind(e) == Some(Tok::Op) && COMPOUND_OPS.contains(&self.text(e)) {
-            let v = self.expr(e + 1);
-            return Stmt {
-                start: i,
-                end: v.max(e + 1),
-                kind: Kind::Compound { target: (i, e), op: e, value: (e + 1, v) },
-            };
-        }
-        Stmt { start: i, end: e, kind: Kind::Expr((i, e)) }
-    }
-
-    fn func(&mut self, kw: usize, at: usize) -> usize {
+    fn func(&mut self, body: Node<'a>) -> usize {
         let idx = self.funcs.len();
+        let owner = body.parent();
+        let kw = owner.and_then(|owner| self.at(owner, T::Function)).unwrap_or(self.span(body).0);
+        let at = self.span(body).0;
         self.funcs.push(Func {
             kw,
+            params: body.children_of(N::ParamNameDef).map(|param| self.span(param).0).collect(),
+            vararg: body.has(T::Ellipsis),
+            close: self.at(body, T::RParen),
+            body: Block { stmts: Vec::new(), end: at },
+            end: self.at(body, T::End),
+            next: at,
+            parent: self.stack.last().copied(),
+        });
+        self.stack.push(idx);
+        let block = body.child(N::Block).map(|block| self.block(block));
+        self.stack.pop();
+        let f = &mut self.funcs[idx];
+        if let Some(block) = block {
+            f.body = block;
+        }
+        f.next = f.end.map_or(f.body.end, |end| end + 1).max(at);
+        idx
+    }
+
+    /// A function statement whose parameter list is missing still counts as a function.
+    fn func_of(&mut self, stat: Node<'a>) -> usize {
+        if let Some(body) = stat.child(N::FuncBody) {
+            return self.func(body);
+        }
+        let at = self.span(stat).1;
+        self.funcs.push(Func {
+            kw: self.at(stat, T::Function).unwrap_or(at),
             params: Vec::new(),
             vararg: false,
             close: None,
@@ -442,147 +204,135 @@ impl Parser<'_> {
             next: at,
             parent: self.stack.last().copied(),
         });
-        let mut j = at;
-        let (mut params, mut vararg, mut close) = (Vec::new(), false, None);
-        if self.op(j, "(") {
-            close = self.src.pair[j];
-            let to = close.unwrap_or(self.n);
-            for k in j + 1..to {
-                if self.name(k) {
-                    params.push(k);
-                } else if self.op(k, "...") {
-                    vararg = true;
-                } else if !self.op(k, ",") {
-                    break;
+        self.funcs.len() - 1
+    }
+
+    fn block(&mut self, node: Node<'a>) -> Block {
+        let mut stmts = Vec::new();
+        for child in node.children() {
+            match child.kind() {
+                N::EmptyStat | N::ShebangLine => {}
+                N::Error => {
+                    self.closures(child);
+                    let (start, end) = self.span(child);
+                    stmts.push(Stmt { start, end: end.max(start + 1), kind: Kind::Error });
+                }
+                N::ExprStat => self.expr_stat(child, &mut stmts),
+                _ => stmts.push(self.stmt(child)),
+            }
+        }
+        Block { stmts, end: self.src.tok_of(node.token_span().1) }
+    }
+
+    /// `i++` and `++i` are two statements here: the variable, and the operator CfxLua does not have.
+    fn expr_stat(&mut self, node: Node<'a>, stmts: &mut Vec<Stmt>) {
+        self.closures(node);
+        for child in node.children() {
+            let (start, end) = self.span(child);
+            if child.is(N::Error) {
+                stmts.push(Stmt { start, end: end.max(start + 1), kind: Kind::Error });
+            } else if child.kind().is_expr() {
+                stmts.push(Stmt { start, end, kind: Kind::Expr((start, end)) });
+            }
+        }
+    }
+
+    fn stmt(&mut self, node: Node<'a>) -> Stmt {
+        let (start, mut end) = self.span(node);
+        if !node.is(N::ReturnStat) && node.last_token().is_some_and(|token| token.is(T::Semi)) {
+            end -= 1;
+        }
+        let mut blocks = Vec::new();
+        let mut func = None;
+        match node.kind() {
+            N::FuncDef | N::ClassMethodDef | N::LocalFuncDef => func = Some(self.func_of(node)),
+            _ => {
+                for child in node.children() {
+                    if child.is(N::Block) {
+                        blocks.push(self.block(child));
+                    } else {
+                        self.closures(child);
+                    }
                 }
             }
-            j = close.map_or(to, |c| c + 1);
         }
-        self.stack.push(idx);
-        let body = self.block(j, END);
-        self.stack.pop();
-        let (end, next) = if self.kw(body.end, "end") { (Some(body.end), body.end + 1) } else { (None, body.end) };
-        let f = &mut self.funcs[idx];
-        f.params = params;
-        f.vararg = vararg;
-        f.close = close;
-        f.body = body;
-        f.end = end;
-        f.next = next.max(at);
-        idx
-    }
-
-    fn suffixed(&mut self, i: usize) -> usize {
-        let mut j = if self.name(i) {
-            i + 1
-        } else if self.op(i, "(") {
-            self.group(i)
-        } else {
-            return i;
-        };
-        while let Some(t) = self.src.toks.get(j) {
-            match (t.kind, t.text(&self.src.text)) {
-                (Tok::Op, "." | ":") if self.name(j + 1) => j += 2,
-                (Tok::Op, "[" | "(" | "{") => j = self.group(j),
-                (Tok::Str { .. } | Tok::LongStr | Tok::Hash { .. }, _) => j += 1,
-                (Tok::Op, "?") if self.src.is_safe_nav(j) => j += 1,
-                _ => break,
-            }
-        }
-        j
-    }
-
-    fn group(&mut self, open: usize) -> usize {
-        let close = self.src.pair[open];
-        let to = close.unwrap_or(self.n);
-        let mut k = open + 1;
-        while k < to {
-            if self.kw(k, "function") {
-                let f = self.func(k, k + 1);
-                k = self.funcs[f].next.max(k + 1);
-                continue;
-            }
-            k += 1;
-        }
-        close.map_or(self.n, |c| (c + 1).max(k))
-    }
-
-    fn expr(&mut self, i: usize) -> usize {
-        let mut i = i;
-        loop {
-            while self.unary(i) {
-                i += 1;
-            }
-            let e = self.simple(i);
-            if e == i {
-                return i;
-            }
-            match self.binop(e) {
-                Some(width) => i = e + width,
-                None => return e,
-            }
-        }
-    }
-
-    fn expr_list(&mut self, i: usize) -> (Vec<Span>, usize) {
-        let mut out = Vec::new();
-        let e = self.expr(i);
-        if e == i {
-            return (out, i);
-        }
-        out.push((i, e));
-        let mut j = e;
-        while self.op(j, ",") {
-            let e = self.expr(j + 1);
-            if e > j + 1 {
-                out.push((j + 1, e));
-            }
-            j = e.max(j + 1);
-        }
-        (out, j)
-    }
-
-    fn simple(&mut self, i: usize) -> usize {
-        let Some(t) = self.src.toks.get(i) else { return i };
-        match (t.kind, t.text(&self.src.text)) {
-            (Tok::Number | Tok::Str { .. } | Tok::LongStr | Tok::Hash { .. }, _) => i + 1,
-            (Tok::Keyword, "nil" | "true" | "false") => i + 1,
-            (Tok::Keyword, "function") => {
-                let f = self.func(i, i + 1);
-                self.funcs[f].next.max(i + 1)
-            }
-            (Tok::Op, "...") => i + 1,
-            (Tok::Op, "{") => self.group(i),
-            (Tok::Name, _) | (Tok::Op, "(") => self.suffixed(i),
-            _ => i,
-        }
-    }
-
-    fn unary(&self, i: usize) -> bool {
-        self.src.toks.get(i).is_some_and(|t| match t.kind {
-            Tok::Op => matches!(t.text(&self.src.text), "-" | "#" | "~" | "!"),
-            Tok::Keyword => t.text(&self.src.text) == "not",
-            _ => false,
-        })
-    }
-
-    fn binop(&self, i: usize) -> Option<usize> {
-        let t = self.src.toks.get(i)?;
-        let text = t.text(&self.src.text);
-        match t.kind {
-            Tok::Keyword if matches!(text, "and" | "or") => Some(1),
-            Tok::Op => match text {
-                "&" | "|" => {
-                    let doubled =
-                        self.src.toks.get(i + 1).is_some_and(|n| n.start == t.end && n.text(&self.src.text) == text);
-                    Some(if doubled { 2 } else { 1 })
-                }
-                "+" | "-" | "*" | "/" | "//" | "%" | "^" | ".." | "==" | "~=" | "!=" | "<" | ">" | "<=" | ">="
-                | "~" | "<<" | ">>" => Some(1),
-                _ => None,
+        let mut body = if blocks.is_empty() || node.is(N::IfStat) { None } else { Some(blocks.remove(0)) };
+        let mut body = || body.take().unwrap_or(Block { stmts: Vec::new(), end });
+        let kind = match node.kind() {
+            N::LocalDef => self.local(node),
+            N::LocalFuncDef => match (self.at(node, T::Id), func) {
+                (Some(name), Some(func)) => Kind::LocalFunction { name, func },
+                _ => Kind::Error,
             },
-            _ => None,
+            N::FuncDef | N::ClassMethodDef => {
+                let after = self.at(node, T::Function).map_or(start, |kw| kw + 1);
+                let name = node.child(N::ClassMethodName).map(|name| self.span(name));
+                let name = name.or_else(|| self.at(node, T::Id).map(|id| (id, id + 1))).unwrap_or((after, after));
+                Kind::Function { name: (after, name.1), func: func.unwrap_or(0) }
+            }
+            N::AssignStat => {
+                let unpack = node.has(T::In);
+                let values = if unpack { self.spans(Some(node)) } else { self.spans(node.child(N::ExprList)) };
+                Kind::Assign { targets: self.spans(node.child(N::VarList)), values, unpack }
+            }
+            N::CompoundAssignStat => {
+                let mut exprs = node.exprs();
+                let target = exprs.next().map_or((start, start), |target| self.span(target));
+                let op = target.1;
+                let value = exprs.next().map_or((op + 1, op + 1), |value| self.span(value));
+                Kind::Compound { target, op, value }
+            }
+            N::IfStat => Kind::If {
+                conds: node.exprs().map(|cond| self.span(cond)).collect(),
+                has_else: node.has(T::Else),
+                blocks,
+            },
+            N::WhileStat => Kind::While { cond: node.expr().map_or((end, end), |cond| self.span(cond)), body: body() },
+            N::DoStat => Kind::Do(body()),
+            N::ForAStat => Kind::For {
+                vars: node.children_of(N::ParamNameDef).map(|var| self.span(var).0).collect(),
+                exprs: node.exprs().map(|expr| self.span(expr)).collect(),
+                body: body(),
+            },
+            N::ForBStat => Kind::For {
+                vars: node.children_of(N::ParamNameDef).map(|var| self.span(var).0).collect(),
+                exprs: self.spans(node.child(N::ExprList)),
+                body: body(),
+            },
+            N::RepeatStat => {
+                let body = body();
+                let cond = node.expr().map_or((body.end, body.end), |cond| self.span(cond));
+                Kind::Repeat { body, cond }
+            }
+            N::ReturnStat => Kind::Return { exprs: self.spans(node.child(N::ExprList)) },
+            N::BreakStat => Kind::Break,
+            N::GotoStat => Kind::Goto,
+            N::LabelStat => Kind::Label,
+            _ => Kind::Error,
+        };
+        Stmt { start, end, kind }
+    }
+
+    fn local(&self, node: Node<'a>) -> Kind {
+        let mut names: Vec<LocalName> = Vec::new();
+        for child in node.child(N::NameList).into_iter().flat_map(Node::children) {
+            match child.kind() {
+                N::NameDef => names.push(LocalName { tok: self.span(child).0, attr: None }),
+                N::Attribute => {
+                    let closed = self.at(child, T::Lt).zip(self.at(child, T::Gt)).filter(|_| child.has(T::Id));
+                    if let Some(name) = names.last_mut() {
+                        name.attr = closed;
+                    }
+                }
+                _ => {}
+            }
         }
+        if names.is_empty() {
+            return Kind::Error;
+        }
+        let unpack = node.has(T::In);
+        let values = if unpack { self.spans(Some(node)) } else { self.spans(node.child(N::ExprList)) };
+        Kind::Local { names, values, unpack }
     }
 }
 
@@ -696,7 +446,7 @@ mod tests {
         assert_eq!(kinds(&tree), ["if"]);
         let deep = "f(function() ".repeat(400);
         let (_, tree) = parse(&deep);
-        assert!(tree.funcs.len() >= MAX_DEPTH / 2);
+        assert!(tree.funcs.len() >= 60);
     }
 
     #[test]
