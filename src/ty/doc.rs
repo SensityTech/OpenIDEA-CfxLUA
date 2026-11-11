@@ -1,6 +1,6 @@
 //! The types a documentation comment writes (`LuaDocPsiImplUtil`).
 
-use super::{Class, Detail, DocField, ELLIPSIS, Function, Param, Ret, Signature, Ty, TyParam, doc_table_name};
+use super::{Class, Detail, DocField, ELLIPSIS, FileId, Function, Param, Ret, Signature, Ty, TyParam, doc_table_name};
 use crate::lua::doc::tags::{self, Comment};
 use crate::lua::tree::{N, Node};
 use std::rc::Rc;
@@ -9,13 +9,13 @@ use std::rc::Rc;
 #[derive(Clone, Copy, Debug)]
 pub struct Reader {
     /// The file, which names the tables written in its comments.
-    pub file: u32,
+    pub file: FileId,
     /// Whether a parameter typed with a bounded generic, `T : Base`, has the members of `Base`.
     pub bounded_generics: bool,
 }
 
 impl Reader {
-    pub fn new(file: u32) -> Reader {
+    pub fn new(file: FileId) -> Reader {
         Reader { file, bounded_generics: false }
     }
 

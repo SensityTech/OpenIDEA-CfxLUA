@@ -130,10 +130,13 @@ pub enum Ret {
     Body(FuncRef),
 }
 
-/// A function of the code: its file, and where its body starts.
+/// A file of the project, as the index numbers it.
+pub type FileId = u32;
+
+/// A function of the code: its file, and where it starts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct FuncRef {
-    pub file: u32,
+    pub file: FileId,
     pub at: u32,
 }
 
@@ -240,7 +243,7 @@ pub fn global_type_name(name: &str) -> String {
 }
 
 /// The class of a table written in a documentation comment of `file`, at `offset`.
-pub fn doc_table_name(file: u32, offset: usize) -> String {
+pub fn doc_table_name(file: FileId, offset: usize) -> String {
     format!("10|{file}|{offset}")
 }
 
