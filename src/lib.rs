@@ -6,6 +6,7 @@ pub mod events;
 pub mod feature;
 pub mod globals;
 pub mod index;
+pub mod inspect;
 pub mod lua;
 pub mod luals;
 pub mod manifest;
@@ -1572,6 +1573,26 @@ mod tests {
         assert!(!native.markdown.contains("\n\n---\n\n"), "the natives document it, the type engine does not");
         let local = kit.hover(&typed, Position::new(1, 6)).expect("the local");
         assert_eq!(local.markdown, "```lua\nlocal c: vector3\n```");
+    }
+
+    #[test]
+    fn what_an_inspection_finds_is_published_and_fixed_from_the_editor() {
+        let host = openidea_plugin::mock::MockHost::install();
+        let mut kit = shop_resource(&host);
+        let typed = lua(SHOP_CLIENT, 2, "local unused = 1\nprint(list[0])\n");
+        kit.line_markers(&typed);
+        let published = host.diagnostics().remove(SHOP_CLIENT).expect("the problems of the document");
+        let unused = published.iter().find(|found| found.code.as_deref() == Some("RemoveUnusedLocal"));
+        let unused = unused.expect("the unused local");
+        let hint = openidea_plugin::Severity::Hint;
+        assert_eq!((unused.severity, unused.unnecessary), (hint, true), "faded, not underlined");
+        assert_eq!(unused.range, Range { start: Position::new(0, 6), end: Position::new(0, 12) });
+        let zero = Position::new(1, 11);
+        let actions = kit.code_actions(&typed, Range::new(zero, zero));
+        let fix = actions.iter().find(|action| action.title == "Replace with index 1").expect("the quick fix");
+        assert_eq!(fix.kind.as_deref(), Some("quickfix"));
+        let one = TextEdit { range: Range { start: zero, end: Position::new(1, 12) }, text: "1".into() };
+        assert_eq!(fix.edits, [(SHOP_CLIENT.to_owned(), vec![one])]);
     }
 
     #[test]

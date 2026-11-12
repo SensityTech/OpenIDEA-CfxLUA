@@ -60,6 +60,37 @@
       "title": "Show what functions return",
       "default": false
     },
+    "inspections.unused": {
+      "type": "boolean",
+      "title": "Inspection: unused locals, parameters, loop variables and local functions",
+      "description": "Fades what is declared and never used, with a fix that removes it or renames it to _.",
+      "default": true
+    },
+    "inspections.shadowed": {
+      "type": "boolean",
+      "title": "Inspection: local that hides another local of the same name",
+      "default": true
+    },
+    "inspections.simplifyLocal": {
+      "type": "boolean",
+      "title": "Inspection: local given nil (local a = nil)",
+      "default": true
+    },
+    "inspections.emptyBody": {
+      "type": "boolean",
+      "title": "Inspection: for, while or do with an empty body",
+      "default": true
+    },
+    "inspections.unreachable": {
+      "type": "boolean",
+      "title": "Inspection: statement after a return",
+      "default": true
+    },
+    "inspections.zeroIndex": {
+      "type": "boolean",
+      "title": "Inspection: table indexed at 0",
+      "default": true
+    },
     "natives.autoUpdate": {
       "type": "boolean",
       "title": "Check for new natives automatically",

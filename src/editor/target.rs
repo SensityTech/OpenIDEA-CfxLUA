@@ -166,7 +166,7 @@ fn type_named(cx: &Cx, reference: Node) -> Option<Target> {
 
 /// The parameter a `@param name` documents (`LuaDocParamNameReference`): the one of that name of the first
 /// function, or loop, of the statement the comment is bound to.
-fn documented_param<'a>(src: &'a Source, reference: Node) -> Option<Node<'a>> {
+pub fn documented_param<'a>(src: &'a Source, reference: Node) -> Option<Node<'a>> {
     let owner = src.documented_by(Comment(reference.ancestor(N::DocComment)?))?;
     let name = reference.code();
     let named = |node: Node<'a>| {

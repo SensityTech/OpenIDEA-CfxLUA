@@ -14,7 +14,7 @@ mod library_tests;
 #[cfg(test)]
 mod tests;
 
-use crate::feature::{Ctx, Feature};
+use crate::feature::{Ctx, Feature, Problem};
 use crate::index::library;
 use crate::index::project::{Projects, Sight};
 use crate::lua::Source;
@@ -186,6 +186,13 @@ impl Feature for EditorFeature {
         }
         let src = &cx.doc.src;
         self.ask(cx, src, |engine, file| signature::help(engine, file, src, at)).flatten()
+    }
+
+    fn problems(&self, cx: &Ctx) -> Vec<Problem> {
+        if !Self::applies(cx) {
+            return Vec::new();
+        }
+        crate::inspect::problems(&cx.doc.src, &|inspection| cx.settings.bool(inspection.setting, true))
     }
 
     fn semantic_tokens(&self, cx: &Ctx) -> Vec<semantic::Token> {
