@@ -39,10 +39,11 @@ Security issues: see [SECURITY.md](SECURITY.md), not a public issue.
 | `src/lua/` | CfxLua lexer, parser and syntax tree, scopes, documentation comments (`doc/`), and a light structural view (`Source`, chains, calls). |
 | `src/ty/` | The type engine: the types of Lua values, how they are shown, the types written in documentation comments, and the inference of expressions and declarations. |
 | `src/index/` | What the files of a project declare, by name: classes, members, aliases. |
-| `src/editor/` | What the editor shows of a Lua file: semantic colours, folding, structure, occurrences. |
+| `src/editor/` | What the editor shows of a Lua file: semantic colours, folding, structure, occurrences, and in `completion/` what the type engine completes (members, names, expected values, table keys, documentation comments). |
 | `src/project/` | Resources, manifest entries, FXServer globs, client/server/shared side, game. |
 | `src/workspace.rs` | The project files the plugin has read; areas only read the project through it. The text of a script is released once it is indexed and read again on demand. |
 | `src/globals.rs` | Which files define a global function, for the areas that read a function of another file. |
+| `src/matching.rs` | How a name answers what is typed of it: by its start or by the starts of its words. |
 | `src/memtrace.rs` | The allocation counter of the `mem-trace` build. |
 | `src/<area>/` | `natives`, `runtime`, `manifest`, `escrow`, `statebags`, `events`, `nui`, `values`, `coords`, `perf`, `syntax`, `docs`. |
 | `web/` | The tool window page (rendering only; searching and HTML are built in Rust). |
@@ -53,9 +54,11 @@ Two rules matter more than any other:
 
 1. **Providers run on the editing path.** OpenIDEA drops a completion, definition or gutter result that takes more
    than 50 ms, shared by every plugin. Project-wide tables are built in `Feature::index_file` / `Feature::indexed`
-   (background work), never in a provider. A completion is asked at every keystroke: it looks at the tokens around
-   the caret before it parses anything, and the edited document only reaches `index_file` when a request reads
-   those tables (`Feature::completes_from_index` says whether a completion does).
+   (background work), never in a provider. A completion looks at the tokens around the caret before it parses
+   anything, and the edited document only reaches `index_file` when a request reads those tables
+   (`Feature::completes_from_index` says whether a completion does). OpenIDEA asks a plugin once per word when the
+   list is not empty, and filters that list itself while the word goes on: a list holds everything that can match
+   from the first character, and reads no other file to decorate its entries.
 2. **Areas never read the project from the host.** They get a `Workspace`, so every feature is unit-tested in memory
    with `testing::Fixture`:
 

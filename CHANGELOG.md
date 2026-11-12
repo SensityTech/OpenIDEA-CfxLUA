@@ -33,6 +33,24 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   read from its body), `self`, the values of a generic function, the file a `require` loads. A function shows its
   parameters and what it returns, a field its type. After a colon only what can take the object is listed; a
   `private` member is listed inside its class only.
+- **Completion of names, without lua-language-server.** While a name is typed the plugin lists the locals,
+  parameters and loop variables in sight with their type, the globals the project declares (by their start or by
+  the starts of their words: `gsc` finds `GetShopCount`), the keywords, and in a method the methods of its object
+  as `self:name`. `function` typed where a value is expected inserts `function() end`. Locals come first, then
+  the globals of the project, the natives and the runtime API, the keywords, and last the words of the file.
+- **Completion of what a place asks for.** Where a typed annotation expects it, the plugin offers the strings of
+  a literal type (`'top'|'bottom'`, an alias, `---|` value lines), inside a string or with their quotes; the
+  members of an expected `---@enum` (`Mode.PRESS`) and the keys of an `---@enum (key)`; and in a table, the
+  fields of the class it is expected to be (`lib.notify({ ti` offers `title = `), without those already set.
+- **Completion of the methods to define again.** After `function Shop:` the methods of the classes `Shop`
+  inherits from, which it does not define yet, are offered with their parameters and their `end`.
+- **Completion inside documentation comments**: the tags after `---@`, the parameters of the documented function
+  after `@param`, the classes, aliases and built-in types where a type is written, `public` / `protected` and
+  the fields of the class after `@field`, the members after `@see Class#`.
+- **Completion of `require` paths and of string arguments.** Inside `require('...')` the Lua files of the
+  resource are offered as the names they are required by (`modules.cart.items`). Inside any other string
+  argument, the strings the project gives to a function of the same name at the same position are offered,
+  marked "History".
 - **The memory the plugin holds is written in the IDE log** when it has read a project
   (`resources indexed (N MiB)`): OpenIDEA gives a plugin 256 MiB.
 
