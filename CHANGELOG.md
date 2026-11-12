@@ -114,6 +114,17 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
 - **Gutter markers of classes and calls.** A method that overrides one of a parent class, or that a subclass
   overrides, has a marker that leads there; a `---@class` shows whether it has subclasses; a recursive call and
   a call that is returned (a tail call) are marked. Each kind has a setting.
+- **A Lua formatter, the one of the JetBrains plugin.** Once the plugin is chosen for `lua` in **Settings ›
+  Languages & Frameworks › Plugin Formatters**, Reformat Code (a file or a selection) and Format on save indent
+  blocks, tables and what continues a line, put statements and the bodies of blocks on their own lines, write the
+  spaces around operators, `=` and commas and inside the braces of a table, line up the parameters written on
+  several lines and the dots of a chained call, keep two blank lines at most, and take out the semicolons no
+  statement needs. Only white space changes. The indent is the editor's; a line that continues another is
+  indented twice, as IntelliJ does, unless a setting gives its width. The other options of the JetBrains plugin
+  are settings with IntelliJ's defaults: keeping a block of one statement on one line, aligning arguments, the
+  `=` of consecutive assignments and of table fields, and each of the spaces. A semicolon that separates table
+  fields, or that keeps a statement starting with a parenthesis from being read as a call, stays. A file over
+  1 MiB is not formatted, and Reformat Code says so.
 - **Natives have parameter info, hints, a hover, and type what they return.** A native shows its parameters while
   its arguments are typed and names them before literals; `GetEntityCoords(ped).` lists `x`, `y` and `z`; hovering
   a native shows its documentation: description, example, parameters, hash, side and game.

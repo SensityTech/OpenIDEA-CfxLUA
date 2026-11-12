@@ -12,6 +12,11 @@ inference of IntelliJ-EmmyLua (https://github.com/EmmyLua/IntelliJ-EmmyLua,
 Copyright 2017 tangzx and its contributors, Apache License 2.0), through
 Sensity DevKit, its fork for CfxLua.
 
+The formatter (src/format) is a port to Rust of the formatter of
+IntelliJ-EmmyLua. It lays its blocks out the way the formatting engine of the
+IntelliJ Platform does (https://github.com/JetBrains/intellij-community,
+Copyright JetBrains s.r.o. and contributors, Apache License 2.0).
+
 Bundled data:
 - data/std/: the annotated stubs of the Lua 5.4 standard library of
   IntelliJ-EmmyLua (Copyright 2018 tangzx, Apache License 2.0), unchanged
