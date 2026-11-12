@@ -9,6 +9,7 @@ pub mod index;
 pub mod lua;
 pub mod luals;
 pub mod manifest;
+pub mod matching;
 pub mod memtrace;
 pub mod natives;
 pub mod nui;

@@ -6,6 +6,7 @@ use crate::feature::{CommandCx, CommandResult, Ctx, Feature, Problem};
 use crate::lua::Source;
 use crate::lua::lexer::Tok;
 use crate::lua::syntax::Seg;
+use crate::matching::{Match, Query};
 use crate::project::{FileKind, Game, Side};
 use crate::settings::keys;
 use openidea_plugin::Severity;
@@ -15,7 +16,6 @@ use std::fmt::Write;
 
 const MAX_ITEMS: usize = 2000;
 const MAX_DOCUMENTED: usize = 500;
-const MAX_HUMPS: usize = 48;
 
 pub const WRONG_SIDE: &str = "CfxNativeWrongSide";
 
@@ -36,8 +36,7 @@ impl Feature for NativesFeature {
             return Vec::new();
         }
         let Some(start) = word_start(&cx.doc.src, at) else { return Vec::new() };
-        let query = cx.doc.text()[start..at].to_ascii_lowercase();
-        let compact: Vec<u8> = query.bytes().filter(|&b| b != b'_').collect();
+        let query = Query::new(&cx.doc.text()[start..at]);
         let mut sets = visible_sets(cx.settings, &cx.ws.detected_games(), cx.doc.side, resource_games(cx));
         // lua-language-server completes the natives of its definitions: listed twice otherwise.
         sets.retain(|s| !cx.ws.luals.sets.contains(s));
@@ -51,7 +50,7 @@ impl Feature for NativesFeature {
                     continue;
                 }
                 // A native of several sets (CFX `shared`) is offered once, from the first.
-                if let Some(m) = match_name(&n.lua_name, &query, &compact)
+                if let Some(m) = query.matches(&n.lua_name)
                     && seen.insert(&n.lua_name)
                 {
                     found.push((m, n));
@@ -122,78 +121,6 @@ fn word_start(src: &Source, at: usize) -> Option<usize> {
         }
     }
     Some(start)
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum Match {
-    Exact,
-    Prefix,
-    CamelHump,
-}
-
-fn match_name(name: &str, query: &str, compact: &[u8]) -> Option<Match> {
-    let (n, q) = (name.as_bytes(), query.as_bytes());
-    if n.len() >= q.len() && n[..q.len()].eq_ignore_ascii_case(q) {
-        return Some(if n.len() == q.len() { Match::Exact } else { Match::Prefix });
-    }
-    let first = n.iter().find(|&&b| b != b'_')?;
-    if compact.is_empty() || compact.len() > MAX_HUMPS || first.to_ascii_lowercase() != compact[0] {
-        return None;
-    }
-    camel_humps(&words(name), compact, 0, 0, true).then_some(Match::CamelHump)
-}
-
-fn words(name: &str) -> Vec<&str> {
-    let b = name.as_bytes();
-    let mut out = Vec::new();
-    let (mut start, mut i) = (0, 0);
-    while i < b.len() {
-        if b[i] == b'_' {
-            if i > start {
-                out.push(&name[start..i]);
-            }
-            while i < b.len() && b[i] == b'_' {
-                i += 1;
-            }
-            start = i;
-            continue;
-        }
-        if i > start {
-            let (p, c) = (b[i - 1], b[i]);
-            let lower_to_upper = (p.is_ascii_lowercase() || p.is_ascii_digit()) && c.is_ascii_uppercase();
-            if lower_to_upper || (p.is_ascii_alphabetic() && c.is_ascii_digit()) {
-                out.push(&name[start..i]);
-                start = i;
-            }
-        }
-        i += 1;
-    }
-    if start < b.len() {
-        out.push(&name[start..]);
-    }
-    out
-}
-
-fn camel_humps(words: &[&str], q: &[u8], qi: usize, wi: usize, anchored: bool) -> bool {
-    if qi == q.len() {
-        return true;
-    }
-    let Some(max) = words.len().checked_sub(1) else { return false };
-    let last = if anchored { wi.min(max) } else { max };
-    for w in wi..=last {
-        let word = words[w].as_bytes();
-        if word[0].to_ascii_lowercase() != q[qi] {
-            continue;
-        }
-        let mut common = 1;
-        while common < word.len() && qi + common < q.len() && word[common].to_ascii_lowercase() == q[qi + common] {
-            common += 1;
-        }
-        if (1..=common).rev().any(|len| camel_humps(words, q, qi + len, w + 1, false)) {
-            return true;
-        }
-    }
-    false
 }
 
 fn item(n: &Native, rank: usize, documented: bool) -> CompletionItem {
@@ -497,14 +424,6 @@ mod tests {
         assert_eq!(labels(&fx, "res/client/main.lua"), ["GetEntityCoords"], "case-insensitive prefix");
         let fx = fixture("res/client/main.lua", "ec<caret>");
         assert!(labels(&fx, "res/client/main.lua").is_empty(), "the first word is anchored");
-        let words: Vec<&str> = words("GetGroundZFor_3dCoord");
-        assert_eq!(words, ["Get", "Ground", "ZFor", "3d", "Coord"]);
-        for (query, name) in
-            [("ggzf3c", "GetGroundZFor_3dCoord"), ("getgrz", "GetGroundZFor_3dCoord"), ("gcoords", "GetEntityCoords")]
-        {
-            assert_eq!(match_name(name, query, query.as_bytes()), Some(Match::CamelHump), "{query}");
-        }
-        assert_eq!(match_name("GetEntityHeading", "gec", b"gec"), None);
     }
 
     #[test]
