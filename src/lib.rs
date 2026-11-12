@@ -1087,6 +1087,8 @@ impl LanguageFeatures for DevKit {
     /// is not formatted is said: an empty answer reads in the IDE as a file that is formatted already.
     fn format(&mut self, d: &Document, range: Option<Range>, options: FormatOptions) -> Result<Vec<TextEdit>, Error> {
         let _timed = Timed::start("format", d);
+        // Asked for by the user, like a command: a setting changed since the document was read is read again.
+        self.settings.reset();
         if d.text.len() > MAX_INDEXED {
             return Err(Error::Failed(format!("CfxLua does not format a file over {} KB", MAX_INDEXED >> 10)));
         }
@@ -1108,7 +1110,6 @@ impl LanguageFeatures for DevKit {
             return Err(Error::Failed("CfxLua is turned off in the settings of this project".to_owned()));
         }
         // A declaration file is not read as a document of the project: its tree is all the formatter needs.
-        self.settings.reset();
         let ws = self.workspace_for(&d.path);
         let doc = Doc::new(&self.workspaces[ws], &d.path, &d.language, d.version, &d.text);
         let cx = Ctx { doc: &doc, ws: &self.workspaces[ws], settings: &self.settings, natives: &self.natives };
@@ -1785,6 +1786,15 @@ mod tests {
         let big = lua(SHOP_CLIENT, 5, &"local a=1\n".repeat(MAX_INDEXED / 10 + 1));
         assert!(kit.format(&big, None, spaces).is_err(), "a file that is not formatted says so");
         let typed = lua(SHOP_CLIENT, 6, &typed.text);
+        kit.format(&typed, None, FormatOptions { tab_size: 2, insert_spaces: true }).expect("the edits");
+        host.set_setting(editor::formatting::KEEP_SIMPLE_BLOCKS, "true");
+        let kept = kit.format(&typed, None, FormatOptions { tab_size: 2, insert_spaces: true }).expect("the edits");
+        assert_eq!(
+            applied(&typed.text, &kept),
+            "local a = 1\nif a then print(a) end\n",
+            "a setting changed since the document was read is read again"
+        );
+        host.set_setting(editor::formatting::KEEP_SIMPLE_BLOCKS, "false");
         kit.format(&typed, None, FormatOptions { tab_size: 2, insert_spaces: true }).expect("the edits");
         assert!(kit.stale.is_some(), "only the tree is read: the document is not indexed for it");
         let line = Range { start: Position::new(1, 0), end: Position::new(1, 3) };
