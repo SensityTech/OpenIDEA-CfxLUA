@@ -1,11 +1,11 @@
 // Asks a plugin package what the editor would receive for a file, through OpenIDEA's own plugin host and without
 // the editor: semantic tokens, folds, structure, the occurrences of a word, what hovering it shows, where it is
-// declared and the parameters shown after its parenthesis, what those questions cost all over the file, the hints
-// of each screen of it, then what the editor asks after an edit, at its own delays. The calls run under the host's
-// limits for editor calls, so a provider that is too slow answers nothing here as it would in the IDE. The host
-// then stops waiting at its deadline and the time printed is its wait, not what the provider costs: `--patient`
-// lifts the deadline to show that cost. An entry of the structure that its parent does not hold fails the check:
-// the IDE would list it at the top.
+// declared and the parameters shown after its parenthesis, what those questions and the code actions cost all over
+// the file, the hints of each screen of it, then what the editor asks after an edit, at its own delays. The calls
+// run under the host's limits for editor calls, so a provider that is too slow answers nothing here as it would in
+// the IDE. The host then stops waiting at its deadline and the time printed is its wait, not what the provider
+// costs: `--patient` lifts the deadline to show that cost. An entry of the structure that its parent does not hold
+// fails the check: the IDE would list it at the top.
 // Without `--project`, no project is open in this host and the plugin loads no native catalog: natives come back as
 // unknown globals and completion lists none. With it, the host opens that folder as a project and events are posted
 // until the plugin has read it, as they are while a user moves between files: the file is then asked about as one
@@ -362,6 +362,9 @@ fn check(
     });
     sweep("signatures", "signatures", &calls(&lines), deadline, |at| {
         host.language_signature_help(&doc, at).map(|help| help.signatures.len())
+    });
+    sweep("actions", "actions", &names(&lines), deadline, |at| {
+        Some(host.provide_code_actions(&doc, Range::point(at)).len()).filter(|found| *found > 0)
     });
     let screens: Vec<Pos> = (0..lines.len() as u32).step_by(SCREEN as usize).map(|line| Pos::new(line, 0)).collect();
     let screen = |from: Pos| Range::new(from, Pos::new(from.line + SCREEN, 0));
