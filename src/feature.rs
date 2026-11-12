@@ -170,6 +170,10 @@ pub trait Feature {
         None
     }
 
+    fn signature_help(&self, _cx: &Ctx, _at: usize) -> Option<crate::editor::signature::Help> {
+        None
+    }
+
     fn line_markers(&self, _cx: &Ctx) -> Vec<LineMarker> {
         Vec::new()
     }

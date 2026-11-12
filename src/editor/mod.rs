@@ -3,6 +3,7 @@ pub mod folding;
 pub mod highlights;
 pub mod hover;
 pub mod semantic;
+pub mod signature;
 pub mod symbols;
 pub mod target;
 
@@ -124,6 +125,14 @@ impl Feature for EditorFeature {
         }
         let src = &cx.doc.src;
         self.projects.ask(cx.ws, &cx.doc.path, src, |engine, file| hover::hover(engine, file, src, at)).flatten()
+    }
+
+    fn signature_help(&self, cx: &Ctx, at: usize) -> Option<signature::Help> {
+        if !Self::applies(cx) || cx.doc.kind != FileKind::Lua {
+            return None;
+        }
+        let src = &cx.doc.src;
+        self.projects.ask(cx.ws, &cx.doc.path, src, |engine, file| signature::help(engine, file, src, at)).flatten()
     }
 
     fn semantic_tokens(&self, cx: &Ctx) -> Vec<semantic::Token> {

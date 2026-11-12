@@ -31,7 +31,9 @@ use feature::{CommandCx, Ctx, Doc, Feature, Problem};
 use lua::Source;
 use natives::Natives;
 use openidea_plugin::hover::{Hover, HoverProvider};
-use openidea_plugin::language_features::{DocumentSymbol, FoldRange, LanguageFeatures};
+use openidea_plugin::language_features::{
+    DocumentSymbol, FoldRange, LanguageFeatures, Parameter, ParameterLabel, Signature, SignatureHelp,
+};
 use openidea_plugin::providers::{CodeAction, CompletionItem, CompletionKind, Document, LineMarker, Providers};
 use openidea_plugin::semantic_tokens::{SemanticToken, SemanticTokens, TokenKind, TokenModifier};
 use openidea_plugin::views::{View, ViewEvent, Viewport, Views};
@@ -1048,6 +1050,34 @@ impl SemanticTokens for DevKit {
 }
 
 impl LanguageFeatures for DevKit {
+    /// Asked at every keystroke while the arguments of a call are typed: the document is not indexed first.
+    fn signature_help(&mut self, d: &Document, at: Position) -> Option<SignatureHelp> {
+        let _timed = Timed::start("signature help", d);
+        let ws = self.prepare(d)?;
+        let help = self.with_ctx(ws, |cx, features| {
+            let at = cx.doc.offset(at);
+            features.iter().find_map(|f| f.signature_help(cx, at))
+        });
+        let help = help.flatten()?;
+        let signature = |shown: &editor::signature::Shown| {
+            let units = |bytes: usize| shown.label[..bytes].encode_utf16().count() as u32;
+            let parameter = |(start, end): &(usize, usize)| Parameter {
+                label: ParameterLabel::Offsets((units(*start), units(*end))),
+                documentation: None,
+            };
+            Signature {
+                label: shown.label.clone(),
+                documentation: None,
+                parameters: shown.params.iter().map(parameter).collect(),
+            }
+        };
+        Some(SignatureHelp {
+            signatures: help.signatures.iter().map(signature).collect(),
+            active_signature: help.active_signature as u32,
+            active_parameter: help.active_parameter as u32,
+        })
+    }
+
     fn folding(&mut self, d: &Document) -> Vec<FoldRange> {
         let _timed = Timed::start("folding", d);
         let folds = self.prepare_indexed(d).and_then(|ws| {
@@ -1441,6 +1471,22 @@ mod tests {
         assert_eq!(hover.range, Some(Range { start: Position::new(3, 0), end: Position::new(3, 4) }));
         assert!(kit.stale.is_none(), "a hover reads what the document declares: it is indexed first");
         assert!(kit.hover(&typed, Position::new(3, 5)).is_none(), "a number says nothing");
+    }
+
+    #[test]
+    fn the_parameters_of_a_call_are_shown_while_they_are_typed() {
+        let host = openidea_plugin::mock::MockHost::install();
+        let mut kit = shop_resource(&host);
+        let text = "---@param door number\n---@param side string\nlocal function open(door, side) end\nopen(1, )\n";
+        let typed = lua(SHOP_CLIENT, 2, text);
+        let help = kit.signature_help(&typed, Position::new(3, 8)).expect("the parameters");
+        assert_eq!(help.signatures.len(), 1);
+        assert_eq!(help.signatures[0].label, "door: number, side: string");
+        assert_eq!((help.active_signature, help.active_parameter), (0, 1));
+        let ranges: Vec<ParameterLabel> = help.signatures[0].parameters.iter().map(|p| p.label.clone()).collect();
+        assert_eq!(ranges, [ParameterLabel::Offsets((0, 12)), ParameterLabel::Offsets((14, 26))]);
+        assert!(kit.stale.is_some(), "asked at every keystroke: the document is not indexed for it");
+        assert!(kit.signature_help(&typed, Position::new(3, 9)).is_none(), "after the parenthesis");
     }
 
     #[test]
