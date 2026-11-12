@@ -41,6 +41,11 @@ languages = ["lua"]
 kinds = ["completion", "definition", "line-markers", "code-actions"]
 languages = ["javascript", "typescript", "javascriptreact", "typescriptreact", "vue", "svelte", "html"]
 
+# The live templates of the JetBrains plugin: func, lfunc, for, fori, forp, if, elseif, ifelse, closure.
+[[contributes.snippets]]
+language = "lua"
+path = "snippets/lua.json"
+
 [[contributes.views]]
 id = "docs"
 title = "CfxLua"

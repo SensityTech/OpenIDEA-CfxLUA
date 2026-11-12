@@ -26,7 +26,7 @@ if [ "${1:-}" = "--pack" ]; then
   mkdir -p "$stage/dist"
   cp plugin.toml settings.schema.json LICENSE NOTICE "$stage/"
   cp dist/plugin.wasm "$stage/dist/"
-  for d in icons templates web; do
+  for d in icons templates snippets web; do
     if [ -d "$d" ]; then cp -r "$d" "$stage/"; fi
   done
   (cd "$stage" && zip -qr - .) >"$out.part"

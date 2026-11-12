@@ -30,7 +30,7 @@ if ($Pack) {
   New-Item -ItemType Directory -Force (Join-Path $stage 'dist') | Out-Null
   Copy-Item plugin.toml, settings.schema.json, LICENSE, NOTICE $stage
   Copy-Item dist\plugin.wasm (Join-Path $stage 'dist')
-  foreach ($d in 'icons', 'templates', 'web') { if (Test-Path $d) { Copy-Item $d $stage -Recurse } }
+  foreach ($d in 'icons', 'templates', 'snippets', 'web') { if (Test-Path $d) { Copy-Item $d $stage -Recurse } }
   # Entries named with forward slashes (Compress-Archive on Windows PowerShell writes backslashes).
   Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
   $out = Join-Path $root "dist\$id-$version.oiplugin"

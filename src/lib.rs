@@ -1330,11 +1330,41 @@ mod tests {
             ("contributes.fileIcons", "iconDark"),
             ("contributes.views", "web"),
             ("contributes.settings", "schema"),
+            ("contributes.snippets", "path"),
         ];
         for (kind, key) in files {
             for path in values(&sections, kind, key) {
                 assert!(root.join(path).is_file(), "{kind}.{key} = {path} does not exist");
             }
+        }
+    }
+
+    /// What OpenIDEA accepts of a snippets file: named entries with a prefix, a body and stops it can read.
+    #[test]
+    fn the_live_templates_are_snippets_the_host_reads() {
+        let sections = manifest_sections();
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let paths = values(&sections, "contributes.snippets", "path");
+        assert_eq!(paths, ["snippets/lua.json"]);
+        let text = std::fs::read_to_string(root.join(paths[0])).unwrap();
+        let snippets: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let entries = snippets.as_object().expect("an object of named snippets");
+        let names: Vec<&str> = entries.keys().map(String::as_str).collect();
+        assert_eq!(names, ["closure", "elseif", "for", "fori", "forp", "func", "if", "ifelse", "lfunc"]);
+        for (name, entry) in entries {
+            assert_eq!(entry["prefix"].as_str(), Some(name.as_str()), "a template is typed by its name");
+            assert!(entry["description"].as_str().is_some_and(|said| !said.is_empty()), "{name}");
+            let body = match &entry["body"] {
+                serde_json::Value::String(line) => line.clone(),
+                serde_json::Value::Array(lines) => {
+                    lines.iter().map(|line| line.as_str().expect("a line")).collect::<Vec<_>>().join("\n")
+                }
+                other => panic!("{name}: {other}"),
+            };
+            assert!(body.contains("$0"), "{name} says where the caret ends");
+            let stops: Vec<&str> = body.split('$').skip(1).collect();
+            let read = |stop: &&str| stop.starts_with(|c: char| c.is_ascii_digit()) || stop.starts_with('{');
+            assert!(stops.iter().all(read), "{name}: {body}");
         }
     }
 

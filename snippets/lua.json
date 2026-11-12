@@ -1,0 +1,47 @@
+{
+  "func": {
+    "prefix": "func",
+    "body": ["function ${1:funcName}($2)", "\t$0", "end"],
+    "description": "function functionName() end"
+  },
+  "lfunc": {
+    "prefix": "lfunc",
+    "body": ["local function ${1:funcName}($2)", "\t$0", "end"],
+    "description": "local function functionName() end"
+  },
+  "for": {
+    "prefix": "for",
+    "body": ["for ${1:i} = 1, ${2:10} do", "\t$0", "end"],
+    "description": "for i = 1, 10 do end"
+  },
+  "fori": {
+    "prefix": "fori",
+    "body": ["for ${1:i}, ${2:v} in ipairs($3) do", "\t$0", "end"],
+    "description": "for i, v in ipairs(expr) do end"
+  },
+  "forp": {
+    "prefix": "forp",
+    "body": ["for ${1:k}, ${2:v} in pairs($3) do", "\t$0", "end"],
+    "description": "for k, v in pairs(expr) do end"
+  },
+  "if": {
+    "prefix": "if",
+    "body": ["if ${1:true} then", "\t$0", "end"],
+    "description": "if expr then end"
+  },
+  "elseif": {
+    "prefix": "elseif",
+    "body": ["elseif ${1:true} then", "\t$0"],
+    "description": "elseif expr then"
+  },
+  "ifelse": {
+    "prefix": "ifelse",
+    "body": ["if ${1:true} then", "\t$0", "else", "end"],
+    "description": "if expr then else end"
+  },
+  "closure": {
+    "prefix": "closure",
+    "body": "function($1) $0 end",
+    "description": "function() end"
+  }
+}
