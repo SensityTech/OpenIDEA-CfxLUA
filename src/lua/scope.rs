@@ -59,6 +59,27 @@ fn name_token<'a>(node: Node<'a>) -> Option<(u32, &'a str)> {
 }
 
 impl<'a> Walker<'a> {
+    fn new(nodes: usize) -> Self {
+        Walker {
+            decls: Vec::new(),
+            target: vec![NONE; nodes],
+            visible: HashMap::new(),
+            declared: Vec::new(),
+            open: Vec::new(),
+            funcs: Vec::new(),
+        }
+    }
+
+    /// Walks the nodes before `until`, then closes what ends there: the walker is where that node starts.
+    fn walk(&mut self, root: Node<'a>, until: u32) {
+        for id in 0..until {
+            let node = root.tree().node(root.source(), id);
+            self.close(id, root);
+            self.visit(node, node.next_id(), root);
+        }
+        self.close(until, root);
+    }
+
     fn push(&mut self, kind: Frame, end: u32) {
         self.open.push(Open { kind, end, declared: self.declared.len(), pending: Vec::new() });
     }
@@ -171,20 +192,19 @@ impl<'a> Walker<'a> {
 impl Scopes {
     pub fn new(root: Node) -> Scopes {
         let count = root.tree().len();
-        let mut walker = Walker {
-            decls: Vec::new(),
-            target: vec![NONE; count],
-            visible: HashMap::new(),
-            declared: Vec::new(),
-            open: Vec::new(),
-            funcs: Vec::new(),
-        };
-        for id in 0..count as u32 {
-            let node = root.tree().node(root.source(), id);
-            walker.close(id, root);
-            walker.visit(node, node.next_id(), root);
-        }
+        let mut walker = Walker::new(count);
+        walker.walk(root, count as u32);
         Scopes { decls: walker.decls, target: walker.target }
+    }
+
+    /// The declarations a name written where the node `at` starts could read: for each name the one in sight,
+    /// in the order they are declared.
+    pub fn in_sight(root: Node, at: u32) -> Vec<Decl> {
+        let mut walker = Walker::new(root.tree().len());
+        walker.walk(root, at.min(root.tree().len() as u32));
+        let mut seen: Vec<u32> = walker.visible.values().filter_map(|stack| stack.last().copied()).collect();
+        seen.sort_unstable();
+        seen.into_iter().map(|decl| walker.decls[decl as usize]).collect()
     }
 
     pub fn decls(&self) -> &[Decl] {
@@ -311,6 +331,32 @@ mod tests {
         let kinds: Vec<DeclKind> = scopes.decls().iter().map(|decl| decl.kind).collect();
         assert_eq!(kinds, [DeclKind::Local, DeclKind::Global, DeclKind::Local]);
         assert_eq!(scopes.uses(0).count(), 3);
+    }
+
+    /// The names in sight where the `NameExpr` `here` stands, as `name:kind`.
+    fn in_sight(src: &str) -> Vec<String> {
+        let tree = Tree::parse(src);
+        let root = tree.root(src);
+        let here = root.descendants().find(|node| node.is(N::NameExpr) && node.code() == "here").expect("here");
+        let name = |decl: &Decl| tree.tokens().text(src, decl.name as usize).to_owned();
+        Scopes::in_sight(root, here.id()).iter().map(|decl| format!("{}:{:?}", name(decl), decl.kind)).collect()
+    }
+
+    #[test]
+    fn what_is_in_sight_is_what_a_name_written_there_would_read() {
+        let src = "local a, hidden = 1, 2\nlocal function f(p, ...)\n local hidden = p\n for i = 1, 2 do\n  local late = here\n  local after\n end\nend\nlocal below";
+        assert_eq!(in_sight(src), ["a:Local", "f:Function", "p:Param", "hidden:Local", "i:LoopVar"]);
+        assert_eq!(in_sight("local a = here"), Vec::<String>::new(), "a local is not in sight in its own value");
+        assert_eq!(in_sight("for i = here, 2 do end"), Vec::<String>::new(), "nor a loop variable in its header");
+        assert_eq!(
+            in_sight("local a\ndo local b end\nprint(here)"),
+            ["a:Local"],
+            "a closed block takes its locals away"
+        );
+        assert_eq!(in_sight("x = here"), ["x:Global"], "an assignment declares its global before its value is read");
+        assert_eq!(in_sight("repeat local done = 1 until here"), ["done:Local"]);
+        assert_eq!(in_sight("count = 0\nprint(here)"), ["count:Global"], "the first assignment of a global");
+        assert_eq!(in_sight("function g(a)\n return function(b) return here end\nend"), ["a:Param", "b:Param"]);
     }
 
     #[test]
