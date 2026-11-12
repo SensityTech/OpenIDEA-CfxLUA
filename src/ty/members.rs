@@ -171,7 +171,8 @@ pub fn globals<'a>(cx: &Cx<'a>, from: Psi, name: &str) -> Vec<Found<'a>> {
         return Vec::new();
     }
     let module = module_of(from.src);
-    cx.index.named(module.as_deref().unwrap_or(G), name, cx.options.global_name_as_type)
+    let found = cx.index.named(module.as_deref().unwrap_or(G), name, cx.options.global_name_as_type);
+    found.into_iter().filter(|found| cx.files.visible(found.file)).collect()
 }
 
 /// The members `name` of one class, those of the classes it inherits from included.
@@ -184,7 +185,8 @@ pub fn named<'a>(cx: &Cx<'a>, class: &Ty, name: &str) -> Vec<Member<'a>> {
     for kept_under in cx.index.names(lookup, cx.options.global_name_as_type) {
         let fields = table_fields(cx, &kept_under).into_iter().filter(|field| &*field.name == name);
         found.extend(fields.map(Member::Field));
-        found.extend(cx.index.own_named(&kept_under, name).map(Member::Declared));
+        let seen = cx.index.own_named(&kept_under, name).filter(|found| cx.files.visible(found.file));
+        found.extend(seen.map(Member::Declared));
     }
     found
 }
@@ -285,7 +287,8 @@ fn chain<'a>(cx: &Cx<'a>, class: &str, open: &mut Vec<Rc<str>>, wanted: &dyn Fn(
         for field in table_fields(cx, &kept_under).into_iter().filter(|field| wanted(&field.name)) {
             own.add(&inherited, Member::Field(field));
         }
-        for found in index.own(&kept_under).filter(|found| wanted(&found.member.name)) {
+        let seen = |found: &Found| wanted(&found.member.name) && cx.files.visible(found.file);
+        for found in index.own(&kept_under).filter(seen) {
             own.add(&inherited, Member::Declared(found));
         }
     }

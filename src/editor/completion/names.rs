@@ -3,7 +3,7 @@
 //! (`SuggestSelfMemberProvider`).
 
 use super::members::{Mode, context_class};
-use super::{CARET_NAME, Listing, expected, tables};
+use super::{CARET_NAME, LIBRARY, Listing, expected, tables};
 use crate::lua::Source;
 use crate::lua::lexer::Tok;
 use crate::lua::scope::{DeclKind, Scopes};
@@ -11,7 +11,7 @@ use crate::lua::token::{T, is_id_part, is_identifier};
 use crate::lua::tree::{N, Node};
 use crate::matching::{self, Match, Query};
 use crate::ty::context::Psi;
-use crate::ty::members::{self, Listed};
+use crate::ty::members::{self, Listed, Member};
 use crate::ty::{FileId, G, SELF, Ty, display, psi};
 use openidea_plugin::providers::{CompletionItem, CompletionKind};
 use std::collections::HashSet;
@@ -107,7 +107,9 @@ fn globals(listing: &mut Listing, here: Psi, typed: &str) {
         });
         found.truncate(MAX_GLOBALS);
         for (rank, (_, listed)) in found.iter().enumerate() {
-            listing.member(listed, &class, &context, &mode, &format!("{GLOBAL}{rank:04}"));
+            let library = matches!(&listed.member, Member::Declared(found) if cx.files.is_library(found.file));
+            let group = if library { LIBRARY } else { GLOBAL };
+            listing.member(listed, &class, &context, &mode, &format!("{group}{rank:04}"));
         }
     }
 }
@@ -151,7 +153,9 @@ fn own_methods(listing: &mut Listing, here: Psi) {
 /// `PlayerData` (`SuggestLocalNameProvider`).
 fn suggested(listing: &mut Listing) {
     let mut names: Vec<String> = Vec::new();
-    for class in listing.cx.index.class_names() {
+    // The classes of a library name no local of the project.
+    let files = listing.cx.files;
+    for (class, _) in listing.cx.index.class_names().filter(|(_, file)| !files.is_library(*file)) {
         let words = matching::words(class.rsplit('.').next().unwrap_or(class));
         for from in (0..words.len()).rev() {
             let first = words[from];

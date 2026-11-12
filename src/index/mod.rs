@@ -4,6 +4,7 @@
 //! their file when the members of that table are asked for.
 
 pub mod declare;
+pub mod library;
 pub mod project;
 
 pub use declare::declare;
@@ -254,14 +255,14 @@ impl Index {
         Some((*file, self.files.get(file)?.aliases.get(*at as usize)?))
     }
 
-    /// The names of the classes the project declares, sorted.
-    pub fn class_names(&self) -> impl Iterator<Item = &str> {
-        self.classes.keys().map(|name| &**name)
+    /// The names of the classes that are declared, sorted, each with the file that declares it first.
+    pub fn class_names(&self) -> impl Iterator<Item = (&str, FileId)> {
+        self.classes.iter().filter_map(|(name, places)| Some((&**name, places.first()?.0)))
     }
 
-    /// The names of its aliases, sorted.
-    pub fn alias_names(&self) -> impl Iterator<Item = &str> {
-        self.aliases.keys().map(|name| &**name)
+    /// The names of the aliases, sorted, each with the file that declares it first.
+    pub fn alias_names(&self) -> impl Iterator<Item = (&str, FileId)> {
+        self.aliases.iter().filter_map(|(name, places)| Some((&**name, places.first()?.0)))
     }
 
     /// The members declared under the very name `class`.

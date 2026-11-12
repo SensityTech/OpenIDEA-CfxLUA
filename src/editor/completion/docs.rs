@@ -1,13 +1,13 @@
 //! Completion inside a documentation comment: the names of the tags, the parameters of the function it
 //! documents, the classes and the aliases where a type is written (`LuaDocCompletionContributor`).
 
-use super::Listing;
+use super::{LIBRARY, Listing};
 use crate::lua::Source;
 use crate::lua::doc::tags::{self, Comment};
 use crate::lua::lexer::Tok;
 use crate::lua::token::{T, is_id_part};
 use crate::lua::tree::{N, Node};
-use crate::ty::{Ty, members, psi};
+use crate::ty::{FileId, Ty, members, psi};
 use openidea_plugin::providers::{CompletionItem, CompletionKind};
 
 /// The tags the grammar reads, then those it only names (`LuaParserDefinition.DOC_TAG_TOKENS`, and the
@@ -94,14 +94,24 @@ fn types(listing: &mut Listing, reference: Node, at: usize) {
         }
         entry
     };
-    for name in index.class_names() {
-        listing.push(dotted(item(name, CompletionKind::Class)));
-    }
-    for name in index.alias_names() {
-        listing.push(dotted(item(name, CompletionKind::Interface)));
-    }
+    // The types of the language first: the library declares them as classes too, and what is listed under a
+    // name is listed once.
     for name in BUILTIN {
         listing.push(item(name, CompletionKind::Keyword));
+    }
+    // A type of a library comes after those of the project, and one of the other side is left out.
+    let files = listing.cx.files;
+    let placed = |mut entry: CompletionItem, file: FileId| {
+        if files.is_library(file) {
+            entry.sort_text = Some(format!("{LIBRARY}{}", entry.label.to_lowercase()));
+        }
+        dotted(entry)
+    };
+    for (name, file) in index.class_names().filter(|(_, file)| files.visible(*file)) {
+        listing.push(placed(item(name, CompletionKind::Class), file));
+    }
+    for (name, file) in index.alias_names().filter(|(_, file)| files.visible(*file)) {
+        listing.push(placed(item(name, CompletionKind::Interface), file));
     }
 }
 

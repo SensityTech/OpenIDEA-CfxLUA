@@ -51,6 +51,22 @@ pub trait Files {
     fn path(&self, _file: FileId) -> Option<String> {
         None
     }
+
+    /// Whether what `file` declares may be used where the question is asked: a library of the other side of
+    /// the network may not.
+    fn visible(&self, _file: FileId) -> bool {
+        true
+    }
+
+    /// Whether `file` is one of a library, not of the project.
+    fn is_library(&self, _file: FileId) -> bool {
+        false
+    }
+
+    /// The function the native `name` is, where the question is asked.
+    fn native(&self, _name: &str) -> Option<Ty> {
+        None
+    }
 }
 
 /// The settings of the JetBrains plugin the engine depends on, with their defaults.

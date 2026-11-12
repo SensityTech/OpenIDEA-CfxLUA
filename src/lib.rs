@@ -109,6 +109,9 @@ pub const FEATURES: [&str; 13] = [
     "luals",
 ];
 
+/// The feature that asks the type engine.
+const TYPE_ENGINE: &str = "editor";
+
 pub fn all_features() -> Vec<Box<dyn Feature>> {
     vec![
         Box::<natives::NativesFeature>::default(),
@@ -874,7 +877,20 @@ impl Providers for DevKit {
         self.index_stale(|feature, cx| feature.completes_from_index(cx, cx.doc.offset(at)));
         let items = self.with_ctx(ws, |cx, features| {
             let at = cx.doc.offset(at);
-            features.iter().flat_map(|f| f.completion(cx, at, trigger)).collect()
+            let mut items: Vec<CompletionItem> = Vec::new();
+            for (feature, name) in features.iter().zip(FEATURES) {
+                let found = feature.completion(cx, at, trigger);
+                if name == TYPE_ENGINE {
+                    // What a feature that knows the Cfx runtime, the events or the state bags offers under a
+                    // name is not offered again by the type engine, which reads the same libraries.
+                    let offered: std::collections::HashSet<String> =
+                        items.iter().map(|item| item.label.clone()).collect();
+                    items.extend(found.into_iter().filter(|item| !offered.contains(&item.label)));
+                } else {
+                    items.extend(found);
+                }
+            }
+            items
         });
         without_repeated_words(items.unwrap_or_default())
     }
@@ -1546,6 +1562,19 @@ mod tests {
     }
 
     #[test]
+    fn what_another_feature_offers_is_not_offered_again_by_the_type_engine() {
+        let host = openidea_plugin::mock::MockHost::install();
+        let mut kit = shop_resource(&host);
+        let typed = lua(SHOP_CLIENT, 2, "Citizen.\nlocal s = string.\n");
+        let citizen = offered(&mut kit, &typed, Position::new(0, 8));
+        for name in ["Wait", "CreateThread", "SetTimeout"] {
+            assert_eq!(citizen.iter().filter(|label| *label == name).count(), 1, "{name}: {citizen:?}");
+        }
+        let string = offered(&mut kit, &typed, Position::new(1, 17));
+        assert!(string.contains(&"format".to_owned()), "Lua's own library comes from the type engine: {string:?}");
+    }
+
+    #[test]
     fn a_completion_that_reads_an_index_indexes_the_document_first() {
         let host = openidea_plugin::mock::MockHost::install();
         let mut kit = shop_resource(&host);
@@ -1557,7 +1586,11 @@ mod tests {
         let typed = lua(SHOP_CLIENT, 3, "LocalPlayer.state.typedKey = 1\nlocal v = LocalPlayer.state.ty\n");
         let all: Vec<String> =
             kit.completion(&typed, Position::new(1, 30), None).into_iter().map(|i| i.label).collect();
-        assert_eq!(all, ["typedKey", "LocalPlayer", "state"], "the key of the line above, once, then the words");
+        assert_eq!(
+            all,
+            ["typedKey", "set", "set", "LocalPlayer", "state"],
+            "the key of the line above, once, the two ways to set a key of a state bag, then the words"
+        );
         // After a dot the editor feature lists members: it reads what the document declares too.
         assert_eq!(waiting(&kit), ["events", "nui", "values", "coords", "perf", "escrow"]);
     }

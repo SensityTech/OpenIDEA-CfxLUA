@@ -20,6 +20,10 @@ use std::collections::HashSet;
 /// How many functions without a `@return` have their body read to show what they return.
 const BODIES_READ: usize = 60;
 
+/// The first character of the sort key of what a library declares: after what the project declares and the
+/// natives, with the Cfx runtime API.
+const LIBRARY: char = '6';
+
 /// The name written at the caret where none is typed, as the JetBrains platform does: the tree then has a
 /// name to tell the place from.
 const CARET_NAME: &str = "__caret";
@@ -163,6 +167,7 @@ pub fn complete(cx: &Cx, file: FileId, asked: &Asked, place: Place) -> Vec<Compl
 
 #[cfg(test)]
 pub(in crate::editor) mod tests {
+    use super::LIBRARY;
     use crate::editor::EditorFeature;
     use crate::feature::Feature;
     use crate::testing::Fixture;
@@ -183,9 +188,16 @@ pub(in crate::editor) mod tests {
         feature.completion(&fx.cx(&doc), at, None)
     }
 
-    /// What it lists there, the words of the file left out.
-    pub fn completed(files: &[(&str, &str)]) -> Vec<CompletionItem> {
+    /// What it lists there of the project and of the libraries, the words of the file left out.
+    pub fn with_libraries(files: &[(&str, &str)]) -> Vec<CompletionItem> {
         with_words(files).into_iter().filter(|item| item.kind != Some(CompletionKind::Text)).collect()
+    }
+
+    /// What it lists there of the project: the words of the file, and what the libraries declare where
+    /// names are listed, are left out.
+    pub fn completed(files: &[(&str, &str)]) -> Vec<CompletionItem> {
+        let library = |item: &CompletionItem| item.sort_text.as_deref().is_some_and(|sort| sort.starts_with(LIBRARY));
+        with_libraries(files).into_iter().filter(|item| !library(item)).collect()
     }
 
     /// Each entry as `label detail`.

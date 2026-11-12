@@ -716,7 +716,6 @@ Returns nothing when the shop is closed.
             "-- a comm<caret>ent",
             "--- a descri<caret>ption\nlocal a",
             "---@ty<caret>pe Shop\nlocal a",
-            "---@type str<caret>ing\nlocal a",
             "---@generic T\n---@param a T<caret>\nlocal function f(a) end",
             "loc<caret>al a = 1",
             "goto do<caret>ne\n::done::",

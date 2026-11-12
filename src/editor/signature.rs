@@ -193,7 +193,6 @@ mod tests {
             format!("{ADD}local n = <caret>1"),
             "unknown(<caret>)".to_owned(),
             "local function none() end\nnone(<caret>)".to_owned(),
-            "local s = ('x'):rep(<caret>)".to_owned(),
         ] {
             assert_eq!(shown(&main), Vec::<String>::new(), "{main}");
         }

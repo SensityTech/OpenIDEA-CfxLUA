@@ -10,14 +10,19 @@ pub mod symbols;
 pub mod target;
 
 #[cfg(test)]
+mod library_tests;
+#[cfg(test)]
 mod tests;
 
 use crate::feature::{Ctx, Feature};
-use crate::index::project::Projects;
+use crate::index::library;
+use crate::index::project::{Projects, Sight};
 use crate::lua::Source;
 use crate::lua::token::T;
 use crate::lua::tree::N;
 use crate::project::FileKind;
+use crate::ty::FileId;
+use crate::ty::context::Cx;
 use crate::workspace::Workspace;
 use openidea_plugin::Location;
 use openidea_plugin::providers::CompletionItem;
@@ -67,6 +72,17 @@ impl EditorFeature {
         cx.settings.enabled() && (cx.doc.is_lua() || matches!(cx.doc.kind, FileKind::Lua | FileKind::Manifest))
     }
 
+    /// Asks the engine about the document, with what its file sees of the libraries: the parts of the Cfx
+    /// runtime of its side, unless lua-language-server was given them, and the natives of its game.
+    fn ask<R>(&self, cx: &Ctx, src: &Source, ask: impl FnOnce(&Cx, FileId) -> R) -> Option<R> {
+        let mut parts = crate::runtime::visible_parts(cx.settings, cx.doc.side);
+        parts.retain(|part| !cx.ws.luals.parts.contains(part));
+        let games = cx.ws.resource_of(&cx.doc.path).and_then(|resource| resource.games.clone());
+        let sets = crate::natives::visible_sets(cx.settings, &cx.ws.detected_games(), cx.doc.side, games.as_deref());
+        let native = |name: &str| cx.natives.find(name, &sets).map(library::native_type);
+        self.projects.ask((cx.ws, &cx.doc.path, src), &Sight { parts: &parts, native: &native }, ask)
+    }
+
     fn completed_place(cx: &Ctx, at: usize) -> Option<completion::Place> {
         let script = Self::applies(cx) && cx.doc.kind == FileKind::Lua;
         script.then(|| completion::place(&cx.doc.src, at)).flatten()
@@ -110,9 +126,7 @@ impl Feature for EditorFeature {
         let typed = completion::Typed::new(&cx.doc.src, at, place);
         let src = typed.src(&cx.doc.src);
         let asked = completion::Asked { ws: cx.ws, doc: cx.doc, src, at };
-        let listed = self
-            .projects
-            .ask(cx.ws, &cx.doc.path, src, |engine, file| completion::complete(engine, file, &asked, place));
+        let listed = self.ask(cx, src, |engine, file| completion::complete(engine, file, &asked, place));
         listed.unwrap_or_default()
     }
 
@@ -127,8 +141,7 @@ impl Feature for EditorFeature {
             return Vec::new();
         }
         let src = &cx.doc.src;
-        let found =
-            self.projects.ask(cx.ws, &cx.doc.path, src, |engine, file| definition::definition(engine, file, src, at));
+        let found = self.ask(cx, src, |engine, file| definition::definition(engine, file, src, at));
         found.unwrap_or_default()
     }
 
@@ -137,9 +150,7 @@ impl Feature for EditorFeature {
             return Vec::new();
         }
         let src = &cx.doc.src;
-        let found = self
-            .projects
-            .ask(cx.ws, &cx.doc.path, src, |engine, file| definition::type_definition(engine, file, src, at));
+        let found = self.ask(cx, src, |engine, file| definition::type_definition(engine, file, src, at));
         found.unwrap_or_default()
     }
 
@@ -157,9 +168,7 @@ impl Feature for EditorFeature {
             return Vec::new();
         }
         let src = &cx.doc.src;
-        let found = self
-            .projects
-            .ask(cx.ws, &cx.doc.path, src, |engine, file| hints::hints(engine, file, src, (from, to), wanted));
+        let found = self.ask(cx, src, |engine, file| hints::hints(engine, file, src, (from, to), wanted));
         found.unwrap_or_default()
     }
 
@@ -168,7 +177,7 @@ impl Feature for EditorFeature {
             return None;
         }
         let src = &cx.doc.src;
-        self.projects.ask(cx.ws, &cx.doc.path, src, |engine, file| hover::hover(engine, file, src, at)).flatten()
+        self.ask(cx, src, |engine, file| hover::hover(engine, file, src, at)).flatten()
     }
 
     fn signature_help(&self, cx: &Ctx, at: usize) -> Option<signature::Help> {
@@ -176,7 +185,7 @@ impl Feature for EditorFeature {
             return None;
         }
         let src = &cx.doc.src;
-        self.projects.ask(cx.ws, &cx.doc.path, src, |engine, file| signature::help(engine, file, src, at)).flatten()
+        self.ask(cx, src, |engine, file| signature::help(engine, file, src, at)).flatten()
     }
 
     fn semantic_tokens(&self, cx: &Ctx) -> Vec<semantic::Token> {

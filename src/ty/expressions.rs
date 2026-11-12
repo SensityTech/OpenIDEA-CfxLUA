@@ -221,7 +221,11 @@ fn name(cx: &Cx, psi: Psi) -> Ty {
                 for found in members::globals(cx, psi, text).into_iter().take(10) {
                     ty.add(&members::declared_type(cx, found));
                 }
-                ty
+                // A name no file declares may be a native.
+                match cx.files.native(text).filter(|_| ty.is_invalid() && !cx.alone()) {
+                    Some(native) => native,
+                    None => ty,
+                }
             }
         });
         if ty.is_invalid() {
