@@ -7,8 +7,10 @@ use super::expressions::{assigned_name, global_type, table_of};
 use super::{ANONYMOUS, Class, Detail, DocField, FileId, G, GLOBAL, Ty, psi};
 use crate::index::{Found, MemberKind, declare};
 use crate::lua::Source;
+use crate::lua::doc::tags::Visibility;
 use crate::lua::tree::{N, Node};
 use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 /// A member of a class.
@@ -43,11 +45,36 @@ impl Member<'_> {
         }
     }
 
+    fn shared_name(&self) -> Rc<str> {
+        match self {
+            Member::Declared(found) => found.member.name.clone(),
+            Member::Field(field) => field.name.clone(),
+            Member::Written(field) => field.name.clone(),
+        }
+    }
+
     fn worth(&self) -> u32 {
         match self {
             Member::Declared(found) => found.member.kind.worth(),
             Member::Field(_) => TABLE_FIELD,
             Member::Written(_) => MemberKind::DocField.worth(),
+        }
+    }
+
+    pub fn visibility(&self) -> Visibility {
+        match self {
+            Member::Declared(found) => found.member.visibility,
+            Member::Field(_) | Member::Written(_) => Visibility::Public,
+        }
+    }
+
+    /// Its type when no file has to be read to tell it: the one its file kept, or the one it is written
+    /// with.
+    pub fn kept_type(&self) -> Option<Ty> {
+        match self {
+            Member::Declared(found) => found.member.ty.clone(),
+            Member::Field(_) => None,
+            Member::Written(field) => Some(field.ty.clone()),
         }
     }
 
@@ -213,56 +240,68 @@ fn find_in<'l, 'a>(levels: &'l [Level<'a>], name: &str) -> Option<&'l Member<'a>
     levels.iter().flat_map(|level| &level.members).find(|member| member.name() == name)
 }
 
-/// The members of one class and of those it inherits from, as they hide one another (`ClassMemberChain`):
-/// the first level is the class itself, the next ones its parents.
-fn chain<'a>(cx: &Cx<'a>, class: &str, open: &mut Vec<Rc<str>>) -> Vec<Level<'a>> {
-    let index = cx.index;
-    if open.iter().any(|name| **name == *class) {
-        return Vec::new();
-    }
-    open.push(class.into());
-    let inherited = index.parent(class, None).map_or(Vec::new(), |parent| chain(cx, &parent, open));
-    let mut own: Vec<Member<'a>> = Vec::new();
-    let add = |own: &mut Vec<Member<'a>>, member: Member<'a>| {
+/// The members one class declares, one per name: the one that weighs most, the first of those.
+#[derive(Default)]
+struct Own<'a> {
+    members: Vec<Member<'a>>,
+    places: HashMap<Rc<str>, usize>,
+}
+
+impl<'a> Own<'a> {
+    fn add(&mut self, inherited: &[Level<'a>], member: Member<'a>) {
         let worth = member.worth();
-        let hidden = find_in(&inherited, member.name()).is_some_and(|parent| {
+        let hidden = find_in(inherited, member.name()).is_some_and(|parent| {
             let parent = parent.worth();
             !(worth > parent || worth == parent && worth > 0)
         });
         if hidden {
             return;
         }
-        match own.iter_mut().find(|known| known.name() == member.name()) {
-            Some(known) if worth > known.worth() => *known = member,
+        match self.places.get(member.name()) {
+            Some(&at) if worth > self.members[at].worth() => self.members[at] = member,
             Some(_) => {}
-            None => own.push(member),
+            None => {
+                self.places.insert(member.shared_name(), self.members.len());
+                self.members.push(member);
+            }
         }
-    };
+    }
+}
+
+/// The members of one class and of those it inherits from, as they hide one another (`ClassMemberChain`):
+/// the first level is the class itself, the next ones its parents. Only the names `wanted` are read.
+fn chain<'a>(cx: &Cx<'a>, class: &str, open: &mut Vec<Rc<str>>, wanted: &dyn Fn(&str) -> bool) -> Vec<Level<'a>> {
+    let index = cx.index;
+    if open.iter().any(|name| **name == *class) {
+        return Vec::new();
+    }
+    open.push(class.into());
+    let inherited = index.parent(class, None).map_or(Vec::new(), |parent| chain(cx, &parent, open, wanted));
+    let mut own = Own::default();
     let others = index.other_names(class, cx.options.global_name_as_type);
     for kept_under in std::iter::once(Rc::from(class)).chain(others) {
-        for field in table_fields(cx, &kept_under) {
-            add(&mut own, Member::Field(field));
+        for field in table_fields(cx, &kept_under).into_iter().filter(|field| wanted(&field.name)) {
+            own.add(&inherited, Member::Field(field));
         }
-        for found in index.own(&kept_under) {
-            add(&mut own, Member::Declared(found));
+        for found in index.own(&kept_under).filter(|found| wanted(&found.member.name)) {
+            own.add(&inherited, Member::Declared(found));
         }
     }
     let extras = index.class(class).map(|def| def.extra_supers.clone()).unwrap_or_default();
     for extra in extras {
-        for member in chain(cx, &extra, open).into_iter().flat_map(|level| level.members) {
-            let known = own.iter().any(|known| known.name() == member.name());
-            if !known && find_in(&inherited, member.name()).is_none() {
-                add(&mut own, member);
+        for member in chain(cx, &extra, open, wanted).into_iter().flat_map(|level| level.members) {
+            if !own.places.contains_key(member.name()) && find_in(&inherited, member.name()).is_none() {
+                own.add(&inherited, member);
             }
         }
     }
     open.pop();
-    std::iter::once(Level { class: class.into(), members: own }).chain(inherited).collect()
+    std::iter::once(Level { class: class.into(), members: own.members }).chain(inherited).collect()
 }
 
-fn levels<'a>(cx: &Cx<'a>, class: &Ty) -> Vec<Level<'a>> {
+fn levels<'a>(cx: &Cx<'a>, class: &Ty, wanted: &dyn Fn(&str) -> bool) -> Vec<Level<'a>> {
     match lookup_name(class) {
-        Some(name) if !cx.alone() => chain(cx, name, &mut Vec::new()),
+        Some(name) if !cx.alone() => chain(cx, name, &mut Vec::new(), wanted),
         _ => Vec::new(),
     }
 }
@@ -276,15 +315,22 @@ pub struct Listed<'a> {
 /// The members of a class as a completion lists them: its own, then those it inherits; a name comes once,
 /// from the nearest class that declares it.
 pub fn visible<'a>(cx: &Cx<'a>, class: &Ty) -> Vec<Listed<'a>> {
+    visible_named(cx, class, &|_| true)
+}
+
+/// The members of a class whose name is `wanted`, as a completion lists them: a class with thousands of
+/// members, as the globals are, is not listed whole.
+pub fn visible_named<'a>(cx: &Cx<'a>, class: &Ty, wanted: &dyn Fn(&str) -> bool) -> Vec<Listed<'a>> {
     if let Some(fields) = written(class) {
         let listed = |field: &DocField| Listed { member: Member::Written(field.clone()), class: class.clone() };
-        return fields.iter().map(listed).collect();
+        return fields.iter().filter(|field| wanted(&field.name)).map(listed).collect();
     }
     let mut listed: Vec<Listed<'a>> = Vec::new();
-    for level in levels(cx, class) {
+    let mut names: HashSet<Rc<str>> = HashSet::new();
+    for level in levels(cx, class, wanted) {
         let declaring = if class.class_name() == Some(&*level.class) { class.clone() } else { Ty::named(&level.class) };
         for member in level.members {
-            if !listed.iter().any(|known| known.member.name() == member.name()) {
+            if names.insert(member.shared_name()) {
                 listed.push(Listed { member, class: declaring.clone() });
             }
         }
@@ -297,7 +343,7 @@ pub fn find<'a>(cx: &Cx<'a>, class: &Ty, name: &str) -> Option<Member<'a>> {
     if let Some(fields) = written(class) {
         return fields.iter().find(|field| &*field.name == name).cloned().map(Member::Written);
     }
-    find_in(&levels(cx, class), name).cloned()
+    find_in(&levels(cx, class, &|member| member == name), name).cloned()
 }
 
 /// Whether a value of the class `class` can stand where `other` is asked for: it is that class, or
