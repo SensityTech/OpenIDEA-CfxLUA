@@ -3,6 +3,7 @@
 mod expected;
 mod members;
 mod names;
+mod overrides;
 mod tables;
 
 use crate::feature::Doc;
@@ -111,6 +112,8 @@ pub fn complete(cx: &Cx, file: FileId, doc: &Doc, src: &Source, at: usize, place
         Place::Member(sign) => {
             let named = Psi { file, src, node: src.root().tree().node_at(&src.text, src.toks[sign].start) };
             match named.node.kind() {
+                // `function Class:name`: a method is declared, not read.
+                N::ClassMethodName => overrides::methods(&mut listing, named),
                 // The CfxLua set field `{ .name }`.
                 N::TableField => {
                     if let Some(table) = tables::keyed_by(named.node) {
