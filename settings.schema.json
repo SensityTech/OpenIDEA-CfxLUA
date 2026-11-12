@@ -132,6 +132,27 @@
       "title": "Inspection: ---@param that names no parameter",
       "default": true
     },
+    "inspections.matchSignature": {
+      "type": "boolean",
+      "title": "Type safety: arguments that do not match the function they are given to",
+      "description": "Missing or extra arguments and arguments of another type than the ---@param of the function; also a call to a method its class does not declare.",
+      "default": false
+    },
+    "inspections.returnType": {
+      "type": "boolean",
+      "title": "Type safety: return values that do not match ---@return",
+      "default": false
+    },
+    "inspections.assignType": {
+      "type": "boolean",
+      "title": "Type safety: value assigned to a variable or a field of another type",
+      "default": false
+    },
+    "inspections.undeclaredVariable": {
+      "type": "boolean",
+      "title": "Type safety: name that nothing declares",
+      "default": false
+    },
     "natives.autoUpdate": {
       "type": "boolean",
       "title": "Check for new natives automatically",

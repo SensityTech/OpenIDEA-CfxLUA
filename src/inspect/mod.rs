@@ -4,11 +4,14 @@
 
 pub mod indexed;
 pub mod suppress;
+pub mod typed;
 
 #[cfg(test)]
 mod indexed_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod typed_tests;
 
 use crate::editor::target::documented_param;
 use crate::feature::{Fix, Problem};
@@ -40,8 +43,23 @@ pub const UNRESOLVED_TYPE: Inspection = Inspection { code: "UnresolvedClass", se
 pub const UNRESOLVED_PARAM: Inspection =
     Inspection { code: "UnresolvedSymbolInEmmyDoc", setting: "inspections.unresolvedParam" };
 
+pub const MATCH_SIGNATURE: Inspection =
+    Inspection { code: "MatchFunctionSignature", setting: "inspections.matchSignature" };
+pub const UNDECLARED: Inspection = Inspection { code: "UndeclaredVariable", setting: "inspections.undeclaredVariable" };
+pub const RETURN_TYPE: Inspection = Inspection { code: "ReturnType", setting: "inspections.returnType" };
+pub const ASSIGN_TYPE: Inspection = Inspection { code: "AssignType", setting: "inspections.assignType" };
+
 /// The inspections that read one file.
 pub const ALL: [Inspection; 6] = [UNUSED, SHADOWED, SIMPLIFY, EMPTY_BODY, UNREACHABLE, ZERO_INDEX];
+/// The type safety inspections: the JetBrains plugin leaves them off until they are asked for.
+pub const TYPED: [Inspection; 4] = [MATCH_SIGNATURE, UNDECLARED, RETURN_TYPE, ASSIGN_TYPE];
+
+impl Inspection {
+    /// Whether it runs when no setting says so.
+    pub fn on_by_default(self) -> bool {
+        !TYPED.contains(&self)
+    }
+}
 /// The inspections that read what the project declares.
 pub const INDEXED: [Inspection; 4] = [DUPLICATE_CLASS, DEPRECATED, UNRESOLVED_TYPE, UNRESOLVED_PARAM];
 

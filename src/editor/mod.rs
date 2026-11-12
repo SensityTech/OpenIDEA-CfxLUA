@@ -242,14 +242,17 @@ impl Feature for EditorFeature {
             return Vec::new();
         }
         let src = &cx.doc.src;
-        let wanted = |inspection: Inspection| cx.settings.bool(inspection.setting, true);
+        let wanted = |inspection: Inspection| cx.settings.bool(inspection.setting, inspection.on_by_default());
         let mut found = inspect::problems(src, &wanted);
         // A project that is still being read declares less than it will: a type would be unknown for a while.
-        if cx.doc.kind == FileKind::Lua && !cx.ws.indexing && inspect::INDEXED.into_iter().any(wanted) {
+        let asked = inspect::INDEXED.into_iter().chain(inspect::TYPED).any(wanted);
+        if cx.doc.kind == FileKind::Lua && !cx.ws.indexing && asked {
             let root = format!("{}/", cx.ws.root);
             let shown = |path: &str| path.strip_prefix(&root).unwrap_or(path).to_owned();
             let indexed = self.ask_within(Some(INSPECTION_TIME), cx, src, |engine, file| {
-                inspect::indexed::problems(engine, file, src, &wanted, &shown)
+                let mut found = inspect::indexed::problems(engine, file, src, &wanted, &shown);
+                found.extend(inspect::typed::problems(engine, file, src, &wanted));
+                found
             });
             found.extend(indexed.unwrap_or_default());
             found.sort_by_key(|problem| problem.start);

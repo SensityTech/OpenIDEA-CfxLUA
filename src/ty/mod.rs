@@ -13,6 +13,7 @@ pub mod psi;
 mod render;
 pub mod resolve;
 mod subst;
+pub mod subtype;
 
 #[cfg(test)]
 mod engine_tests;
