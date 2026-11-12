@@ -58,6 +58,19 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   comment is shown as Markdown, then what its tags tell: parameters and their values, returned values, overloads,
   `@see`, `@deprecated`, `@since`. A class or an alias named in an annotation, and a parameter named by a
   `@param`, show the same. Where lua-language-server answers too, the plugin's text comes below its own.
+- **Parameter info, without lua-language-server.** Inside the parentheses of a call (after `(` or `,`, or with
+  Parameter Info) the parameters of the called function are shown, the one being typed in bold: each signature of
+  the function, its `---@overload`s included, with the object first when a method is called with a dot.
+- **Go to declaration from the type engine.** Go to Declaration on a name leads to the local, the parameter or the
+  global it stands for, in any file of the project; on a field, to the member of its class (the `---@field`, the
+  method or the assignment); on `self`, to what the method is declared on; on a class or an alias named in an
+  annotation, to its `---@class` or `---@alias`; on the name after `@param`, to the parameter; on the label of a
+  `goto`, to that label; on the string of a `require`, to the file it loads. Go to Type Declaration leads to the
+  classes of the type of a name.
+- **Inlay hints of parameter names.** Before a number, a string, a table, a function or an operation given to a
+  function the plugin knows, the name of the parameter is written: `open(door: 2, fast: true)`. Three more hints
+  can be turned on in the settings: the types of local variables, the types of parameters, and what functions
+  return.
 - **The memory the plugin holds is written in the IDE log** when it has read a project
   (`resources indexed (N MiB)`): OpenIDEA gives a plugin 256 MiB.
 
