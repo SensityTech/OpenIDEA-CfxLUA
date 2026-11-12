@@ -67,6 +67,8 @@ const VIEW: Slice = Slice { reads: 64, bytes: 256 << 10, heavy: false };
 const EDIT: Slice = Slice { reads: 8, bytes: 24 << 10, heavy: false };
 // Bigger files are generated data or bundles: lexing one would take a call on its own.
 const MAX_INDEXED: usize = 1 << 20;
+/// The host keeps this many edits of what a formatter answers and drops the rest without a word.
+const MAX_EDITS: usize = 10_000;
 /// How much text is read before the indexing has to catch up.
 const READ_AHEAD: usize = 4 << 20;
 const DERIVE_EVERY: u32 = 6;
@@ -1099,6 +1101,7 @@ impl LanguageFeatures for DevKit {
                 let Ok(edits) = feature.format(cx, options.tab_size, options.insert_spaces, range) else {
                     return Err(Error::Failed("CfxLua could not lay this file out: nothing is formatted".to_owned()));
                 };
+                let edits = format::joined(&cx.doc.src.text, edits, MAX_EDITS);
                 out.extend(edits.into_iter().map(|(start, end, text)| cx.doc.edit(start, end, text)));
             }
             Ok(out)
@@ -1784,7 +1787,11 @@ mod tests {
         let edits = kit.format(&declarations, None, spaces.clone()).expect("the edits");
         assert_eq!(applied(&declarations.text, &edits), "---@meta\nlocal a = 1\n", "a declaration file as well");
         let big = lua(SHOP_CLIENT, 5, &"local a=1\n".repeat(MAX_INDEXED / 10 + 1));
-        assert!(kit.format(&big, None, spaces).is_err(), "a file that is not formatted says so");
+        assert!(kit.format(&big, None, spaces.clone()).is_err(), "a file that is not formatted says so");
+        let many = lua(SHOP_CLIENT, 7, &"local a=1\n".repeat(MAX_EDITS));
+        let edits = kit.format(&many, None, spaces).expect("the edits");
+        assert!(edits.len() <= MAX_EDITS, "{} edits: the host would drop the last ones", edits.len());
+        assert_eq!(applied(&many.text, &edits), "local a = 1\n".repeat(MAX_EDITS));
         let typed = lua(SHOP_CLIENT, 6, &typed.text);
         kit.format(&typed, None, FormatOptions { tab_size: 2, insert_spaces: true }).expect("the edits");
         host.set_setting(editor::formatting::KEEP_SIMPLE_BLOCKS, "true");

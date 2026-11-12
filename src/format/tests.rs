@@ -340,6 +340,29 @@ fn only_what_touches_the_range_is_formatted() {
 }
 
 #[test]
+fn many_edits_are_joined_into_fewer_that_write_the_same() {
+    let text = "a=1\nif a then b=2 end\n".repeat(200);
+    let src = Source::new(&text);
+    let edits = format(&src, &style(), None).expect("a layout that settles");
+    assert!(edits.len() > 1_000, "{}", edits.len());
+    let apply = |edits: &[Edit]| {
+        let mut written = text.clone();
+        for (from, to, with) in edits.iter().rev() {
+            written.replace_range(*from..*to, with);
+        }
+        written
+    };
+    for most in [1, 7, 100, 999] {
+        let fewer = joined(&text, edits.clone(), most);
+        assert!(fewer.len() <= most && !fewer.is_empty(), "{} for {most}", fewer.len());
+        assert!(fewer.windows(2).all(|pair| pair[0].1 <= pair[1].0), "in the order of the text");
+        assert_eq!(apply(&fewer), apply(&edits), "{most}");
+    }
+    assert_eq!(joined(&text, edits.clone(), edits.len()), edits, "nothing to join under the limit");
+    assert_eq!(apply(&edits), formatted(&src, &style()));
+}
+
+#[test]
 fn a_line_is_as_deep_as_it_is_long() {
     // Nothing is nested in these: the tree of a sum, of a chain or of an index has one level for each link.
     let long = [

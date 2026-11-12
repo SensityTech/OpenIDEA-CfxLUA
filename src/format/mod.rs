@@ -149,6 +149,25 @@ pub fn format(src: &Source, style: &Style, range: Option<(usize, usize)>) -> Res
     if settled { Ok(edits) } else { Err(Unsettled) }
 }
 
+/// The same change written as `most` edits at most: neighbours are joined into one edit, which writes again
+/// what stands between them. `edits` are in the order of the text, as `format` gives them.
+pub fn joined(text: &str, edits: Vec<Edit>, most: usize) -> Vec<Edit> {
+    if most == 0 || edits.len() <= most {
+        return edits;
+    }
+    let joined = |group: &[Edit]| {
+        let mut written = String::new();
+        for (rank, (_, end, with)) in group.iter().enumerate() {
+            written.push_str(with);
+            if let Some((next, _, _)) = group.get(rank + 1) {
+                written.push_str(&text[*end..*next]);
+            }
+        }
+        (group[0].0, group[group.len() - 1].1, written)
+    };
+    edits.chunks(edits.len().div_ceil(most)).map(joined).collect()
+}
+
 /// The edits of one layout, and whether that layout got to the end of the file.
 fn laid_out(src: &Source, style: &Style, range: Option<(usize, usize)>) -> (Vec<Edit>, bool) {
     let root = src.root();
