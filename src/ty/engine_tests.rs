@@ -93,9 +93,9 @@ impl Project {
         let ty = self.before_caret();
         let mut names: Vec<String> = Vec::new();
         for class in ty.top_classes() {
-            for member in members::visible(&cx, class) {
-                if !names.iter().any(|name| name == member.name()) {
-                    names.push(member.name().to_owned());
+            for listed in members::visible(&cx, class) {
+                if !names.iter().any(|name| name == listed.member.name()) {
+                    names.push(listed.member.name().to_owned());
                 }
             }
         }
@@ -309,7 +309,7 @@ fn the_place_of_a_table_tells_what_its_fields_should_be() {
     let expected = declarations::should_be(&project.cx(), project.psi(table));
     let mut fields: Vec<String> = Vec::new();
     for class in expected.top_classes() {
-        fields.extend(members::visible(&project.cx(), class).iter().map(|member| member.name().to_owned()));
+        fields.extend(members::visible(&project.cx(), class).iter().map(|listed| listed.member.name().to_owned()));
     }
     assert_eq!(fields, ["aaa", "bbb", "ccc"], "{expected:?}");
 }
