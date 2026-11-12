@@ -101,6 +101,18 @@ pub struct Declared {
     pub members: Vec<Member>,
     pub classes: Vec<ClassDef>,
     pub aliases: Vec<AliasDef>,
+    /// The names of the fields of table constructors a comment marks `@deprecated`: those fields are not
+    /// kept, a member and a class carry their own mark.
+    pub deprecated_fields: Vec<Rc<str>>,
+}
+
+impl Declared {
+    /// The names of what the file declares as deprecated.
+    fn deprecated(&self) -> impl Iterator<Item = &Rc<str>> {
+        let members = self.members.iter().filter(|member| member.deprecated).map(|member| &member.name);
+        let classes = self.classes.iter().filter(|class| class.deprecated).map(|class| &class.name);
+        members.chain(classes).chain(&self.deprecated_fields)
+    }
 }
 
 /// A member and the file that declares it.
@@ -174,6 +186,8 @@ pub struct Index {
     members: BTreeSet<Place>,
     classes: Names,
     aliases: Names,
+    /// How many declarations marked `@deprecated` bear each name.
+    deprecated: HashMap<Rc<str>, u32>,
 }
 
 fn forget(places: &mut Names, name: &str, file: FileId) {
@@ -204,6 +218,9 @@ impl Index {
         for (at, alias) in declared.aliases.iter().enumerate() {
             self.aliases.entry(alias.name.clone()).or_default().push((file, at as u32));
         }
+        for name in declared.deprecated() {
+            *self.deprecated.entry(name.clone()).or_default() += 1;
+        }
         self.files.insert(file, declared);
     }
 
@@ -221,6 +238,26 @@ impl Index {
         for alias in &declared.aliases {
             forget(&mut self.aliases, &alias.name, file);
         }
+        for name in declared.deprecated() {
+            if let Some(count) = self.deprecated.get_mut(name) {
+                *count -= 1;
+                if *count == 0 {
+                    self.deprecated.remove(name);
+                }
+            }
+        }
+    }
+
+    /// Whether a member, a class or a field of a table bearing that name is marked `@deprecated` somewhere:
+    /// what a name is not worth resolving without.
+    pub fn has_deprecated(&self, name: &str) -> bool {
+        self.deprecated.contains_key(name)
+    }
+
+    /// Every declaration of the class `name`, with the file that makes it.
+    pub fn classes_named(&self, name: &str) -> impl Iterator<Item = (FileId, &ClassDef)> {
+        let places = self.classes.get(name).map_or(&[][..], Vec::as_slice);
+        places.iter().filter_map(|(file, at)| Some((*file, self.files.get(file)?.classes.get(*at as usize)?)))
     }
 
     fn found(&self, place: &Place) -> Option<Found<'_>> {
@@ -427,6 +464,33 @@ mod tests {
         assert_eq!(index.supers("T", Some("B")), [Rc::from("B"), Rc::from("C")], "a bounded generic parameter");
         assert_eq!(index.parent("A", None).as_deref(), Some("B"));
         assert_eq!(index.parent("C", None), None);
+    }
+
+    #[test]
+    fn deprecated_names_and_the_declarations_of_a_class_follow_the_files() {
+        let mut index = Index::default();
+        let old = |name: &str| Member { deprecated: true, ..member("_G", name, MemberKind::Function) };
+        let shop = |node: u32| ClassDef { node, ..class("Shop", &[], None) };
+        index.set(1, Declared { members: vec![old("open")], classes: vec![shop(3)], ..Declared::default() });
+        let second = Declared {
+            members: vec![old("open"), member("_G", "close", MemberKind::Function)],
+            classes: vec![shop(7), ClassDef { deprecated: true, ..class("Cart", &[], None) }],
+            deprecated_fields: vec!["legacy".into()],
+            ..Declared::default()
+        };
+        index.set(2, second);
+        assert!(["open", "Cart", "legacy"].into_iter().all(|name| index.has_deprecated(name)));
+        assert!(!index.has_deprecated("close") && !index.has_deprecated("Shop"));
+        let places = |index: &Index| -> Vec<(FileId, u32)> {
+            index.classes_named("Shop").map(|(file, class)| (file, class.node)).collect()
+        };
+        assert_eq!(places(&index), [(1, 3), (2, 7)]);
+        index.remove(2);
+        assert!(index.has_deprecated("open") && !index.has_deprecated("legacy") && !index.has_deprecated("Cart"));
+        assert_eq!(places(&index), [(1, 3)]);
+        index.set(1, Declared::default());
+        assert!(!index.has_deprecated("open"));
+        assert_eq!(index.classes_named("Shop").count(), 0);
     }
 
     #[test]

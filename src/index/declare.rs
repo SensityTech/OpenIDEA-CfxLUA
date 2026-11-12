@@ -278,5 +278,17 @@ pub fn declare(cx: &Cx, file: FileId, src: &Source) -> Declared {
         declaring.comment(Comment(comment));
     }
     declaring.out.members.shrink_to_fit();
+    if src.text.contains(DEPRECATED) {
+        declaring.out.deprecated_fields = deprecated_fields(src);
+    }
     declaring.out
+}
+
+const DEPRECATED: &str = "@deprecated";
+
+/// The names of the fields of table constructors whose comment says `@deprecated`.
+fn deprecated_fields(src: &Source) -> Vec<Rc<str>> {
+    let marked = |field: &Node| src.comment_of(*field).is_some_and(Comment::is_deprecated);
+    let fields = src.root().descendants().filter(|node| node.is(N::TableField)).filter(marked);
+    fields.filter_map(|field| psi::field_name(src, field).map(|name| Rc::from(name.as_ref()))).collect()
 }
