@@ -76,6 +76,13 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   they return is typed. After `string.` or `('x'):` the string functions are listed, and the names of Lua itself
   (`print`, `pairs`, `math`…) are completed. A script only sees the runtime API of its side: a server script is
   not offered `SendNUIMessage`, a client script is not offered `GetPlayers`.
+- **Lua inspections, without lua-language-server.** The plugin reports, the way the JetBrains plugin does: a
+  local, a parameter, a loop variable or a local function that is never used (faded, with a fix that removes it
+  or renames it to `_`); a local that hides another local of the same name; `local a = nil`; a `for`, a `while`
+  or a `do` with an empty body; the statements written after a `return`; a table indexed at `0`. Each has a
+  setting and a quick fix where one makes sense. A `---@suppress <id>` comment above a statement turns an
+  inspection off in it (`---@suppress RemoveUnusedLocal`), for the plugin's CfxLua checks too, and a `---@meta`
+  file is not told about its unused names.
 - **Natives have parameter info, hints, a hover, and type what they return.** A native shows its parameters while
   its arguments are typed and names them before literals; `GetEntityCoords(ped).` lists `x`, `y` and `z`; hovering
   a native shows its documentation: description, example, parameters, hash, side and game.

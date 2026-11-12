@@ -40,6 +40,7 @@ Security issues: see [SECURITY.md](SECURITY.md), not a public issue.
 | `src/ty/` | The type engine: the types of Lua values, how they are shown, the types written in documentation comments, and the inference of expressions and declarations. |
 | `src/index/` | What the files of a project declare, by name: classes, members, aliases; and in `library.rs` what the engine knows without a project writing it (the Lua standard library, the Cfx runtime, the natives). |
 | `src/editor/` | What the editor shows of a Lua file: semantic colours, folding, structure, occurrences, in `completion/` what the type engine completes (members, names, expected values, table keys, documentation comments), in `target.rs` what the name under the caret stands for, in `hover.rs` and `definition.rs` its documentation and where it is declared, in `signature.rs` the parameters of the call being typed, and in `hints.rs` the inlay hints. |
+| `src/inspect/` | The Lua inspections that read one file (unused and shadowed locals, empty bodies, unreachable statements, index 0, `local a = nil`) and what turns one off (`---@suppress`, `---@meta`). |
 | `src/project/` | Resources, manifest entries, FXServer globs, client/server/shared side, game. |
 | `src/workspace.rs` | The project files the plugin has read; areas only read the project through it. The text of a script is released once it is indexed and read again on demand. |
 | `src/globals.rs` | Which files define a global function, for the areas that read a function of another file. |
