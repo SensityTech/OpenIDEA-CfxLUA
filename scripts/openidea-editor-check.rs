@@ -9,7 +9,8 @@
 // Without `--project`, no project is open in this host and the plugin loads no native catalog: natives come back as
 // unknown globals and completion lists none. With it, the host opens that folder as a project and events are posted
 // until the plugin has read it, as they are while a user moves between files: the file is then asked about as one
-// of an indexed project. `--log` prints on stderr what the host logs, the lines of the plugin included.
+// of an indexed project, and the problems the plugin publishes for it after the edit are counted. `--log` prints
+// on stderr what the host logs, the lines of the plugin included.
 // `--type <text>` is what the edit types on a new last line, `GetEnt` by default: the completion is asked at its
 // end and its first entries are printed.
 // Built like scripts/openidea-start-check.rs, as an example of OpenIDEA's `ide-host` crate:
@@ -24,7 +25,7 @@ use ide_plugin::{HostError, Invocation, Limits, ProviderDocument, WorkbenchEvent
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
@@ -43,8 +44,11 @@ const KEYWORDS: [&str; 22] = [
     "not", "or", "repeat", "return", "then", "true", "until", "while",
 ];
 
+/// How many problems the plugin last published: errors, warnings, infos, hints, and those shown faded.
+type Published = Arc<Mutex<Option<[usize; 5]>>>;
+
 /// One open project, with no editor on it: what the plugin reads comes from the disk.
-struct Opened(PathBuf);
+struct Opened(PathBuf, Published);
 
 impl PluginWorkspace for Opened {
     fn projects(&self) -> Vec<PathBuf> {
@@ -65,7 +69,15 @@ impl PluginWorkspace for Opened {
     fn project_of(&self, _: &str) -> Option<PathBuf> {
         Some(self.0.clone())
     }
-    fn publish_diagnostics(&self, _: &str, _: &Path, _: Vec<ide_core::Diagnostic>) -> Result<(), HostError> {
+    fn publish_diagnostics(&self, _: &str, _: &Path, found: Vec<ide_core::Diagnostic>) -> Result<(), HostError> {
+        let mut counts = [0; 5];
+        for problem in &found {
+            counts[problem.severity as usize] += 1;
+            counts[4] += usize::from(problem.unnecessary);
+        }
+        if let Ok(mut published) = self.1.lock() {
+            *published = Some(counts);
+        }
         Ok(())
     }
 }
@@ -235,8 +247,9 @@ fn check(
         _ => {}
     };
     let host = PluginHost::new(dir.to_path_buf(), Arc::new(sink), limits).map_err(|e| e.to_string())?;
+    let published = Published::default();
     if let Some(root) = project {
-        host.set_workspace(Some(Arc::new(Opened(root.to_path_buf()))));
+        host.set_workspace(Some(Arc::new(Opened(root.to_path_buf(), published.clone()))));
     }
     let unpacked = host.unpack_package(package).map_err(|e| e.to_string())?;
     let installed = host.install_from_dir(&unpacked, &Consent::all()).map_err(|e| e.to_string())?;
@@ -386,6 +399,13 @@ fn check(
     println!("    after `{typing}`: {}", completed.borrow().join(", "));
     ask(300, "occurrences", &|| host.language_document_highlights(&typed, at).len());
     ask(400, "line markers", &|| host.provide_line_markers(&typed).len());
+    if let Some([errors, warnings, infos, hints, faded]) = published.lock().ok().and_then(|counts| *counts) {
+        let all = errors + warnings + infos + hints;
+        println!(
+            "  problems published: {all} ({errors} errors, {warnings} warnings, {infos} infos, {hints} hints, \
+             {faded} faded)"
+        );
+    }
     ask(500, "code actions", &|| host.provide_code_actions(&typed, Range::point(at)).len());
     let coloured = ask(600, "tokens", &|| host.provide_semantic_tokens(&typed).len());
 
