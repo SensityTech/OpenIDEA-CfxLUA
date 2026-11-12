@@ -88,6 +88,11 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   a class that a `---@deprecated` comment marks, struck through; a type written in a comment that no class, no
   alias and no generic parameter declares; and a `---@param` that names no parameter of the function it
   documents, with a fix that removes it. Each has a setting.
+- **Type safety inspections, off by default.** Four inspections of the JetBrains plugin can be turned on in the
+  settings: arguments that do not match the `---@param` of the function they are given to (type, missing or
+  extra argument, a method its class does not declare), `return` values that do not match `---@return`, a value
+  assigned to a variable or a field of another type, and a name that nothing declares. On code that is not
+  annotated they report a lot, which is why they wait for a setting.
 - **Lua intentions.** Where the caret stands, the plugin offers the rewrites of the JetBrains plugin: add or
   remove the parentheses of a call that takes a single string or table; invert a boolean; replace an operation
   between constants by its value (with the caret on its operator); add `---@param` for a parameter, `---@type`
