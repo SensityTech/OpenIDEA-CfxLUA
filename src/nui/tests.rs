@@ -454,6 +454,30 @@ fn lua_wrappers_of_wrappers() {
 }
 
 #[test]
+fn the_calls_of_a_wrapper_found_late_are_read_again() {
+    let (fx, f) = project(&[
+        ("shop/client/a_calls.lua", "SendUi('first')\nOther('third')\nShowPanel('second')\nprint('fourth')\n"),
+        (
+            "shop/client/ui.lua",
+            "function SendUi(action, payload)\n    SendNUIMessage({ action = action, payload = payload })\nend\n",
+        ),
+        ("shop/client/z_panel.lua", "function ShowPanel(action)\n    SendUi(action, {})\nend\n"),
+    ]);
+    // `ShowPanel` is found a wrapper in the last file, after the first one gave its calls of `SendUi`.
+    assert_eq!(sites_of(&fx, &f, Channel::Message, "first"), ["SEND shop/client/a_calls.lua:1"]);
+    assert_eq!(sites_of(&fx, &f, Channel::Message, "second"), ["SEND shop/client/a_calls.lua:3"]);
+    assert!(sites_of(&fx, &f, Channel::Message, "third").is_empty());
+    let st = f.state.borrow();
+    let kept = |path: &str| -> Vec<String> {
+        st.calls[&Fixture::path(path)].calls.iter().map(|call| call.callee.clone()).collect()
+    };
+    assert_eq!(kept("shop/client/a_calls.lua"), ["SendUi", "ShowPanel"], "the calls of the wrappers, no other");
+    assert_eq!(kept("shop/client/z_panel.lua"), ["SendUi"]);
+    assert_eq!(kept("shop/client/main.lua"), ["SendReactMessage"], "its own local wrapper");
+    assert!(!st.calls.contains_key(&Fixture::path("shop/client/ui.lua")), "it calls no wrapper: not read again");
+}
+
+#[test]
 fn javascript_client_scripts_registering_callbacks() {
     let (fx, f) = project(&[(
         "legacy/client.js",

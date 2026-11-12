@@ -211,13 +211,17 @@ impl Keys {
     }
 }
 
+/// The calls a file makes of the wrappers named like the hash given; a file that has to be read gives at once
+/// the calls of every name of the sorted list.
+pub type CallsOf<'a> = dyn FnMut(&str, u64, &[u64]) -> Rc<[LuaCall]> + 'a;
+
 pub struct Input<'a> {
     pub ws: &'a Workspace,
     pub keys: &'a Keys,
     pub lua: &'a BTreeMap<String, lua::Facts>,
     pub web: &'a BTreeMap<String, web::Facts>,
     pub resource_of: &'a mut dyn FnMut(&str) -> Option<String>,
-    pub calls_of: &'a mut dyn FnMut(&str) -> Rc<[LuaCall]>,
+    pub calls_of: &'a mut CallsOf<'a>,
 }
 
 const MAX_WRAPPERS: usize = 200;
@@ -389,6 +393,9 @@ impl Builder<'_> {
         let input_lua = self.input.lua;
         let mut known: HashSet<(String, usize, LuaKind)> =
             wrappers.iter().map(|w| (w.path.clone(), w.param, w.kind)).collect();
+        let mut names: Vec<u64> = wrappers.iter().map(|w| lua::name_hash(simple_name(&w.path))).collect();
+        names.sort_unstable();
+        names.dedup();
         let mut i = 0;
         while i < wrappers.len() && i < MAX_WRAPPERS {
             let w = wrappers[i].clone();
@@ -400,7 +407,7 @@ impl Builder<'_> {
                     continue;
                 }
                 let file: Rc<str> = Rc::from(path.as_str());
-                let calls = (self.input.calls_of)(path);
+                let calls = (self.input.calls_of)(path, hash, &names);
                 for call in calls.iter().filter(|c| w.called_by(c, path)) {
                     match call.args.get(w.param) {
                         Some(Arg::Str(n)) => self.site(&file, role, &n.name, true, &n.at, n.literal),
@@ -420,6 +427,10 @@ impl Builder<'_> {
                                     param: *index,
                                     field: w.field.clone(),
                                 });
+                                let found = lua::name_hash(simple_name(&f.path));
+                                if let Err(at) = names.binary_search(&found) {
+                                    names.insert(at, found);
+                                }
                             }
                         }
                         Some(Arg::Other) if w.kind == LuaKind::Callback => self.mark_dynamic(path),

@@ -594,12 +594,16 @@ fn callee_path(chain: &Chain, seg: usize) -> Option<(String, bool)> {
     Some((path, false))
 }
 
-pub fn calls(an: &Analysis) -> Vec<LuaCall> {
+/// The calls of the functions whose simple name hashes to one of `names`, which are sorted.
+pub fn calls(an: &Analysis, names: &[u64]) -> Vec<LuaCall> {
     let src = an.src;
     let mut out = Vec::new();
     for (i, call) in an.calls.iter().enumerate() {
         let chain = &an.chains[call.chain];
         let Some((callee, colon)) = callee_path(chain, call.seg) else { continue };
+        if names.binary_search(&name_hash(simple_name(&callee))).is_err() {
+            continue;
+        }
         let args: Vec<Arg> = an.args(i).iter().take(MAX_ARGS).map(|&s| an.arg(s, call.name_tok)).collect();
         if args.is_empty() {
             continue;
@@ -828,7 +832,10 @@ mod tests {
              local z = Zone.new()\nz:open('x')\nfunction Zone:show() self:open('y') end\nlocal p = setmetatable({}, Panel)\np:open('z')",
         );
         let an = Analysis::new(&src);
-        let calls = calls(&an);
+        let mut names = ["SendUi", "ShowPanel", "open"].map(name_hash);
+        names.sort_unstable();
+        let calls = calls(&an, &names);
+        assert_eq!(calls.len(), 6, "the calls of the names asked for, no other");
         let find = |callee: &str| calls.iter().filter(|c| c.callee == callee).collect::<Vec<_>>();
         let send = find("SendUi");
         assert_eq!(send[0].args[0], Arg::Param(0));

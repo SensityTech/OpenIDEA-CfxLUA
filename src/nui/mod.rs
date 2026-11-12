@@ -52,11 +52,19 @@ pub struct NuiFeature {
     state: RefCell<State>,
 }
 
+/// What a Lua file calls of the wrappers of some names, kept from one build of the bridge to the next: the
+/// file is read again when the calls of another name are asked for.
+struct Called {
+    /// The hashes of those names, sorted.
+    names: Vec<u64>,
+    calls: Rc<[LuaCall]>,
+}
+
 struct State {
     lua: BTreeMap<String, lua::Facts>,
     web: BTreeMap<String, web::Facts>,
     configs: Configs,
-    calls: HashMap<String, Rc<[LuaCall]>>,
+    calls: HashMap<String, Called>,
     resources: HashMap<String, Option<String>>,
     bridge: Option<(Keys, Rc<Bridge>)>,
     keys: Keys,
@@ -99,18 +107,18 @@ impl State {
             let configs: &Configs = configs;
             let mut resource =
                 |path: &str| resources.entry(path.to_owned()).or_insert_with(|| resource_of(ws, configs, path)).clone();
-            let mut calls_of = |path: &str| -> Rc<[LuaCall]> {
-                if let Some(c) = calls.get(path) {
-                    return c.clone();
+            let mut calls_of = |path: &str, name: u64, names: &[u64]| -> Rc<[LuaCall]> {
+                if let Some(called) = calls.get(path).filter(|called| called.names.binary_search(&name).is_ok()) {
+                    return called.calls.clone();
                 }
                 let read: Rc<[LuaCall]> = match ws.read(path) {
                     Some(text) => {
                         let src = Source::new(&text);
-                        lua::calls(&lua::Analysis::new(&src)).into()
+                        lua::calls(&lua::Analysis::new(&src), names).into()
                     }
                     None => Rc::from(Vec::new()),
                 };
-                calls.insert(path.to_owned(), read.clone());
+                calls.insert(path.to_owned(), Called { names: names.to_vec(), calls: read.clone() });
                 read
             };
             Bridge::build(Input { ws, keys: &keys, lua, web, resource_of: &mut resource, calls_of: &mut calls_of })
