@@ -39,6 +39,27 @@
       "description": "Hidden natives are still recognised: existing scripts are not flagged.",
       "default": false
     },
+    "hints.parameterNames": {
+      "type": "boolean",
+      "title": "Show parameter names before arguments",
+      "description": "Before a number, a string, a table, a function or an operation given to a function the plugin knows, as in open(door: 2, fast: true).",
+      "default": true
+    },
+    "hints.localTypes": {
+      "type": "boolean",
+      "title": "Show the types of local variables",
+      "default": false
+    },
+    "hints.parameterTypes": {
+      "type": "boolean",
+      "title": "Show the types of parameters",
+      "default": false
+    },
+    "hints.returnTypes": {
+      "type": "boolean",
+      "title": "Show what functions return",
+      "default": false
+    },
     "natives.autoUpdate": {
       "type": "boolean",
       "title": "Check for new natives automatically",

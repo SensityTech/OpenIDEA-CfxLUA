@@ -179,6 +179,11 @@ pub trait Feature {
         None
     }
 
+    /// What is written between the characters of the document, from `_from` to `_to`.
+    fn inlay_hints(&self, _cx: &Ctx, _from: usize, _to: usize) -> Vec<crate::editor::hints::Hint> {
+        Vec::new()
+    }
+
     fn line_markers(&self, _cx: &Ctx) -> Vec<LineMarker> {
         Vec::new()
     }

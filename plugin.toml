@@ -26,6 +26,7 @@ kinds = [
     "type-definition",
     "hover",
     "signature-help",
+    "inlay-hints",
     "line-markers",
     "code-actions",
     "semantic-tokens",

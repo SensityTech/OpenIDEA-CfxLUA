@@ -31,6 +31,7 @@ use feature::{CommandCx, Ctx, Doc, Feature, Problem};
 use lua::Source;
 use natives::Natives;
 use openidea_plugin::hover::{Hover, HoverProvider};
+use openidea_plugin::inlay_hints::{InlayHint, InlayHints, InlayKind};
 use openidea_plugin::language_features::{
     DocumentSymbol, FoldRange, LanguageFeatures, Parameter, ParameterLabel, Signature, SignatureHelp,
 };
@@ -1187,7 +1188,28 @@ impl HoverProvider for DevKit {
     }
 }
 
-register_plugin!(DevKit, providers, views, language_features, hover);
+impl InlayHints for DevKit {
+    /// Asked for what the editor shows, after each edit: the document is not indexed first.
+    fn inlay_hints(&mut self, d: &Document, range: Range) -> Vec<InlayHint> {
+        let _timed = Timed::start("inlay hints", d);
+        let Some(ws) = self.prepare(d) else { return Vec::new() };
+        let hints = self.with_ctx(ws, |cx, features| {
+            let (from, to) = (cx.doc.offset(range.start), cx.doc.offset(range.end));
+            let hints = features.iter().flat_map(|f| f.inlay_hints(cx, from, to));
+            let shown = hints.map(|hint| {
+                let shown = InlayHint::new(cx.doc.position(hint.at), hint.label);
+                match hint.kind {
+                    editor::hints::HintKind::Parameter => shown.kind(InlayKind::Parameter).padding_right(),
+                    editor::hints::HintKind::Type => shown.kind(InlayKind::Type),
+                }
+            });
+            shown.collect::<Vec<_>>()
+        });
+        hints.unwrap_or_default()
+    }
+}
+
+register_plugin!(DevKit, providers, views, language_features, hover, inlay_hints);
 
 // The semantic tokens are exported here rather than by `register_plugin!`, to send the names of
 // `TOKEN_NAMES` in place of the SDK's.
@@ -1504,6 +1526,23 @@ mod tests {
         assert_eq!(ranges, [ParameterLabel::Offsets((0, 12)), ParameterLabel::Offsets((14, 26))]);
         assert!(kit.stale.is_some(), "asked at every keystroke: the document is not indexed for it");
         assert!(kit.signature_help(&typed, Position::new(3, 9)).is_none(), "after the parenthesis");
+    }
+
+    #[test]
+    fn the_names_of_parameters_are_written_before_the_arguments_in_sight() {
+        let host = openidea_plugin::mock::MockHost::install();
+        let mut kit = shop_resource(&host);
+        let text = "---@param door number\nlocal function open(door, fast) end\nopen(1, true)\nopen(2, false)\n";
+        let typed = lua(SHOP_CLIENT, 2, text);
+        let second = Range { start: Position::new(3, 0), end: Position::new(3, 14) };
+        let hints = kit.inlay_hints(&typed, second);
+        let shown: Vec<(u32, u32, &str, bool)> = hints
+            .iter()
+            .map(|hint| (hint.position.line, hint.position.character, hint.label.as_str(), hint.padding_right))
+            .collect();
+        assert_eq!(shown, [(3, 5, "door:", true), (3, 8, "fast:", true)], "the line asked for only");
+        assert!(hints.iter().all(|hint| hint.kind == InlayKind::Parameter));
+        assert!(kit.stale.is_some(), "asked after each edit: the document is not indexed for it");
     }
 
     #[test]

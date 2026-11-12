@@ -2,6 +2,7 @@ pub mod completion;
 pub mod definition;
 pub mod folding;
 pub mod highlights;
+pub mod hints;
 pub mod hover;
 pub mod semantic;
 pub mod signature;
@@ -139,6 +140,26 @@ impl Feature for EditorFeature {
         let found = self
             .projects
             .ask(cx.ws, &cx.doc.path, src, |engine, file| definition::type_definition(engine, file, src, at));
+        found.unwrap_or_default()
+    }
+
+    fn inlay_hints(&self, cx: &Ctx, from: usize, to: usize) -> Vec<hints::Hint> {
+        if !Self::applies(cx) || cx.doc.kind != FileKind::Lua {
+            return Vec::new();
+        }
+        let wanted = hints::Wanted {
+            arguments: cx.settings.bool(hints::PARAMETER_NAMES, true),
+            locals: cx.settings.bool(hints::LOCAL_TYPES, false),
+            parameters: cx.settings.bool(hints::PARAMETER_TYPES, false),
+            returns: cx.settings.bool(hints::RETURN_TYPES, false),
+        };
+        if !wanted.any() {
+            return Vec::new();
+        }
+        let src = &cx.doc.src;
+        let found = self
+            .projects
+            .ask(cx.ws, &cx.doc.path, src, |engine, file| hints::hints(engine, file, src, (from, to), wanted));
         found.unwrap_or_default()
     }
 
