@@ -29,7 +29,7 @@ fn is_identifier(name: &str) -> bool {
 }
 
 /// The name of a class a member is shown with; a table or the type made for a variable has none worth it.
-fn class_name(class: &Ty) -> Option<&str> {
+pub(super) fn class_name(class: &Ty) -> Option<&str> {
     match class {
         Ty::Class(named) if named.flags != 0 || matches!(named.detail, Detail::Table(_)) => None,
         other => other.class_name(),
@@ -64,6 +64,8 @@ pub(super) struct Mode<'m> {
     pub object: &'m str,
     /// Whether the type of a member its file did not keep is read there.
     pub read: bool,
+    /// What a member that is no function is listed as: a field of its class, or a variable for a global.
+    pub value: CompletionKind,
     /// From the sign to the caret: what an entry that is no name replaces, the sign included.
     pub replaced: Option<(usize, usize)>,
 }
@@ -99,7 +101,7 @@ impl Listing<'_, '_> {
     }
 
     fn field(&mut self, name: &str, ty: Option<&Ty>, declaring: &Ty, mode: &Mode, sort: &str) {
-        let mut item = CompletionItem::new(name, CompletionKind::Field);
+        let mut item = CompletionItem::new(name, mode.value);
         item.detail = ty.map(display);
         if let Some(replaced) = mode.replaced.filter(|_| !is_identifier(name)) {
             item.label = format!("['{name}']");
@@ -140,7 +142,9 @@ pub(super) fn members(listing: &mut Listing, file: FileId, src: &Source, sign: u
     let from = Psi { file, src, node: index };
     let ty = listing.cx.infer(from.at(prefix));
     let context = context_class(listing.cx, from);
-    let mode = Mode { colon: sign.text(&src.text) == ":", object: "", read: true, replaced: Some((sign.start, at)) };
+    let colon = sign.text(&src.text) == ":";
+    let (value, replaced) = (CompletionKind::Field, Some((sign.start, at)));
+    let mode = Mode { colon, object: "", read: true, value, replaced };
     for class in ty.top_classes() {
         for listed in members::visible(listing.cx, class) {
             let inherited = u8::from(listed.class != *class);

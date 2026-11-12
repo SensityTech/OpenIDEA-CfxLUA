@@ -3,10 +3,12 @@
 mod expected;
 mod members;
 mod names;
+mod tables;
 
 use crate::feature::Doc;
 use crate::lua::Source;
-use crate::ty::context::Cx;
+use crate::lua::tree::N;
+use crate::ty::context::{Cx, Psi};
 use crate::ty::{FileId, Ret, Signature, display};
 use openidea_plugin::providers::CompletionItem;
 use std::collections::HashSet;
@@ -106,7 +108,18 @@ impl Listing<'_, '_> {
 pub fn complete(cx: &Cx, file: FileId, doc: &Doc, src: &Source, at: usize, place: Place) -> Vec<CompletionItem> {
     let mut listing = Listing { cx, doc, bodies: 0, listed: HashSet::new(), items: Vec::new() };
     match place {
-        Place::Member(sign) => members::members(&mut listing, file, src, sign, at),
+        Place::Member(sign) => {
+            let named = Psi { file, src, node: src.root().tree().node_at(&src.text, src.toks[sign].start) };
+            match named.node.kind() {
+                // The CfxLua set field `{ .name }`.
+                N::TableField => {
+                    if let Some(table) = tables::keyed_by(named.node) {
+                        tables::keys(&mut listing, named.at(table), named.node);
+                    }
+                }
+                _ => members::members(&mut listing, file, src, sign, at),
+            }
+        }
         Place::Name(start) => names::names(&mut listing, file, src, start, &doc.src.text[start..at]),
         Place::String(token) => expected::strings(&mut listing, file, src, token, at),
     }

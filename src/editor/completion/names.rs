@@ -3,7 +3,7 @@
 //! (`SuggestSelfMemberProvider`).
 
 use super::members::{Mode, context_class};
-use super::{Listing, expected};
+use super::{Listing, expected, tables};
 use crate::lua::Source;
 use crate::lua::lexer::Tok;
 use crate::lua::scope::{DeclKind, Scopes};
@@ -88,7 +88,7 @@ fn globals(listing: &mut Listing, here: Psi, typed: &str) {
     let cx = listing.cx;
     let query = Query::new(typed);
     let context = context_class(cx, here);
-    let mode = Mode { colon: false, object: "", read: false, replaced: None };
+    let mode = Mode { colon: false, object: "", read: false, value: CompletionKind::Variable, replaced: None };
     let module = members::module_of(here.src).map(|module| Ty::class(&module));
     for class in module.into_iter().chain([Ty::class(G)]) {
         let wanted = |name: &str| query.matches(name).is_some();
@@ -135,7 +135,7 @@ fn own_methods(listing: &mut Listing, here: Psi) {
         return;
     }
     let class = context_class(listing.cx, here);
-    let mode = Mode { colon: true, object: "self:", read: true, replaced: None };
+    let mode = Mode { colon: true, object: "self:", read: true, value: CompletionKind::Field, replaced: None };
     for listed in members::visible(listing.cx, &class) {
         let sort = format!("{OWN_METHOD}{}", listed.member.name().to_lowercase());
         listing.member(&listed, &class, &class, &mode, &sort);
@@ -149,10 +149,19 @@ pub(super) fn names(listing: &mut Listing, file: FileId, src: &Source, start: us
     match leaf.kind() {
         N::NameExpr => {
             expected::values(listing, here);
+            if let (Some(table), Some(field)) = (tables::keyed_by(leaf), leaf.parent()) {
+                tables::keys(listing, here.at(table), field);
+            }
             locals(listing, here);
             own_methods(listing, here);
             globals(listing, here, typed);
             keywords(listing, leaf);
+        }
+        // `{ na = value }`: the name of a field.
+        N::TableField if leaf.token(T::Id).is_some_and(|name| name.start() == start) => {
+            if let Some(table) = tables::keyed_by(leaf) {
+                tables::keys(listing, here.at(table), leaf);
+            }
         }
         // `function na`: the function is given to a variable, which may be one that exists.
         N::FuncDef if leaf.token(T::Id).is_some_and(|name| name.start() == start) => {
