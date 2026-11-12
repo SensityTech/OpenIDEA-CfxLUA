@@ -644,7 +644,10 @@ impl DevKit {
         }
         let problems =
             self.with_ctx(ws, |cx, features| features.iter().flat_map(|f| f.problems(cx)).collect::<Vec<_>>());
-        let problems = problems.unwrap_or_default();
+        let problems = match &self.last {
+            Some((doc, _)) => inspect::suppress::unsuppressed(&doc.src, problems.unwrap_or_default()),
+            None => Vec::new(),
+        };
         if let Some((_, p)) = &mut self.last {
             *p = Some(problems.clone());
         }
@@ -1593,6 +1596,10 @@ mod tests {
         assert_eq!(fix.kind.as_deref(), Some("quickfix"));
         let one = TextEdit { range: Range { start: zero, end: Position::new(1, 12) }, text: "1".into() };
         assert_eq!(fix.edits, [(SHOP_CLIENT.to_owned(), vec![one])]);
+        let quiet = lua(SHOP_CLIENT, 3, "---@suppress RemoveUnusedLocal\nlocal unused = 1\n");
+        kit.line_markers(&quiet);
+        let published = host.diagnostics().remove(SHOP_CLIENT).unwrap_or_default();
+        assert!(published.iter().all(|found| found.code.as_deref() != Some("RemoveUnusedLocal")));
     }
 
     #[test]

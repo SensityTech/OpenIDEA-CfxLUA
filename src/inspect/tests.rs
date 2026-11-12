@@ -1,3 +1,4 @@
+use super::suppress::unsuppressed;
 use super::*;
 use crate::editor::EditorFeature;
 use crate::feature::Feature;
@@ -6,7 +7,7 @@ use crate::testing::Fixture;
 
 fn all(text: &str) -> Vec<Problem> {
     let src = Source::new(text);
-    problems(&src, &|_| true)
+    unsuppressed(&src, problems(&src, &|_| true))
 }
 
 fn shown(text: &str, problems: &[Problem]) -> Vec<String> {
@@ -169,6 +170,29 @@ fn an_array_is_not_indexed_from_zero() {
     assert_eq!(found("local v = t[0]\nt.list[0] = 1", ZERO_INDEX), ["0: 0 index", "0: 0 index"]);
     assert_eq!(fixed("print(t[0])", "Replace with index 1"), "print(t[1])");
     assert!(found("print(t[1], t['0'], t[0.0], t[00], t[a][10], f(0))", ZERO_INDEX).is_empty());
+}
+
+#[test]
+fn a_suppress_tag_turns_an_inspection_off_in_its_statement() {
+    assert!(all("---@suppress RemoveUnusedLocal\nlocal a = 1").is_empty());
+    assert!(all("---@suppress LocalNameShadowed, RemoveUnusedLocal\nlocal a = 1").is_empty());
+    assert_eq!(all("---@suppress LocalNameShadowed\nlocal a = 1").len(), 1, "another inspection");
+    assert_eq!(all("---@suppress RemoveUnusedLocal\nlocal a = 1\nlocal b = 2").len(), 1, "another statement");
+    // The parameter stands in the statement of its function, a local of the body in its own statement.
+    assert!(all("---@suppress RemoveUnusedLocal\nfunction f(a) end").is_empty());
+    assert_eq!(all("---@suppress RemoveUnusedLocal\nfunction f()\n    local a = 1\nend").len(), 1);
+    assert!(all("local t = {\n    ---@suppress ArrayIndexZero\n    first = list[0],\n}\nprint(t)").is_empty());
+}
+
+#[test]
+fn a_file_that_only_declares_an_api_leaves_its_names_unused() {
+    // `LuaCatsInspectionsTest`, "meta files only declare an API"
+    let api = "---@param data string\n---@return boolean\nfunction MetaNotify(data) end\n\nlocal helper = {}";
+    assert!(found(&format!("---@meta\n{api}"), UNUSED).is_empty());
+    assert!(found(&format!("local first = 1\nprint(first)\n  --- @meta\n{api}"), UNUSED).is_empty());
+    assert_eq!(found(api, UNUSED), ["data: Unused parameter : 'data'", "helper: Unused local : 'helper'"]);
+    assert_eq!(found(&format!("---@metadata\n-- @meta\n{api}"), UNUSED).len(), 2, "neither line is the tag");
+    assert_eq!(found("---@meta\nlocal a = nil\nlocal a", SHADOWED).len(), 1, "what is not about running code stays");
 }
 
 /// `CfxInspectionsTest.testAllLuaInspectionsOnTheCorpus`: every inspection reads the CfxLua syntax, valid or

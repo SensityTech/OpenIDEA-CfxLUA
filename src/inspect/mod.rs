@@ -1,6 +1,8 @@
 //! The inspections of the JetBrains plugin that read the tree and the scopes of one file
 //! (`codeInsight/inspection`): what is declared and never used, what hides a local, what does nothing.
 
+pub mod suppress;
+
 #[cfg(test)]
 mod tests;
 

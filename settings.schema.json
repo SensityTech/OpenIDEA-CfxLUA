@@ -63,7 +63,7 @@
     "inspections.unused": {
       "type": "boolean",
       "title": "Inspection: unused locals, parameters, loop variables and local functions",
-      "description": "Fades what is declared and never used, with a fix that removes it or renames it to _.",
+      "description": "Fades what is declared and never used, with a fix that removes it or renames it to _. A statement under a ---@suppress RemoveUnusedLocal comment is left alone; every inspection takes its name that way.",
       "default": true
     },
     "inspections.shadowed": {
