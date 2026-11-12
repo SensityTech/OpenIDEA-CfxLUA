@@ -254,6 +254,12 @@ impl Index {
         self.deprecated.contains_key(name)
     }
 
+    /// Every class the project declares, with the file that declares it.
+    pub fn all_classes(&self) -> impl Iterator<Item = (FileId, &ClassDef)> {
+        let places = self.classes.values().flatten();
+        places.filter_map(|(file, at)| Some((*file, self.files.get(file)?.classes.get(*at as usize)?)))
+    }
+
     /// Every declaration of the class `name`, with the file that makes it.
     pub fn classes_named(&self, name: &str) -> impl Iterator<Item = (FileId, &ClassDef)> {
         let places = self.classes.get(name).map_or(&[][..], Vec::as_slice);

@@ -75,6 +75,11 @@ fn name_of(cx: &Cx, target: &Target) -> Option<Named> {
     }
 }
 
+/// Where what a name stands for is written.
+pub fn place(cx: &Cx, target: &Target) -> Option<Location> {
+    name_of(cx, target).and_then(|named| location(cx, named))
+}
+
 fn location(cx: &Cx, named: Named) -> Option<Location> {
     let path = cx.files.path(named.file)?;
     let range = cx.read(named.file, |src| src.lines.range(&src.text, named.start, named.end))?;

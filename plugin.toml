@@ -43,6 +43,22 @@ languages = ["lua"]
 kinds = ["completion", "definition", "line-markers", "code-actions"]
 languages = ["javascript", "typescript", "javascriptreact", "typescriptreact", "vue", "svelte", "html"]
 
+# What a gutter marker of the type engine is drawn with, where OpenIDEA has no icon of its own.
+[[contributes.markerIcons]]
+id = "lua-class"
+icon = "icons/markers/class.svg"
+iconDark = "icons/markers/class_dark.svg"
+
+[[contributes.markerIcons]]
+id = "lua-recursive-call"
+icon = "icons/markers/recursive.svg"
+iconDark = "icons/markers/recursive_dark.svg"
+
+[[contributes.markerIcons]]
+id = "lua-tail-call"
+icon = "icons/markers/tailCall.svg"
+iconDark = "icons/markers/tailCall_dark.svg"
+
 # The live templates of the JetBrains plugin: func, lfunc, for, fori, forp, if, elseif, ifelse, closure.
 [[contributes.snippets]]
 language = "lua"

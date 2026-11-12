@@ -60,6 +60,26 @@
       "title": "Show what functions return",
       "default": false
     },
+    "gutter.overrides": {
+      "type": "boolean",
+      "title": "Gutter: methods that override another one or are overridden",
+      "default": true
+    },
+    "gutter.classes": {
+      "type": "boolean",
+      "title": "Gutter: classes, and those that have subclasses",
+      "default": true
+    },
+    "gutter.recursiveCalls": {
+      "type": "boolean",
+      "title": "Gutter: recursive calls",
+      "default": true
+    },
+    "gutter.tailCalls": {
+      "type": "boolean",
+      "title": "Gutter: calls that are returned (tail calls)",
+      "default": true
+    },
     "inspections.unused": {
       "type": "boolean",
       "title": "Inspection: unused locals, parameters, loop variables and local functions",

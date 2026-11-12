@@ -5,6 +5,7 @@ pub mod highlights;
 pub mod hints;
 pub mod hover;
 pub mod injection;
+pub mod markers;
 pub mod selection;
 pub mod semantic;
 pub mod signature;
@@ -13,6 +14,8 @@ pub mod target;
 
 #[cfg(test)]
 mod library_tests;
+#[cfg(test)]
+mod markers_tests;
 #[cfg(test)]
 mod tests;
 
@@ -28,7 +31,7 @@ use crate::ty::FileId;
 use crate::ty::context::Cx;
 use crate::workspace::Workspace;
 use openidea_plugin::Location;
-use openidea_plugin::providers::CompletionItem;
+use openidea_plugin::providers::{CompletionItem, LineMarker};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -209,6 +212,29 @@ impl Feature for EditorFeature {
         }
         let src = &cx.doc.src;
         self.ask(cx, src, |engine, file| signature::help(engine, file, src, at)).flatten()
+    }
+
+    fn line_markers(&self, cx: &Ctx) -> Vec<LineMarker> {
+        if !Self::applies(cx) || cx.doc.kind != FileKind::Lua {
+            return Vec::new();
+        }
+        let wanted = markers::Wanted {
+            overrides: cx.settings.bool(markers::OVERRIDES, true),
+            classes: cx.settings.bool(markers::CLASSES, true),
+            recursive_calls: cx.settings.bool(markers::RECURSIVE_CALLS, true),
+            tail_calls: cx.settings.bool(markers::TAIL_CALLS, true),
+            project_read: !cx.ws.indexing,
+        };
+        let src = &cx.doc.src;
+        let found =
+            self.ask_within(Some(INSPECTION_TIME), cx, src, |engine, file| markers::markers(engine, file, src, wanted));
+        let marker = |found: markers::Marker| LineMarker {
+            line: cx.doc.position(found.at).line,
+            icon: Some(found.icon.to_owned()),
+            tooltip: found.tooltip,
+            target: found.target,
+        };
+        found.unwrap_or_default().into_iter().map(marker).collect()
     }
 
     fn problems(&self, cx: &Ctx) -> Vec<Problem> {

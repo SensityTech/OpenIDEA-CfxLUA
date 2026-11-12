@@ -1362,6 +1362,8 @@ mod tests {
             ("contributes.views", "web"),
             ("contributes.settings", "schema"),
             ("contributes.snippets", "path"),
+            ("contributes.markerIcons", "icon"),
+            ("contributes.markerIcons", "iconDark"),
         ];
         for (kind, key) in files {
             for path in values(&sections, kind, key) {
