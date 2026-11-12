@@ -720,6 +720,34 @@ fn probe_a_file() {
         }
         return;
     }
+    // What an editor asks for: `FORMAT_TAB` columns an indent (`FORMAT_TABS` for tabs), `FORMAT_CONTINUATION`
+    // columns for a continuation, the bytes `FORMAT_RANGE` of a selection; the result is written to `FORMAT_OUT`.
+    if let Ok(out) = std::env::var("FORMAT_OUT") {
+        let number = |name: &str| std::env::var(name).ok().and_then(|value| value.parse::<u32>().ok());
+        let mut style = asked();
+        if let Some(tab) = number("FORMAT_TAB") {
+            let sized = Style::new(tab, std::env::var("FORMAT_TABS").is_err());
+            style.indent = sized.indent;
+            style.continuation = sized.continuation;
+            style.tabs = sized.tabs;
+            style.tab_size = sized.tab_size;
+        }
+        if let Some(columns) = number("FORMAT_CONTINUATION") {
+            style.continuation = columns;
+        }
+        let range = std::env::var("FORMAT_RANGE").ok().and_then(|range| {
+            let (from, to) = range.split_once(',')?;
+            Some((from.parse().ok()?, to.parse().ok()?))
+        });
+        let mut edits = format(&Source::new(&text), &style, range).expect("a layout that settles");
+        edits.sort_by_key(|edit| std::cmp::Reverse(edit.0));
+        let mut written = text.clone();
+        for (from, to, with) in edits {
+            written.replace_range(from..to, &with);
+        }
+        std::fs::write(out, written).expect("the result written");
+        return;
+    }
     let once = formatted(&Source::new(&text), &asked());
     eprintln!("{once}");
     let twice = formatted(&Source::new(&once), &asked());
