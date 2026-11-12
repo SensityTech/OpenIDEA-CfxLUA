@@ -8,11 +8,13 @@
 // unknown globals and completion lists none. With it, the host opens that folder as a project and events are posted
 // until the plugin has read it, as they are while a user moves between files: the file is then asked about as one
 // of an indexed project. `--log` prints on stderr what the host logs, the lines of the plugin included.
+// `--type <text>` is what the edit types on a new last line, `GetEnt` by default: the completion is asked at its
+// end and its first entries are printed.
 // Built like scripts/openidea-start-check.rs, as an example of OpenIDEA's `ide-host` crate:
 //
 //   cp scripts/openidea-editor-check.rs <openidea>/crates/ide-host/examples/cfxlua_editor_check.rs
 //   cargo run --release --locked -p ide-host --example cfxlua_editor_check -- \
-//       [--patient] [--log] [--project <folder>] <package.oiplugin> <file.lua> [word]
+//       [--patient] [--log] [--project <folder>] [--type <text>] <package.oiplugin> <file.lua> [word]
 
 use ide_core::{Pos, Range, TextEdit};
 use ide_host::plugins::{Consent, PluginEvent, PluginHost, PluginWorkspace};
@@ -24,8 +26,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-const USAGE: &str =
-    "usage: cfxlua_editor_check [--patient] [--log] [--project <folder>] <package.oiplugin> <file.lua> [word]";
+const USAGE: &str = "usage: cfxlua_editor_check [--patient] [--log] [--project <folder>] [--type <text>] \
+                     <package.oiplugin> <file.lua> [word]";
+/// How many entries of the completion are printed.
+const SHOWN: usize = 12;
 /// More event batches than any project needs: a scan that never ends stops the check instead of hanging it.
 const MAX_BATCHES: usize = 5_000;
 
@@ -70,6 +74,17 @@ fn main() -> ExitCode {
         let logs = tracing_subscriber::fmt().with_writer(std::io::stderr).with_ansi(false).with_target(false);
         let _ = logs.with_max_level(tracing::Level::INFO).try_init();
     }
+    let typing = match args.iter().position(|a| a == "--type") {
+        Some(at) if at + 1 < args.len() => {
+            args.remove(at);
+            args.remove(at)
+        }
+        Some(_) => {
+            eprintln!("{USAGE}");
+            return ExitCode::from(2);
+        }
+        None => "GetEnt".to_owned(),
+    };
     let project = match args.iter().position(|a| a == "--project") {
         Some(at) if at + 1 < args.len() => {
             args.remove(at);
@@ -92,7 +107,7 @@ fn main() -> ExitCode {
     };
     let dir = std::env::temp_dir().join(format!("cfxlua-editor-check-{}", std::process::id()));
     let word = args.get(2).map(String::as_str);
-    let result = check(&dir, limits, project.as_deref(), Path::new(package), Path::new(file), word);
+    let result = check(&dir, limits, project.as_deref(), Path::new(package), Path::new(file), word, &typing);
     let _ = std::fs::remove_dir_all(&dir);
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -137,6 +152,7 @@ fn check(
     package: &Path,
     file: &Path,
     word: Option<&str>,
+    typing: &str,
 ) -> Result<(), String> {
     let scan = Arc::new(Scan::default());
     let seen = scan.clone();
@@ -232,8 +248,8 @@ fn check(
     // What the editor asks after an edit, at the delays of OpenIDEA 0.1.40: completion while typing, occurrences
     // 300 ms after the edit, line markers at 400, code actions at 500, semantic tokens at 600. Each call finds the
     // plugin as the one before left it, still busy when that one was late.
-    let typed = ProviderDocument { version: 2, text: format!("{text}\nGetEnt"), ..doc.clone() };
-    let at = Pos::new(lines.len() as u32, 6);
+    let typed = ProviderDocument { version: 2, text: format!("{text}\n{typing}"), ..doc.clone() };
+    let at = Pos::new(lines.len() as u32, typing.encode_utf16().count() as u32);
     let edit = Instant::now();
     let ask = |delay: u64, what: &str, call: &dyn Fn() -> usize| {
         std::thread::sleep(Duration::from_millis(delay).saturating_sub(edit.elapsed()));
@@ -243,7 +259,13 @@ fn check(
         count
     };
     println!("after an edit:");
-    ask(100, "completion", &|| host.provide_completion(&typed, at, None).len());
+    let completed = std::cell::RefCell::new(Vec::new());
+    ask(100, "completion", &|| {
+        let items = host.provide_completion(&typed, at, None);
+        *completed.borrow_mut() = items.iter().take(SHOWN).map(|(_, item)| item.label.clone()).collect();
+        items.len()
+    });
+    println!("    after `{typing}`: {}", completed.borrow().join(", "));
     ask(300, "occurrences", &|| host.language_document_highlights(&typed, at).len());
     ask(400, "line markers", &|| host.provide_line_markers(&typed).len());
     ask(500, "code actions", &|| host.provide_code_actions(&typed, Range::point(at)).len());
