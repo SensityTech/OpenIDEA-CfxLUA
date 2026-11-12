@@ -21,6 +21,8 @@ pub struct Decl {
     pub name: u32,
     /// The `FUNC_BODY` the declaration lives in, `NONE` outside any function.
     pub func: u32,
+    /// The local of the same name that was in sight where this one is declared, `NONE` when there was none.
+    pub shadows: u32,
 }
 
 /// Which declaration each name of a file refers to.
@@ -86,7 +88,11 @@ impl<'a> Walker<'a> {
 
     fn create(&mut self, kind: DeclKind, node: Node<'a>, name: u32) -> u32 {
         let func = self.funcs.last().map_or(NONE, |(_, func)| *func);
-        self.decls.push(Decl { kind, node: node.id(), name, func });
+        let shadows = match kind {
+            DeclKind::Global => NONE,
+            _ => self.hidden_by(node.tree().tokens().text(node.source(), name as usize)),
+        };
+        self.decls.push(Decl { kind, node: node.id(), name, func, shadows });
         let id = self.decls.len() as u32 - 1;
         self.target[node.id() as usize] = id;
         id
@@ -124,6 +130,11 @@ impl<'a> Walker<'a> {
 
     fn lookup(&self, name: &str) -> Option<u32> {
         self.visible.get(name).and_then(|stack| stack.last()).copied()
+    }
+
+    /// The local a new local named `name` would hide.
+    fn hidden_by(&self, name: &str) -> u32 {
+        self.lookup(name).filter(|decl| self.decls[*decl as usize].kind != DeclKind::Global).unwrap_or(NONE)
     }
 
     fn visit(&mut self, node: Node<'a>, end: u32, root: Node<'a>) {
@@ -234,6 +245,20 @@ impl Scopes {
     pub fn uses(&self, id: u32) -> impl Iterator<Item = u32> + '_ {
         self.target.iter().enumerate().filter(move |(_, decl)| **decl == id).map(|(node, _)| node as u32)
     }
+
+    /// The local of the same name that was in sight where `decl` is declared: the one it hides.
+    pub fn hidden(&self, decl: &Decl) -> Option<&Decl> {
+        (decl.shadows != NONE).then(|| self.decl(decl.shadows))
+    }
+
+    /// For each declaration, how many nodes refer to it, the declaring node included.
+    pub fn use_counts(&self) -> Vec<u32> {
+        let mut counts = vec![0; self.decls.len()];
+        for decl in self.target.iter().filter(|decl| **decl != NONE) {
+            counts[*decl as usize] += 1;
+        }
+        counts
+    }
 }
 
 #[cfg(test)]
@@ -331,6 +356,18 @@ mod tests {
         let kinds: Vec<DeclKind> = scopes.decls().iter().map(|decl| decl.kind).collect();
         assert_eq!(kinds, [DeclKind::Local, DeclKind::Global, DeclKind::Local]);
         assert_eq!(scopes.uses(0).count(), 3);
+    }
+
+    #[test]
+    fn a_local_knows_the_one_it_hides_and_how_often_it_is_referred_to() {
+        let src = "local a = 1\nlocal function f(a)\n return a\nend\na = f(a)\nx = 1\nlocal x";
+        let tree = Tree::parse(src);
+        let scopes = Scopes::new(tree.root(src));
+        let line = |decl: &Decl| src[..tree.tokens().start(decl.name as usize)].matches('\n').count() + 1;
+        let hidden: Vec<Option<usize>> = scopes.decls().iter().map(|decl| scopes.hidden(decl).map(line)).collect();
+        // The parameter hides the first local; the last local hides nothing, a global is not a local.
+        assert_eq!(hidden, [None, None, Some(1), None, None]);
+        assert_eq!(scopes.use_counts(), [3, 2, 2, 1, 1]);
     }
 
     /// The names in sight where the `NameExpr` `here` stands, as `name:kind`.
