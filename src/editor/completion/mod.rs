@@ -162,7 +162,7 @@ pub fn complete(cx: &Cx, file: FileId, asked: &Asked, place: Place) -> Vec<Compl
 }
 
 #[cfg(test)]
-mod tests {
+pub(in crate::editor) mod tests {
     use crate::editor::EditorFeature;
     use crate::feature::Feature;
     use crate::testing::Fixture;

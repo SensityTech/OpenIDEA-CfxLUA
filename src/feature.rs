@@ -166,6 +166,10 @@ pub trait Feature {
         Vec::new()
     }
 
+    fn hover(&self, _cx: &Ctx, _at: usize) -> Option<crate::editor::hover::Hover> {
+        None
+    }
+
     fn line_markers(&self, _cx: &Ctx) -> Vec<LineMarker> {
         Vec::new()
     }

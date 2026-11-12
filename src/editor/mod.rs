@@ -1,6 +1,7 @@
 pub mod completion;
 pub mod folding;
 pub mod highlights;
+pub mod hover;
 pub mod semantic;
 pub mod symbols;
 pub mod target;
@@ -115,6 +116,14 @@ impl Feature for EditorFeature {
     /// indexing the document at every word: what it declares in sight is read in its tree.
     fn completes_from_index(&self, cx: &Ctx, at: usize) -> bool {
         matches!(Self::completed_place(cx, at), Some(completion::Place::Member(_)))
+    }
+
+    fn hover(&self, cx: &Ctx, at: usize) -> Option<hover::Hover> {
+        if !Self::applies(cx) || cx.doc.kind != FileKind::Lua {
+            return None;
+        }
+        let src = &cx.doc.src;
+        self.projects.ask(cx.ws, &cx.doc.path, src, |engine, file| hover::hover(engine, file, src, at)).flatten()
     }
 
     fn semantic_tokens(&self, cx: &Ctx) -> Vec<semantic::Token> {

@@ -30,6 +30,7 @@ pub mod testing;
 use feature::{CommandCx, Ctx, Doc, Feature, Problem};
 use lua::Source;
 use natives::Natives;
+use openidea_plugin::hover::{Hover, HoverProvider};
 use openidea_plugin::language_features::{DocumentSymbol, FoldRange, LanguageFeatures};
 use openidea_plugin::providers::{CodeAction, CompletionItem, CompletionKind, Document, LineMarker, Providers};
 use openidea_plugin::semantic_tokens::{SemanticToken, SemanticTokens, TokenKind, TokenModifier};
@@ -1115,7 +1116,31 @@ impl LanguageFeatures for DevKit {
     }
 }
 
-register_plugin!(DevKit, providers, views, language_features);
+impl HoverProvider for DevKit {
+    fn hover(&mut self, d: &Document, at: Position) -> Option<Hover> {
+        let _timed = Timed::start("hover", d);
+        let ws = self.prepare_indexed(d)?;
+        let shown = self.with_ctx(ws, |cx, features| {
+            let at = cx.doc.offset(at);
+            let hovers: Vec<editor::hover::Hover> = features.iter().filter_map(|f| f.hover(cx, at)).collect();
+            let (start, end) = hovers.first()?.range;
+            let parts: Vec<&str> = hovers.iter().map(|hover| hover.markdown.as_str()).collect();
+            Some(
+                Hover::new(parts.join(
+                    "
+
+---
+
+",
+                ))
+                .range(cx.doc.range(start, end)),
+            )
+        });
+        shown.flatten()
+    }
+}
+
+register_plugin!(DevKit, providers, views, language_features, hover);
 
 // The semantic tokens are exported here rather than by `register_plugin!`, to send the names of
 // `TOKEN_NAMES` in place of the SDK's.
@@ -1400,6 +1425,22 @@ mod tests {
         let again = lua(SHOP_SERVER, 3, &typed.text);
         assert!(!kit.completion(&again, Position::new(0, 6), None).is_empty());
         assert!(kit.stale.is_none(), "the same text is not indexed twice");
+    }
+
+    #[test]
+    fn hovering_a_name_documents_what_the_document_declares() {
+        let host = openidea_plugin::mock::MockHost::install();
+        let mut kit = shop_resource(&host);
+        let text = "--- Opens the door.\n---@param door number\nlocal function open(door) end\nopen(1)\n";
+        let typed = lua(SHOP_CLIENT, 2, text);
+        let hover = kit.hover(&typed, Position::new(3, 1)).expect("a hover");
+        assert_eq!(
+            hover.markdown,
+            "```lua\nlocal function open(door: number): void\n```\n\nOpens the door.\n\n**Parameters**\n- `door`: `number`"
+        );
+        assert_eq!(hover.range, Some(Range { start: Position::new(3, 0), end: Position::new(3, 4) }));
+        assert!(kit.stale.is_none(), "a hover reads what the document declares: it is indexed first");
+        assert!(kit.hover(&typed, Position::new(3, 5)).is_none(), "a number says nothing");
     }
 
     #[test]

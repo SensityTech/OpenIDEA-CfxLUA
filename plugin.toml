@@ -23,6 +23,7 @@ optional = ["net:static.cfx.re", "net:raw.githubusercontent.com", "clipboard"]
 kinds = [
     "completion",
     "definition",
+    "hover",
     "line-markers",
     "code-actions",
     "semantic-tokens",
