@@ -160,21 +160,6 @@ impl Declaring<'_, '_> {
         }
     }
 
-    fn table(&mut self, table: Node) {
-        let owner: Rc<str> = table_type_name(self.file, table.code_range().0).into();
-        for field in table.children_of(N::TableField) {
-            if let Some(name) = psi::field_name(self.src, field) {
-                let annotated = self.src.comment_of(field).and_then(|comment| Reader::new(self.file).typed(comment));
-                let ty = match annotated {
-                    Some(annotated) => Some(annotated),
-                    None if psi::is_set_field(field) => Some(Ty::BOOLEAN),
-                    None => self.written(psi::field_value(field)),
-                };
-                self.member(vec![owner.clone()], &name, MemberKind::TableField, (field, field), ty);
-            }
-        }
-    }
-
     fn class(&mut self, comment: Comment, tag: Node) {
         let Some(name) = tags::name(tag) else { return };
         let mut parents = tag.children_of(N::DocClassNameRef).map(|parent| Rc::from(parent.code()));
@@ -256,7 +241,6 @@ pub fn declare(cx: &Cx, file: FileId, src: &Source) -> Declared {
                 }
             }
             N::AssignStat => declaring.assignment(node),
-            N::TableExpr => declaring.table(node),
             _ => {}
         }
     }

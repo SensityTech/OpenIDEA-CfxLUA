@@ -647,20 +647,22 @@ fn the_type_a_file_keeps_for_a_member_is_the_one_reading_it_gives() {
         assert_eq!(kept, read, "{name}");
     }
     let names: Vec<&str> = kept.iter().map(|(name, _, _)| name.as_str()).collect();
-    for stated in ["count", "name", "open", "none", "items", "buy", "all", "find", "close", "debug", "ready", "key"] {
+    for stated in ["count", "name", "open", "none", "items", "buy", "all", "find", "close"] {
         assert!(names.contains(&stated), "{stated} says its type: {names:?}");
     }
-    for stated in ["rate", "list", "Config", "Shop", "Limit", "Flag", "Bank", "a"] {
+    for stated in ["Config", "Shop", "Limit", "Flag", "Bank", "a"] {
         assert!(names.contains(&stated), "{stated} says its type: {names:?}");
     }
-    for read in ["computed", "called", "cb", "Later", "b"] {
+    for read in ["computed", "called", "Later", "b"] {
         assert!(!names.contains(&read), "{read} has to be inferred: {names:?}");
+    }
+    for field in ["debug", "ready", "key", "rate", "list", "cb"] {
+        assert!(!names.contains(&field), "{field} is written in a table: {names:?}");
     }
     let shown = |wanted: &str| kept.iter().find(|(name, _, _)| name == wanted).map(|(_, kept, _)| kept.as_str());
     assert_eq!(shown("buy"), Some("fun(item: any, amount: any): any"));
     assert_eq!(shown("find"), Some("fun(id: number): Shop"));
     assert_eq!(shown("all"), Some("Shop[]"));
-    assert_eq!(shown("ready"), Some("boolean"));
     assert_eq!(shown("Limit"), Some("number"));
     assert_eq!(shown("Shop"), Some("Shop|table|[global Shop]"));
     assert_eq!(shown("Bank"), Some("[global Bank]|Bank"), "a union comes before the type it is joined to");
@@ -668,4 +670,43 @@ fn the_type_a_file_keeps_for_a_member_is_the_one_reading_it_gives() {
     for (name, kept, read) in kept_and_read(&Project::new(&[("synthlib.lua", LIBRARY)])) {
         assert_eq!(kept, read, "{name}");
     }
+}
+
+#[test]
+fn the_fields_a_table_writes_are_read_in_its_file() {
+    let config = (
+        "config.lua",
+        "Config = { debug = false, .ready, ['key'] = 2, rate = 1.5, list = { 1 }, cb = print, 'positional' }
+         Config.added = 'later'
+",
+    );
+    let listed = Project::new(&[config, ("main.lua", "Config.--[[caret]]")]);
+    let mut members = listed.members();
+    members.sort();
+    assert_eq!(members, ["added", "cb", "debug", "key", "list", "rate", "ready"], "no positional value");
+    assert!(listed.index.file(0).expect("the file").members.iter().all(|member| &*member.name != "debug"));
+    let typed = Project::new(&[
+        config,
+        (
+            "main.lua",
+            "local d = Config.debug
+local r = Config.ready
+local k = Config.key
+local l = Config.list
+",
+        ),
+    ]);
+    assert_eq!(typed.type_of("d"), "boolean");
+    assert_eq!(typed.type_of("r"), "boolean", "a set field holds true");
+    assert_eq!(typed.type_of("k"), "number");
+    assert_eq!(display(&typed.local("l")), "table|[local l]");
+    let nested = Project::new(&[
+        (
+            "config.lua",
+            "Config = { shop = { items = { bread = { price = 2 } } } }
+",
+        ),
+        ("main.lua", "Config.shop.items.bread.--[[caret]]"),
+    ]);
+    assert_eq!(nested.members(), ["price"]);
 }

@@ -1,5 +1,7 @@
 //! What the files of a project declare, by name: classes, members, aliases (`stubs/index/`,
 //! `LuaShortNamesManager`). A member is kept under each class the declaring file alone can tell it belongs to.
+//! The fields a table constructor writes are not kept: most of what a project declares, they are read in
+//! their file when the members of that table are asked for.
 
 pub mod declare;
 pub mod project;
@@ -19,8 +21,6 @@ pub enum MemberKind {
     Method,
     /// `function name()`.
     Function,
-    /// `{ name = v }`.
-    TableField,
     /// `a.name = v`.
     Field,
     /// `name = v`, a global.
@@ -28,12 +28,11 @@ pub enum MemberKind {
 }
 
 impl MemberKind {
-    /// Which declaration of a name stands for the others: an annotation, then a function, then a table field.
+    /// Which declaration of a name stands for the others: an annotation, then a function.
     pub fn worth(self) -> u32 {
         match self {
             MemberKind::DocField => 1000,
             MemberKind::Method | MemberKind::Function => 900,
-            MemberKind::TableField => 800,
             MemberKind::Field | MemberKind::Global => 0,
         }
     }
@@ -263,23 +262,26 @@ impl Index {
         out
     }
 
-    /// The members `name` of a class: its own, then, for a declared class, those of its other names and of
-    /// the classes it inherits from (`LuaClassMemberIndex.process`).
-    pub fn named(&self, class: &str, name: &str, global_name_as_type: bool) -> Vec<Found<'_>> {
-        let mut found: Vec<Found> = self.own_named(class, name).collect();
+    /// Every name the members of a class are kept under: its own and, for a declared class, its other
+    /// names, then the classes it inherits from and theirs (`LuaClassMemberIndex.process`).
+    pub fn names(&self, class: &str, global_name_as_type: bool) -> Vec<Rc<str>> {
+        let mut names: Vec<Rc<str>> = vec![class.into()];
         if self.class(class).is_none() {
-            return found;
+            return names;
         }
-        let classes = std::iter::once(Rc::from(class)).chain(self.supers(class, None));
-        for (rank, class) in classes.enumerate() {
-            if rank > 0 {
-                found.extend(self.own_named(&class, name));
-            }
-            for other in self.other_names(&class, global_name_as_type) {
-                found.extend(self.own_named(&other, name));
-            }
+        names.extend(self.other_names(class, global_name_as_type));
+        for parent in self.supers(class, None) {
+            let others = self.other_names(&parent, global_name_as_type);
+            names.push(parent);
+            names.extend(others);
         }
-        found
+        names
+    }
+
+    /// The members `name` the index keeps for a class, under each of its names.
+    pub fn named(&self, class: &str, name: &str, global_name_as_type: bool) -> Vec<Found<'_>> {
+        let names = self.names(class, global_name_as_type);
+        names.iter().flat_map(|kept_under| self.own_named(kept_under, name)).collect()
     }
 }
 
@@ -351,10 +353,10 @@ mod tests {
             classes: vec![class("Shop", &["Base"], Some("1@(9)table")), class("Base", &[], Some("1@(40)table"))],
             members: vec![
                 member("Shop", "open", MemberKind::Method),
-                member("1@(9)table", "open", MemberKind::TableField),
+                member("1@(9)table", "open", MemberKind::Field),
                 member("$Shop", "open", MemberKind::Field),
                 member("Base", "open", MemberKind::DocField),
-                member("1@(40)table", "open", MemberKind::TableField),
+                member("1@(40)table", "open", MemberKind::Field),
                 member("Elsewhere", "open", MemberKind::Field),
                 member("Shop", "close", MemberKind::Method),
             ],

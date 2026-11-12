@@ -1,26 +1,53 @@
-//! The members of a type: what the index declares for its classes, and the fields a type carries itself
-//! (`LuaShortNamesManager`, `ClassMemberChain`, `LuaCatsIndexSignatures`, `TyAliasSubstitutor`).
+//! The members of a type: what the index declares for its classes, the fields a table constructor writes,
+//! and the fields a type carries itself (`LuaShortNamesManager`, `ClassMemberChain`,
+//! `LuaCatsIndexSignatures`, `TyAliasSubstitutor`).
 
 use super::context::{Cx, Psi};
-use super::expressions::{assigned_name, global_type};
-use super::{ANONYMOUS, Class, Detail, DocField, G, GLOBAL, Ty};
+use super::expressions::{assigned_name, global_type, table_of};
+use super::{ANONYMOUS, Class, Detail, DocField, FileId, G, GLOBAL, Ty, psi};
 use crate::index::{Found, MemberKind, declare};
 use crate::lua::Source;
+use crate::lua::tree::{N, Node};
 use std::cell::RefCell;
 use std::rc::Rc;
 
-/// A member of a class: one a file declares, or a field of a table written in a comment.
+/// A member of a class.
 #[derive(Clone, Debug)]
 pub enum Member<'a> {
+    /// One a file declares: the index keeps it.
     Declared(Found<'a>),
+    /// A field a table constructor writes: it is read in its file.
+    Field(TableField),
+    /// A field of a table written in a comment: the type carries it.
     Written(DocField),
 }
+
+#[derive(Clone, Debug)]
+pub struct TableField {
+    pub file: FileId,
+    /// The `TableField` of the Lua tree.
+    pub node: u32,
+    pub name: Rc<str>,
+}
+
+/// What a field of a table constructor weighs among the declarations of a name: less than a function,
+/// more than an assignment.
+const TABLE_FIELD: u32 = 800;
 
 impl Member<'_> {
     pub fn name(&self) -> &str {
         match self {
             Member::Declared(found) => &found.member.name,
+            Member::Field(field) => &field.name,
             Member::Written(field) => &field.name,
+        }
+    }
+
+    fn worth(&self) -> u32 {
+        match self {
+            Member::Declared(found) => found.member.kind.worth(),
+            Member::Field(_) => TABLE_FIELD,
+            Member::Written(_) => MemberKind::DocField.worth(),
         }
     }
 
@@ -28,6 +55,22 @@ impl Member<'_> {
     pub fn is_function(&self) -> bool {
         matches!(self, Member::Declared(found) if matches!(found.member.kind, MemberKind::Method | MemberKind::Function))
     }
+}
+
+/// The named fields the table constructor of the class `class` writes, read in its file: nothing when the
+/// class is no table, or when its file cannot be read.
+fn table_fields(cx: &Cx, class: &str) -> Vec<TableField> {
+    let Some((file, offset)) = table_of(class) else { return Vec::new() };
+    let fields = cx.read(file, |src| {
+        let inner = src.root().tree().node_at(src.root().source(), offset);
+        let written = |node: &Node| node.is(N::TableExpr) && node.code_range().0 == offset;
+        let table = std::iter::once(inner).chain(inner.ancestors()).find(written)?;
+        let named = |field: Node| {
+            Some(TableField { file, node: field.id(), name: psi::field_name(src, field)?.as_ref().into() })
+        };
+        Some(table.children_of(N::TableField).filter_map(named).collect())
+    });
+    fields.flatten().unwrap_or_default()
 }
 
 struct Module(Option<Rc<str>>);
@@ -63,6 +106,10 @@ fn written(class: &Ty) -> Option<&[DocField]> {
 pub fn type_of(cx: &Cx, member: &Member) -> Ty {
     match member {
         Member::Written(field) => field.ty.clone(),
+        Member::Field(field) => {
+            let inferred = cx.at(field.file, field.node, |psi| cx.with_value(0, || cx.infer(psi)));
+            inferred.unwrap_or(Ty::Unknown)
+        }
         Member::Declared(found) => match &found.member.ty {
             Some(ty) => ty.clone(),
             None => {
@@ -104,8 +151,13 @@ pub fn named<'a>(cx: &Cx<'a>, class: &Ty, name: &str) -> Vec<Member<'a>> {
         return fields.iter().filter(|field| &*field.name == name).cloned().map(Member::Written).collect();
     }
     let Some(lookup) = lookup_name(class).filter(|_| !cx.alone()) else { return Vec::new() };
-    let found = cx.index.named(lookup, name, cx.options.global_name_as_type);
-    found.into_iter().map(Member::Declared).collect()
+    let mut found = Vec::new();
+    for kept_under in cx.index.names(lookup, cx.options.global_name_as_type) {
+        let fields = table_fields(cx, &kept_under).into_iter().filter(|field| &*field.name == name);
+        found.extend(fields.map(Member::Field));
+        found.extend(cx.index.own_named(&kept_under, name).map(Member::Declared));
+    }
+    found
 }
 
 /// The classes a class inherits from, the nearest first.
@@ -154,11 +206,11 @@ pub fn indexed(cx: &Cx, owner: &Ty, key: Option<&Ty>) -> Ty {
 /// The members one class of a chain declares, one per name.
 struct Level<'a> {
     class: Rc<str>,
-    members: Vec<Found<'a>>,
+    members: Vec<Member<'a>>,
 }
 
-fn find_in<'a>(levels: &[Level<'a>], name: &str) -> Option<Found<'a>> {
-    levels.iter().flat_map(|level| &level.members).find(|found| &*found.member.name == name).copied()
+fn find_in<'l, 'a>(levels: &'l [Level<'a>], name: &str) -> Option<&'l Member<'a>> {
+    levels.iter().flat_map(|level| &level.members).find(|member| member.name() == name)
 }
 
 /// The members of one class and of those it inherits from, as they hide one another (`ClassMemberChain`):
@@ -170,36 +222,37 @@ fn chain<'a>(cx: &Cx<'a>, class: &str, open: &mut Vec<Rc<str>>) -> Vec<Level<'a>
     }
     open.push(class.into());
     let inherited = index.parent(class, None).map_or(Vec::new(), |parent| chain(cx, &parent, open));
-    let mut own: Vec<Found<'a>> = Vec::new();
-    let add = |own: &mut Vec<Found<'a>>, found: Found<'a>| {
-        let worth = found.member.kind.worth();
-        let hidden = find_in(&inherited, &found.member.name).is_some_and(|parent| {
-            let parent = parent.member.kind.worth();
+    let mut own: Vec<Member<'a>> = Vec::new();
+    let add = |own: &mut Vec<Member<'a>>, member: Member<'a>| {
+        let worth = member.worth();
+        let hidden = find_in(&inherited, member.name()).is_some_and(|parent| {
+            let parent = parent.worth();
             !(worth > parent || worth == parent && worth > 0)
         });
         if hidden {
             return;
         }
-        match own.iter_mut().find(|known| known.member.name == found.member.name) {
-            Some(known) if worth > known.member.kind.worth() => *known = found,
+        match own.iter_mut().find(|known| known.name() == member.name()) {
+            Some(known) if worth > known.worth() => *known = member,
             Some(_) => {}
-            None => own.push(found),
+            None => own.push(member),
         }
     };
-    for found in index.own(class) {
-        add(&mut own, found);
-    }
-    for other in index.other_names(class, cx.options.global_name_as_type) {
-        for found in index.own(&other) {
-            add(&mut own, found);
+    let others = index.other_names(class, cx.options.global_name_as_type);
+    for kept_under in std::iter::once(Rc::from(class)).chain(others) {
+        for field in table_fields(cx, &kept_under) {
+            add(&mut own, Member::Field(field));
+        }
+        for found in index.own(&kept_under) {
+            add(&mut own, Member::Declared(found));
         }
     }
     let extras = index.class(class).map(|def| def.extra_supers.clone()).unwrap_or_default();
     for extra in extras {
-        for found in chain(cx, &extra, open).into_iter().flat_map(|level| level.members) {
-            let name = &found.member.name;
-            if !own.iter().any(|known| known.member.name == *name) && find_in(&inherited, name).is_none() {
-                add(&mut own, found);
+        for member in chain(cx, &extra, open).into_iter().flat_map(|level| level.members) {
+            let known = own.iter().any(|known| known.name() == member.name());
+            if !known && find_in(&inherited, member.name()).is_none() {
+                add(&mut own, member);
             }
         }
     }
@@ -230,9 +283,9 @@ pub fn visible<'a>(cx: &Cx<'a>, class: &Ty) -> Vec<Listed<'a>> {
     let mut listed: Vec<Listed<'a>> = Vec::new();
     for level in levels(cx, class) {
         let declaring = if class.class_name() == Some(&*level.class) { class.clone() } else { Ty::named(&level.class) };
-        for found in level.members {
-            if !listed.iter().any(|known| known.member.name() == &*found.member.name) {
-                listed.push(Listed { member: Member::Declared(found), class: declaring.clone() });
+        for member in level.members {
+            if !listed.iter().any(|known| known.member.name() == member.name()) {
+                listed.push(Listed { member, class: declaring.clone() });
             }
         }
     }
@@ -244,7 +297,7 @@ pub fn find<'a>(cx: &Cx<'a>, class: &Ty, name: &str) -> Option<Member<'a>> {
     if let Some(fields) = written(class) {
         return fields.iter().find(|field| &*field.name == name).cloned().map(Member::Written);
     }
-    find_in(&levels(cx, class), name).map(Member::Declared)
+    find_in(&levels(cx, class), name).cloned()
 }
 
 /// Whether a value of the class `class` can stand where `other` is asked for: it is that class, or

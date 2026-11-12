@@ -16,6 +16,12 @@ pub fn table_type_name(file: FileId, offset: usize) -> String {
     format!("{file}@({offset})table")
 }
 
+/// The file and the offset the class of a table constructor is named after.
+pub fn table_of(name: &str) -> Option<(FileId, usize)> {
+    let (file, rest) = name.split_once("@(")?;
+    Some((file.parse().ok()?, rest.strip_suffix(")table")?.parse().ok()?))
+}
+
 /// The class of the table `psi` writes.
 pub fn table_type(psi: Psi) -> Ty {
     Ty::flagged(&table_type_name(psi.file, psi.start()), "", ANONYMOUS | ANONYMOUS_TABLE)

@@ -138,7 +138,7 @@ impl Listing<'_, '_> {
         for Listed { member, class } in members::visible(self.cx, asked) {
             let visibility = match &member {
                 Member::Declared(found) => found.member.visibility,
-                Member::Written(_) => Visibility::Public,
+                Member::Field(_) | Member::Written(_) => Visibility::Public,
             };
             if !is_visible(self.cx, &class, context, visibility) {
                 continue;
