@@ -3,6 +3,7 @@ pub mod folding;
 pub mod highlights;
 pub mod semantic;
 pub mod symbols;
+pub mod target;
 
 #[cfg(test)]
 mod tests;
