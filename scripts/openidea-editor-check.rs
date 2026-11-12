@@ -1,7 +1,8 @@
 // Asks a plugin package what the editor would receive for a file, through OpenIDEA's own plugin host and without
 // the editor: semantic tokens, folds, structure, the occurrences of a word, what hovering it shows, where it is
-// declared and the parameters shown after its parenthesis, what those questions and the code actions cost all over
-// the file, the hints of each screen of it, then what the editor asks after an edit, at its own delays. The calls
+// declared and the parameters shown after its parenthesis, what those questions, the code actions and the ranges
+// of Extend Selection cost all over the file, the strings it gives to another language, the hints of each screen
+// of it, then what the editor asks after an edit, at its own delays. The calls
 // run under the host's limits for editor calls, so a provider that is too slow answers nothing here as it would in
 // the IDE. The host then stops waiting at its deadline and the time printed is its wait, not what the provider
 // costs: `--patient` lifts the deadline to show that cost. An entry of the structure that its parent does not hold
@@ -366,6 +367,15 @@ fn check(
     sweep("actions", "actions", &names(&lines), deadline, |at| {
         Some(host.provide_code_actions(&doc, Range::point(at)).len()).filter(|found| *found > 0)
     });
+    sweep("selections", "ranges", &names(&lines), deadline, |at| {
+        Some(host.language_selection_ranges(&doc, at).len()).filter(|found| *found > 0)
+    });
+    let start = Instant::now();
+    let injected = host.provide_injections(&doc);
+    let languages: std::collections::BTreeSet<&str> = injected.iter().map(|found| found.language.as_str()).collect();
+    let named = languages.into_iter().collect::<Vec<_>>().join(", ");
+    let named = if named.is_empty() { named } else { format!(": {named}") };
+    println!("injections: {} ({:?}){named}", injected.len(), start.elapsed());
     let screens: Vec<Pos> = (0..lines.len() as u32).step_by(SCREEN as usize).map(|line| Pos::new(line, 0)).collect();
     let screen = |from: Pos| Range::new(from, Pos::new(from.line + SCREEN, 0));
     let first: Vec<String> = host
