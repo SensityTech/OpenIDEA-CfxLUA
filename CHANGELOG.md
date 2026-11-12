@@ -26,6 +26,15 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
 - **A slow editor call is named in the IDE log.** OpenIDEA restarts a plugin whose editor call runs for 500 ms and
   does not say which call it was: the plugin now writes `<call> took <n> ms on <size> KB` when one of its own takes
   more than 250 ms.
+- **Completion of the members of a table, a class or an object, without lua-language-server.** After a `.` or a
+  `:` the plugin lists what the expression holds, from its own type engine (a port of the JetBrains plugin's): the
+  fields of a table and what is assigned to it in any file of the project, the fields and methods of an annotated
+  class (`---@class`, `---@field`) and of the classes it inherits from, what a function returns (`---@return`, or
+  read from its body), `self`, the values of a generic function, the file a `require` loads. A function shows its
+  parameters and what it returns, a field its type. After a colon only what can take the object is listed; a
+  `private` member is listed inside its class only.
+- **The memory the plugin holds is written in the IDE log** when it has read a project
+  (`resources indexed (N MiB)`): OpenIDEA gives a plugin 256 MiB.
 
 ### Fixed
 
