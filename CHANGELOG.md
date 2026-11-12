@@ -51,6 +51,13 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   resource are offered as the names they are required by (`modules.cart.items`). Inside any other string
   argument, the strings the project gives to a function of the same name at the same position are offered,
   marked "History".
+- **Documentation on hover, without lua-language-server.** Hovering a name shows how it is declared and what its
+  comment says, from the plugin's own type engine: a local with its type, a parameter with its `@param`, a
+  function or a method with its parameters and what it returns (`@return`, or read from its body), a field with
+  the class it belongs to, a class with its parents and its fields, an alias with its values. The text of the
+  comment is shown as Markdown, then what its tags tell: parameters and their values, returned values, overloads,
+  `@see`, `@deprecated`, `@since`. A class or an alias named in an annotation, and a parameter named by a
+  `@param`, show the same. Where lua-language-server answers too, the plugin's text comes below its own.
 - **The memory the plugin holds is written in the IDE log** when it has read a project
   (`resources indexed (N MiB)`): OpenIDEA gives a plugin 256 MiB.
 
