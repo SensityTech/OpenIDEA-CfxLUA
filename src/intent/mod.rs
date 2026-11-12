@@ -6,11 +6,17 @@ mod compute;
 #[cfg(test)]
 mod tests;
 
+use crate::editor::hover::shown;
 use crate::feature::Fix;
 use crate::lua::Source;
+use crate::lua::doc::tags::Comment;
+use crate::lua::token::T;
 use crate::lua::tree::{N, Node};
+use crate::ty::context::{Cx, Psi};
 use crate::ty::psi::{self, Literal};
+use crate::ty::{FileId, Ty};
 
+const VISIBILITIES: [&str; 3] = ["private", "protected", "public"];
 const REGIONS: [(&str, &str, &str); 2] =
     [("Lua Region --region", "region", "endregion"), ("Lua Region --{{{", "{{{", "}}}")];
 
@@ -111,4 +117,142 @@ fn selected_statements(src: &Source, start: usize, end: usize) -> Option<(usize,
         last = last.ancestors().find(|outer| outer.kind().is_statement())?;
     }
     Some((first.range().0, last.code_range().1))
+}
+
+/// The type an annotation writes for `node`: what the engine infers, `any` when it knows nothing.
+fn written(cx: &Cx, file: FileId, src: &Source, node: Node) -> String {
+    let ty = cx.with_value(0, || cx.infer(Psi { file, src, node }));
+    shown(cx, &ty)
+}
+
+/// The statement, or the table field, a comment above documents `node` through.
+fn documented(node: Node) -> Option<Node> {
+    std::iter::once(node).chain(node.ancestors()).find(|owner| owner.kind().is_statement() || owner.is(N::TableField))
+}
+
+/// The comment above `owner`: not one written behind it on its line.
+fn comment_above<'a>(src: &'a Source, owner: Node) -> Option<Comment<'a>> {
+    src.comment_of(owner).filter(|comment| comment.0.range().0 <= owner.code_range().0)
+}
+
+/// A line added to the documentation of `owner`: after its comment, or above it (`LuaCommentUtil.insertTemplate`).
+fn documenting(src: &Source, owner: Node, title: &str, lines: &[String]) -> Option<Fix> {
+    let start = owner.code_range().0;
+    let indent = indent_of(src, start);
+    let fix = Fix::new(title);
+    match src.comment_of(owner) {
+        Some(comment) if comment.0.range().0 > start => None,
+        Some(comment) => {
+            let added: String = lines.iter().map(|line| format!("\n{indent}{line}")).collect();
+            Some(fix.insert(comment.0.code_range().1, added))
+        }
+        None => {
+            let added: String = lines.iter().map(|line| format!("{line}\n{indent}")).collect();
+            Some(fix.insert(start, added))
+        }
+    }
+}
+
+/// The function statement whose header holds the caret (`FunctionIntention`): a closure has no
+/// documentation of its own, and inside the body the caret is about something else.
+fn function_header<'a>(src: &'a Source, at: usize) -> Option<Node<'a>> {
+    let owner = at_caret(src, at, psi::is_function).filter(|owner| !owner.is(N::ClosureExpr))?;
+    let (start, end) = owner.child(N::FuncBody)?.code_range();
+    (at < start || at > end).then_some(owner)
+}
+
+/// The rewrites that ask the engine for a type: the annotations of a parameter, of a local and of a
+/// function, the visibility of a method, a field kept from a parameter.
+pub fn annotations(cx: &Cx, file: FileId, src: &Source, at: usize) -> Vec<Fix> {
+    let mut found = Vec::new();
+    let parameter = at_caret(src, at, |node| node.is(N::ParamNameDef));
+    if let Some(parameter) = parameter {
+        found.extend(parameter_annotation(cx, file, src, parameter));
+        found.extend(field_from_parameter(src, parameter));
+    }
+    if let Some(local) = at_caret(src, at, |node| node.is(N::LocalDef)) {
+        found.extend(type_annotation(cx, file, src, local));
+    }
+    if let Some(function) = function_header(src, at) {
+        found.extend(return_annotation(cx, file, src, function));
+        found.extend(function_doc(cx, file, src, function));
+        found.extend(visibility(src, function));
+    }
+    found
+}
+
+/// `---@param name type` (`CreateParameterAnnotationIntention`).
+fn parameter_annotation(cx: &Cx, file: FileId, src: &Source, parameter: Node) -> Option<Fix> {
+    let owner = documented(parameter)?;
+    let name = parameter.code();
+    if comment_above(src, owner).is_some_and(|comment| comment.param(name).is_some()) {
+        return None;
+    }
+    let line = format!("---@param {name} {}", written(cx, file, src, parameter));
+    documenting(src, owner, "Create parameter annotation", &[line])
+}
+
+/// `---@type type` above a `local` (`CreateTypeAnnotationIntention`).
+fn type_annotation(cx: &Cx, file: FileId, src: &Source, local: Node) -> Option<Fix> {
+    if comment_above(src, local).is_some_and(|comment| comment.tag(N::DocTagType).is_some()) {
+        return None;
+    }
+    let name = local.child(N::NameList)?.child(N::NameDef)?;
+    let line = format!("---@type {}", written(cx, file, src, name));
+    documenting(src, local, "Create type annotation", &[line])
+}
+
+/// `---@return type` (`CreateFunctionReturnAnnotationIntention`).
+fn return_annotation(cx: &Cx, file: FileId, src: &Source, function: Node) -> Option<Fix> {
+    if comment_above(src, function).is_some_and(|comment| comment.tag(N::DocTagReturn).is_some()) {
+        return None;
+    }
+    let returned = match cx.infer(Psi { file, src, node: function }) {
+        Ty::Function(function) => shown(cx, &cx.ret(&function.main.ret)),
+        _ => shown(cx, &Ty::Unknown),
+    };
+    documenting(src, function, "Create return annotation", &[format!("---@return {returned}")])
+}
+
+/// The name of the function and a `@param` for each of its parameters (`CreateFunctionDocIntention`).
+fn function_doc(cx: &Cx, file: FileId, src: &Source, function: Node) -> Option<Fix> {
+    if src.comment_of(function).is_some() {
+        return None;
+    }
+    let mut lines = vec![format!("---{}", psi::function_name(function)?)];
+    for parameter in psi::params(function) {
+        lines.push(format!("---@param {} {}", parameter.code(), written(cx, file, src, parameter)));
+    }
+    documenting(src, function, "Create LuaDoc", &lines)
+}
+
+/// `---@private`, `---@protected` or `---@public` on a method that says none (`SetVisibilityIntention`).
+fn visibility(src: &Source, method: Node) -> Vec<Fix> {
+    let stated = |comment: Comment| comment.tag(N::DocAccessModifier).is_some();
+    if !method.is(N::ClassMethodDef) || comment_above(src, method).is_some_and(stated) {
+        return Vec::new();
+    }
+    let set = |word: &str| documenting(src, method, &format!("Set visibility: {word}"), &[format!("---@{word}")]);
+    VISIBILITIES.into_iter().filter_map(set).collect()
+}
+
+/// `self.name = name` at the start of a method, for one of its parameters
+/// (`CreateFieldFromParameterIntention`).
+fn field_from_parameter(src: &Source, parameter: Node) -> Option<Fix> {
+    let body = parameter.parent().filter(|body| body.is(N::FuncBody))?;
+    let method = body.parent().filter(|method| method.is(N::ClassMethodDef) && !psi::is_static(*method))?;
+    let closed = body.token(T::RParen)?.end();
+    let name = parameter.code();
+    let outer = indent_of(src, method.code_range().0);
+    let step = if src.text.contains("\n\t") { "\t" } else { "    " };
+    let assigned = format!("\n{outer}{step}self.{name} = {name}");
+    let fix = Fix::new("Create field for parameter");
+    // What follows the parameters on their line moves below the new statement.
+    let rest = &src.text[closed..];
+    let gap = rest.len() - rest.trim_start_matches([' ', '\t']).len();
+    let same_line = !rest[gap..].starts_with(['\n', '\r']) && !rest[gap..].is_empty();
+    Some(match same_line {
+        true => fix.replace(closed, closed + gap, format!("{assigned}\n{outer}")),
+        false => fix.insert(closed, assigned),
+    })
 }

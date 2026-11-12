@@ -154,10 +154,15 @@ struct Page<'a, 'c> {
     out: String,
 }
 
+/// A type as a reader is shown it: what its functions return read in their bodies, without the classes made
+/// for a variable.
+pub fn shown(cx: &Cx, ty: &Ty) -> String {
+    display(&plain(&settled(cx, ty, BODIES_DEEP)))
+}
+
 impl Page<'_, '_> {
-    /// A type as a reader is shown it.
     fn shown(&self, ty: &Ty) -> String {
-        display(&plain(&settled(self.cx, ty, BODIES_DEEP)))
+        shown(self.cx, ty)
     }
 
     /// The declaration, as a block of code: the IDE colours it, and shows it alone where it is brief.

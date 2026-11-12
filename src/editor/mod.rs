@@ -235,6 +235,10 @@ impl Feature for EditorFeature {
         }
         let src = &cx.doc.src;
         let mut found = crate::intent::rewrites(src, start);
+        let annotations = self.ask_within(Some(INSPECTION_TIME), cx, src, |engine, file| {
+            crate::intent::annotations(engine, file, src, start)
+        });
+        found.extend(annotations.unwrap_or_default());
         found.extend(crate::intent::surrounds(src, start, end));
         found.into_iter().map(|fix| Intention { fix, kind: "refactor" }).collect()
     }

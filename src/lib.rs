@@ -1604,6 +1604,23 @@ mod tests {
     }
 
     #[test]
+    fn an_intention_is_offered_where_the_caret_stands() {
+        let host = openidea_plugin::mock::MockHost::install();
+        let mut kit = shop_resource(&host);
+        let typed = lua(SHOP_CLIENT, 2, "local function total() return 2 end\nprint(total())\n");
+        let on_name = Position::new(0, 17);
+        let actions = kit.code_actions(&typed, Range::new(on_name, on_name));
+        let titles: Vec<&str> = actions.iter().map(|action| action.title.as_str()).collect();
+        assert_eq!(titles, ["Create return annotation", "Create LuaDoc"]);
+        assert!(actions.iter().all(|action| action.kind.as_deref() == Some("refactor")));
+        let above = TextEdit {
+            range: Range::new(Position::new(0, 0), Position::new(0, 0)),
+            text: "---@return number\n".into(),
+        };
+        assert_eq!(actions[0].edits, [(SHOP_CLIENT.to_owned(), vec![above])]);
+    }
+
+    #[test]
     fn what_another_feature_offers_is_not_offered_again_by_the_type_engine() {
         let host = openidea_plugin::mock::MockHost::install();
         let mut kit = shop_resource(&host);

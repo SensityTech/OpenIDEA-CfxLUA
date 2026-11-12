@@ -67,7 +67,7 @@ fn an_operation_between_constants_is_computed_from_its_operator() {
         let title = titles(text).into_iter().find(|title| title.starts_with("Compute constant value of "));
         title.map(|title| applied(text, &title))
     };
-    assert_eq!(titles("local n = 1 <caret>+ 2 * 3"), ["Compute constant value of 1 + 2 * 3"]);
+    assert_eq!(titles("local n = 1 <caret>+ 2 * 3"), ["Compute constant value of 1 + 2 * 3", "Create type annotation"]);
     assert_eq!(computed("local n = 1 <caret>+ 2 * 3").as_deref(), Some("local n = 7"));
     assert_eq!(computed("local n = 1 + 2 <caret>* 3").as_deref(), Some("local n = 1 + 6"));
     assert_eq!(computed("n = (1 + 2) <caret>* 3").as_deref(), Some("n = 9"));
@@ -120,4 +120,86 @@ fn the_selected_statements_are_marked_as_a_region() {
     );
     assert!(surrounds("local a = 1\n<caret>\n<end>print(a)").is_empty(), "nothing but white space");
     assert!(surrounds("local a = 1\n<caret>print(a)").is_empty(), "no selection");
+}
+
+#[test]
+fn a_parameter_and_a_local_get_their_annotation() {
+    assert_eq!(
+        applied("local function open(do<caret>or, side) end", "Create parameter annotation"),
+        "---@param door any\nlocal function open(door, side) end"
+    );
+    assert_eq!(
+        applied(
+            "--- Opens.\n---@param side string\nlocal function open(door<caret>, side) end",
+            "Create parameter annotation"
+        ),
+        "--- Opens.\n---@param side string\n---@param door any\nlocal function open(door, side) end"
+    );
+    assert_eq!(
+        applied("do\n    f(function(<caret>item) end)\nend", "Create parameter annotation"),
+        "do\n    ---@param item any\n    f(function(item) end)\nend"
+    );
+    let documented = "---@param door number\nlocal function open(do<caret>or) end";
+    assert!(!titles(documented).contains(&"Create parameter annotation".to_owned()));
+    assert_eq!(applied("local na<caret>me = 'x'", "Create type annotation"), "---@type string\nlocal name = 'x'");
+    assert_eq!(applied("local count = <caret>1", "Create type annotation"), "---@type number\nlocal count = 1");
+    assert_eq!(applied("local what<caret>", "Create type annotation"), "---@type any\nlocal what");
+    assert!(titles("---@type string\nlocal na<caret>me = 'x'").is_empty());
+}
+
+#[test]
+fn a_function_is_documented_from_its_header() {
+    assert_eq!(
+        applied("function ge<caret>t() return 1 end", "Create return annotation"),
+        "---@return number\nfunction get() return 1 end"
+    );
+    assert_eq!(
+        applied("--- Gets.\nlocal function ge<caret>t(a) return a end", "Create return annotation"),
+        "--- Gets.\n---@return any\nlocal function get(a) return a end"
+    );
+    assert_eq!(
+        applied("Shop = {}\nfunction Shop.ad<caret>d(item, count) end", "Create LuaDoc"),
+        "Shop = {}\n---add\n---@param item any\n---@param count any\nfunction Shop.add(item, count) end"
+    );
+    let header = titles("Shop = {}\nfunction Shop:clo<caret>se() end");
+    assert_eq!(
+        header,
+        [
+            "Create return annotation",
+            "Create LuaDoc",
+            "Set visibility: private",
+            "Set visibility: protected",
+            "Set visibility: public",
+        ]
+    );
+    assert_eq!(
+        applied("Shop = {}\n    function Shop:clo<caret>se() end", "Set visibility: protected"),
+        "Shop = {}\n    ---@protected\n    function Shop:close() end"
+    );
+    let stated = titles("Shop = {}\n---@private\n---@return number\nfunction Shop:clo<caret>se() return 1 end");
+    assert!(stated.is_empty(), "{stated:?}");
+    assert_eq!(titles("function get()\n    pri<caret>nt(1)\nend"), Vec::<String>::new(), "inside the body");
+    assert!(titles("local get = func<caret>tion() end").iter().all(|title| title == "Create type annotation"));
+}
+
+#[test]
+fn a_parameter_of_a_method_is_kept_in_a_field() {
+    let title = "Create field for parameter";
+    assert_eq!(
+        applied("function Shop:open(do<caret>or)\nend", title),
+        "function Shop:open(door)\n    self.door = door\nend"
+    );
+    assert_eq!(
+        applied("function Shop:open(do<caret>or) end", title),
+        "function Shop:open(door)\n    self.door = door\nend"
+    );
+    assert_eq!(
+        applied("do\n\tfunction Shop:open(a, side<caret>)\n\t\tprint(a)\n\tend\nend", title),
+        "do\n\tfunction Shop:open(a, side)\n\t\tself.side = side\n\t\tprint(a)\n\tend\nend"
+    );
+    for kept in
+        ["function Shop.open(do<caret>or) end", "function open(do<caret>or) end", "f(function(do<caret>or) end)"]
+    {
+        assert!(!titles(kept).contains(&title.to_owned()), "{kept}");
+    }
 }
