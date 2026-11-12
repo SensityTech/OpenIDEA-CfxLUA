@@ -616,3 +616,46 @@ fn updating_a_real_project_matches_a_full_build() {
         db.sites.len()
     );
 }
+
+#[test]
+#[ignore = "measurement: CFXLUA_PROJECT=<dir> cargo test --release --lib what_the_facts_of_a_real_project_hold -- --ignored --nocapture"]
+fn what_the_facts_of_a_real_project_hold() {
+    let files: Vec<(String, String)> = crate::testing::real_project()
+        .into_iter()
+        .filter(|(path, text)| {
+            path.ends_with(".lua") && text.len() <= crate::workspace::MAX_FILE && !crate::project::is_escrowed(text)
+        })
+        .collect();
+    let refs: Vec<(&str, &str)> = files.iter().map(|(path, text)| (path.as_str(), text.as_str())).collect();
+    let ws = crate::workspace::Workspace::from_files("/real", &refs);
+    let start = std::time::Instant::now();
+    let all: std::collections::BTreeMap<String, super::flow::FileFacts> =
+        files.iter().map(|(path, text)| (ws.absolute(path), facts_of(text))).collect();
+    let analysed = start.elapsed();
+    let (mut functions, mut calls, mut args, mut packed) = (0, 0, 0, 0);
+    for facts in all.values() {
+        let read = facts.calls.all();
+        functions += facts.functions.len();
+        calls += read.len();
+        args += read.iter().map(|call| call.args.len()).sum::<usize>();
+        packed += facts.calls.size();
+    }
+    eprintln!(
+        "{} Lua files analysed in {analysed:?}: {functions} functions, {calls} calls with {args} arguments packed in {packed} bytes",
+        all.len()
+    );
+
+    let config = Config { detect: true, helpers: Vec::new(), aliases: vec!["RegisterEventAlias".to_owned()] };
+    let start = std::time::Instant::now();
+    let db = Db::build(&ws, &all, &config);
+    let built = start.elapsed();
+    let mut names: std::collections::HashSet<&str> = super::model::STANDARD_NAMES.iter().copied().collect();
+    names.extend(db.helpers.iter().map(|helper| helper.simple_name()));
+    let read: usize = all.values().map(|facts| facts.calls.of(|name| names.contains(name)).len()).sum();
+    eprintln!(
+        "database built in {built:?}: {} helpers, {} sites, {read} calls read under {} names",
+        db.helpers.len(),
+        db.sites.len(),
+        names.len()
+    );
+}

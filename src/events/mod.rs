@@ -4,6 +4,7 @@ pub mod db;
 pub mod editor;
 pub mod flow;
 pub mod model;
+pub mod packed;
 pub mod spec;
 
 use crate::feature::{Ctx, Feature, Problem};

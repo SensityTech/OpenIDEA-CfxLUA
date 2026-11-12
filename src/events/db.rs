@@ -326,16 +326,16 @@ impl Db {
 /// A file and the place of a function among those of its facts.
 type FnId<'a> = (&'a str, u32);
 
-#[derive(Clone, Copy)]
+/// A call read from the facts of its file.
 struct Ref<'a> {
     file: &'a str,
-    record: &'a CallRecord,
+    record: CallRecord,
     facts: &'a FileFacts,
 }
 
 impl<'a> Ref<'a> {
     fn function(&self) -> Option<&'a FunctionInfo> {
-        self.facts.function_of(self.record)
+        self.facts.function_of(&self.record)
     }
 
     fn function_id(&self) -> Option<FnId<'a>> {
@@ -363,7 +363,6 @@ struct Builder<'a> {
     detected_index: HashMap<FnId<'a>, usize>,
     helper_ids: HashSet<FnId<'a>>,
     functions: HashMap<String, Vec<Rc<EventFn>>>,
-    fetched: HashMap<String, Rc<Vec<Ref<'a>>>>,
     keys: RefCell<HashSet<Rc<EventKey>>>,
 }
 
@@ -382,7 +381,6 @@ impl<'a> Builder<'a> {
             detected_index: HashMap::new(),
             helper_ids: HashSet::new(),
             functions: HashMap::new(),
-            fetched: HashMap::new(),
             keys: RefCell::default(),
         }
     }
@@ -401,26 +399,18 @@ impl<'a> Builder<'a> {
         self.functions = functions;
     }
 
-    fn fetch(&mut self, name: &str) -> Rc<Vec<Ref<'a>>> {
-        if let Some(r) = self.fetched.get(name) {
-            return r.clone();
-        }
-        let refs = Rc::new(Self::calls(name, self.files.iter()));
-        self.fetched.insert(name.to_owned(), refs.clone());
-        refs
-    }
-
+    /// The calls of a name, read from the facts: they are kept no longer than what reads them.
     fn calls(name: &str, files: impl Iterator<Item = (&'a String, &'a FileFacts)>) -> Vec<Ref<'a>> {
         files
             .flat_map(|(file, facts)| {
-                facts.calls_named(name).map(move |record| Ref { file: file.as_str(), record, facts })
+                facts.calls.named(name).into_iter().map(move |record| Ref { file: file.as_str(), record, facts })
             })
             .collect()
     }
 
     fn resolve(&self, r: &Ref, info: &FileInfo) -> Option<(Rc<EventFn>, usize)> {
         let self_class = r.function().and_then(FunctionInfo::class_name);
-        self.scopes.resolve(&self.functions, &self.standard, r.record, r.file, info, self_class)
+        self.scopes.resolve(&self.functions, &self.standard, &r.record, r.file, info, self_class)
     }
 
     fn declare(&mut self) {
@@ -485,7 +475,7 @@ impl<'a> Builder<'a> {
             }
             for name in &pending {
                 fetched.insert(name.clone());
-                for r in self.fetch(name).iter() {
+                for r in Self::calls(name, files.iter()) {
                     let (Some(id), Some(info)) = (r.function_id(), r.function()) else { continue };
                     // only arguments computed from parameters may form a helper's key
                     if !r.record.forwards_params() {
@@ -495,7 +485,7 @@ impl<'a> Builder<'a> {
                         inner.push((id, info, Vec::new()));
                         inner.len() - 1
                     });
-                    inner[k].2.push(*r);
+                    inner[k].2.push(r);
                 }
             }
             if self.config.detect {
@@ -529,8 +519,8 @@ impl<'a> Builder<'a> {
         let files = self.files;
         for name in fetched {
             let refs = match only {
-                Some(only) => Rc::new(Self::calls(name, only.iter().filter_map(|f| files.get_key_value(f)))),
-                None => self.fetch(name),
+                Some(only) => Self::calls(name, only.iter().filter_map(|f| files.get_key_value(f))),
+                None => Self::calls(name, files.iter()),
             };
             let mut last: Option<(&str, FileInfo)> = None;
             for r in refs.iter() {
@@ -721,7 +711,7 @@ impl<'a> Builder<'a> {
         sites: &mut Vec<Site>,
         dynamic: &mut Vec<DynamicSite>,
     ) {
-        let record = r.record;
+        let record = &r.record;
         let args = &record.args[shift.min(record.args.len())..];
         let role = f.role_for(args.len());
         if role == Role::Alias {
@@ -968,9 +958,9 @@ fn annotated(facts: &FileFacts) -> impl Iterator<Item = &FunctionInfo> {
 }
 
 impl Db {
-    fn forwarding<'a>(&'a self, facts: &'a FileFacts) -> impl Iterator<Item = (&'a CallRecord, &'a FunctionInfo)> + 'a {
-        let read = |c: &&CallRecord| c.forwards_params() && self.fetched.contains(c.simple_name());
-        facts.calls.iter().filter(read).filter_map(|c| Some((c, facts.function_of(c)?)))
+    fn forwarding<'a>(&self, facts: &'a FileFacts) -> Vec<(CallRecord, &'a FunctionInfo)> {
+        let read = facts.calls.of(|name| self.fetched.contains(name)).into_iter().filter(CallRecord::forwards_params);
+        read.filter_map(|call| facts.function_of(&call).map(|function| (call, function))).collect()
     }
 
     /// Whether the detection of the event functions reads the same in two versions of a file, wherever the code
@@ -979,14 +969,12 @@ impl Db {
         if !annotated(old).eq(annotated(new)) {
             return false;
         }
-        let (mut a, mut b) = (self.forwarding(old), self.forwarding(new));
-        loop {
-            match (a.next(), b.next()) {
-                (None, None) => return true,
-                (Some((call, function)), Some((other, same))) if call.alike(other) && function == same => {}
-                _ => return false,
-            }
-        }
+        let (a, b) = (self.forwarding(old), self.forwarding(new));
+        let alike =
+            |((call, function), (other, same)): (&(CallRecord, &FunctionInfo), &(CallRecord, &FunctionInfo))| {
+                call.alike(other) && function == same
+            };
+        a.len() == b.len() && a.iter().zip(&b).all(alike)
     }
 
     /// The database after the Lua files `changed` were edited, re-resolving only their calls. The event functions,

@@ -1,5 +1,6 @@
 use super::ast::{Ast, DeclKind, ExprKind, Key, NONE, StmtKind, raw_string};
 use super::model::{FnKind, Seg, Sources, Span, VARARG, is_standard_name, simple_name};
+use super::packed::Calls;
 use crate::lua::Source;
 use crate::lua::lexer::Tok;
 use std::cell::RefCell;
@@ -208,17 +209,12 @@ impl CallRecord {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FileFacts {
     pub functions: Vec<FunctionInfo>,
-    pub calls: Vec<CallRecord>,
-    pub by_name: HashMap<String, Vec<u32>>,
+    pub calls: Calls,
 }
 
 impl FileFacts {
-    pub fn calls_named<'a>(&'a self, name: &str) -> impl Iterator<Item = &'a CallRecord> + 'a {
-        self.by_name.get(name).into_iter().flatten().map(|&i| &self.calls[i as usize])
-    }
-
     pub fn function_of(&self, call: &CallRecord) -> Option<&FunctionInfo> {
-        call.function.map(|i| &self.functions[i as usize])
+        call.function.and_then(|i| self.functions.get(i as usize))
     }
 }
 
@@ -686,15 +682,11 @@ impl<'a> Analysis<'a> {
     }
 
     pub fn facts(&self) -> FileFacts {
-        let calls: Vec<CallRecord> = calls_in(self.ast, 0, self.ast.exprs.len() as u32)
-            .into_iter()
-            .filter_map(|c| self.record(c, true))
-            .collect();
-        let mut by_name: HashMap<String, Vec<u32>> = HashMap::new();
-        for (i, c) in calls.iter().enumerate() {
-            by_name.entry(c.simple_name().to_owned()).or_default().push(i as u32);
-        }
-        FileFacts { functions: self.functions.clone(), calls, by_name }
+        FileFacts { functions: self.functions.clone(), calls: Calls::pack(&self.calls()) }
+    }
+
+    pub(super) fn calls(&self) -> Vec<CallRecord> {
+        calls_in(self.ast, 0, self.ast.exprs.len() as u32).into_iter().filter_map(|c| self.record(c, true)).collect()
     }
 
     pub fn functions(&self) -> &[FunctionInfo] {
@@ -1063,8 +1055,9 @@ mod tests {
         facts(&Source::new(text))
     }
 
-    fn call<'a>(f: &'a FileFacts, callee: &str) -> &'a CallRecord {
-        f.calls.iter().find(|c| c.callee == callee).unwrap_or_else(|| panic!("no call {callee}: {:?}", f.calls))
+    fn call(f: &FileFacts, callee: &str) -> CallRecord {
+        let calls = f.calls.all();
+        calls.iter().find(|c| c.callee == callee).cloned().unwrap_or_else(|| panic!("no call {callee}: {calls:?}"))
     }
 
     fn set(v: &[i32]) -> Sources {
@@ -1122,7 +1115,7 @@ mod tests {
             panic!("{:?}", add.args)
         };
         assert_eq!((cb.param, cb.inputs.clone()), (2, vec![set(&[VARARG])]));
-        assert_eq!(f.function_of(add).map(|i| i.path.as_str()), Some("MyHelper.AddEventHandler"));
+        assert_eq!(f.function_of(&add).map(|i| i.path.as_str()), Some("MyHelper.AddEventHandler"));
     }
 
     #[test]
@@ -1137,25 +1130,25 @@ mod tests {
              local p = setmetatable({}, Player)\np:Go('x')\n\
              TriggerServerEvent('shop:' .. GetCurrentResourceName())\nTriggerServerEvent(GetValues())",
         );
+        let calls = f.calls.all();
         let send =
-            f.calls.iter().find(|c| c.callee == "TriggerServerEvent" && !c.original && c.function.is_some()).unwrap();
+            calls.iter().find(|c| c.callee == "TriggerServerEvent" && !c.original && c.function.is_some()).unwrap();
         assert_eq!(
             send.args[0],
             Arg::Template(vec![Seg::Lit("evt:".into()), Seg::Param(0), Seg::Lit(":".into()), Seg::Param(1)])
         );
         assert_eq!(send.args[1], Arg::Spread(set(&[VARARG])));
-        let saved = f.calls.iter().find(|c| c.original).unwrap();
+        let saved = calls.iter().find(|c| c.original).unwrap();
         assert_eq!(saved.callee, "TriggerServerEvent");
         assert_eq!(saved.args[0], Arg::Str { value: "shop:".into(), lit: None });
         assert_eq!(call(&f, "zone:TriggerEvent").receiver_class.as_deref(), Some("Zone"));
         assert!(call(&f, "zone:TriggerEvent").local_receiver);
         assert_eq!(call(&f, "p:Go").receiver_class.as_deref(), Some("Player"));
-        let dynamic =
-            f.calls.iter().filter(|c| c.callee == "TriggerServerEvent" && c.function.is_none() && !c.original);
+        let dynamic = calls.iter().filter(|c| c.callee == "TriggerServerEvent" && c.function.is_none() && !c.original);
         let args: Vec<&Arg> = dynamic.map(|c| &c.args[0]).collect();
         assert_eq!(args[0], &Arg::Dynamic("shop:".into()));
         assert_eq!(args[1], &Arg::Dynamic(String::new()));
-        assert!(f.calls.iter().rev().find(|c| c.callee == "TriggerServerEvent").unwrap().last_arg_multi);
+        assert!(calls.iter().rev().find(|c| c.callee == "TriggerServerEvent").unwrap().last_arg_multi);
     }
 
     #[test]
@@ -1180,7 +1173,8 @@ mod tests {
         let f = analysis_of(
             "print('x')\nstring.format('%d', 1)\nfoo(1)\nbar('x')\nAddEventHandler(name)\nlocal function h(n) baz(n) end",
         );
-        let callees: Vec<&str> = f.calls.iter().map(|c| c.callee.as_str()).collect();
+        let calls = f.calls.all();
+        let callees: Vec<&str> = calls.iter().map(|c| c.callee.as_str()).collect();
         assert_eq!(callees, ["bar", "AddEventHandler", "baz"]);
     }
 

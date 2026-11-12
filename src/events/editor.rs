@@ -313,11 +313,11 @@ pub fn completion(
             items.push(builtin_item(e, replace));
         }
     }
-    let mut names: Vec<&str> = Vec::new();
+    let mut names: Vec<String> = Vec::new();
     for facts in files.values() {
         for name in super::model::STANDARD_NAMES {
-            for c in facts.calls_named(name) {
-                if let Some(Arg::Str { value, lit: Some(_) }) = c.args.first() {
+            for c in facts.calls.named(name) {
+                if let Some(Arg::Str { value, lit: Some(_) }) = c.args.into_iter().next() {
                     names.push(value);
                 }
             }
@@ -330,10 +330,10 @@ pub fn completion(
             && !value.contains('\n')
             && !value.trim().is_empty()
             && value != current
-            && starts_with_ci(value, prefix)
-            && offered.insert(value.to_owned())
+            && starts_with_ci(&value, prefix)
+            && offered.insert(value.clone())
         {
-            items.push(project_item(value, "project event".into(), replace, None));
+            items.push(project_item(&value, "project event".into(), replace, None));
         }
     }
     items
