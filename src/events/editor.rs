@@ -1,4 +1,4 @@
-use super::ast::{self, ExprKind};
+use super::ast::{self, Ast, ExprKind, Key};
 use super::db::Db;
 use super::flow::{Analysis, Arg, FileFacts};
 use super::model::{Dirs, EventFn, EventKey, FileInfo, Role, Seg, Site, side_text};
@@ -12,6 +12,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 
 const MAX_LOCATIONS: usize = 10;
+/// How many strings given elsewhere to the same function one list holds.
+const MAX_HISTORY: usize = 200;
 
 struct Slot {
     function: Rc<EventFn>,
@@ -241,6 +243,68 @@ fn project_item(label: &str, detail: String, replace: Range, documentation: Opti
     item
 }
 
+/// The call the string of the code token `i` is an argument of: the call, what it calls, and the rank of the
+/// argument.
+fn argument(tree: &Ast, i: usize) -> Option<(u32, u32, usize)> {
+    let literal = tree.exprs.iter().position(|e| e.kind == ExprKind::Str && e.first as usize == i)?;
+    tree.exprs.iter().enumerate().find_map(|(id, e)| match &e.kind {
+        ExprKind::Call(callee, args) => {
+            args.iter().position(|&a| a as usize == literal).map(|n| (id as u32, *callee, n))
+        }
+        _ => None,
+    })
+}
+
+/// The strings the project gives, at the same rank, to a function of the same name
+/// (`LuaStringArgHistoryProvider`): those of 2 to 128 characters on one line that `listed` does not offer.
+/// They are read in the calls the index keeps: not those of the functions it leaves out, as `print`.
+fn history(
+    cx: &Ctx,
+    files: &BTreeMap<String, FileFacts>,
+    i: usize,
+    at: usize,
+    listed: &[CompletionItem],
+) -> Vec<CompletionItem> {
+    let src = &cx.doc.src;
+    let tree = ast::parse(src);
+    let Some((_, callee, rank)) = argument(&tree, i) else { return Vec::new() };
+    let (name, colon) = match tree.kind(callee) {
+        ExprKind::Name(_) => (src.tok_text(tree.expr(callee).first as usize), false),
+        ExprKind::Index(_, Key::Field(Some(name))) => (src.tok_text(*name as usize), false),
+        ExprKind::Index(_, Key::Method(Some(name))) => (src.tok_text(*name as usize), true),
+        _ => return Vec::new(),
+    };
+    // The object of a call written with a colon is its first argument.
+    let rank = rank + usize::from(colon);
+    let mut seen: HashSet<String> = listed.iter().map(|item| item.label.clone()).collect();
+    seen.insert(ast::raw_string(src, i));
+    let mut values: Vec<String> = Vec::new();
+    for facts in files.values() {
+        for call in facts.calls.named(name) {
+            let Some(own) = rank.checked_sub(usize::from(call.colon)) else { continue };
+            let Some(Arg::Str { value, lit: Some(_) }) = call.args.into_iter().nth(own) else { continue };
+            let plain = (2..=128).contains(&value.chars().count()) && !value.contains(['\n', '\\']);
+            if plain && seen.insert(value.clone()) {
+                values.push(value);
+            }
+        }
+    }
+    values.sort_unstable();
+    values.truncate(MAX_HISTORY);
+    let replace = cx.doc.range(src.toks[i].start + 1, at);
+    let entry = |value: String| {
+        let mut item = CompletionItem::new(&value, CompletionKind::Text);
+        item.detail = Some("History".to_owned());
+        item.replace = Some(replace);
+        item.sort_text = Some(format!("9{value}"));
+        item
+    };
+    values.into_iter().map(entry).collect()
+}
+
+/// What a string may be where it is typed: an event the place asks for or, where the event analysis has
+/// nothing to say of the string, what the project gives to the same function elsewhere. That history mixes
+/// the parts of tuple keys and the functions that share a name: it never completes an event.
 pub fn completion(
     cx: &Ctx,
     db: Option<&Db>,
@@ -248,25 +312,33 @@ pub fn completion(
     i: usize,
     at: usize,
 ) -> Vec<CompletionItem> {
+    let mut items = Vec::new();
+    if !event_names(cx, db, files, i, at, &mut items) {
+        let given = history(cx, files, i, at, &items);
+        items.extend(given);
+    }
+    items
+}
+
+/// Adds the events the string may name to `items`. Tells whether the string is a part of an event key, read
+/// by the event analysis.
+fn event_names(
+    cx: &Ctx,
+    db: Option<&Db>,
+    files: &BTreeMap<String, FileFacts>,
+    i: usize,
+    at: usize,
+    items: &mut Vec<CompletionItem>,
+) -> bool {
     let src = &cx.doc.src;
     let tok = src.toks[i];
     let prefix = &src.text[tok.start + 1..at];
     let current = ast::raw_string(src, i);
     let replace = cx.doc.range(tok.start + 1, at);
     let tree = ast::parse(src);
-    let Some(literal) = tree.exprs.iter().position(|e| e.kind == ExprKind::Str && e.first as usize == i) else {
-        return Vec::new();
-    };
-    let found = tree.exprs.iter().enumerate().find_map(|(id, e)| match &e.kind {
-        ExprKind::Call(callee, args) => {
-            args.iter().position(|&a| a as usize == literal).map(|n| (id as u32, *callee, n))
-        }
-        _ => None,
-    });
-    let Some((call, callee, arg_index)) = found else { return Vec::new() };
+    let Some((call, callee, arg_index)) = argument(&tree, i) else { return false };
     let games = project_games(cx);
     let mut offered: HashSet<String> = HashSet::new();
-    let mut items = Vec::new();
 
     // the event analysis: helpers, redefinitions and the runtime functions
     if let Some(db) = db {
@@ -297,14 +369,14 @@ pub fn completion(
                     let docs: Vec<String> = keys.iter().take(3).map(|k| key_doc(cx, db, k)).collect();
                     items.push(project_item(&value, handled_text(db, &keys), replace, Some(docs.join("\n\n---\n\n"))));
                 }
-                return items;
+                return true;
             }
         }
     }
 
     // no slot: the first argument of a plain call to a runtime function
-    let Some(name) = tree.global(src, callee) else { return Vec::new() };
-    let Some(target) = standard_target(name).filter(|_| arg_index == 0) else { return Vec::new() };
+    let Some(name) = tree.global(src, callee) else { return false };
+    let Some(target) = standard_target(name).filter(|_| arg_index == 0) else { return false };
     for e in crate::docs::data::events() {
         if builtin_relevant(e, target, cx.doc.side, &games)
             && starts_with_ci(&e.name, prefix)
@@ -336,7 +408,7 @@ pub fn completion(
             items.push(project_item(&value, "project event".into(), replace, None));
         }
     }
-    items
+    true
 }
 
 fn targets_of<'a>(db: &'a Db, site: &Site) -> Vec<&'a Site> {

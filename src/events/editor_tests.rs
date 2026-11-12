@@ -488,3 +488,55 @@ fn nui_callback_events_are_left_to_the_nui_bridge() {
     assert!(definitions(&fx, &f, "myres/client.lua", "'__cfx_nui:close', function", 3).is_empty());
     assert_eq!(definitions(&fx, &f, "myres/client.lua", "TriggerEvent('__cfx_nui", 15), ["myres/client.lua:2"]);
 }
+
+#[test]
+fn the_strings_a_function_is_given_elsewhere() {
+    // `TestArgHistory`
+    let first = concat!(
+        "local function test(strArg1, strArg2)\n",
+        "end\n",
+        "test(\"his1\")\n",
+        "test(\"his2\", \"second\")\n",
+        "test(\"<caret>\")\n"
+    );
+    let second = concat!(
+        "local obj = {}\n",
+        "function obj:test(a) end\n",
+        "obj:test('fromColon')\n",
+        "obj.test(obj, 'fromDot')\n",
+        "test('other file')\n",
+        "test('his1')\n",
+        "test('x')\n",
+        "test('two\\nlines')\n"
+    );
+    let fx = project(&[("studio/client/h1.lua", first), ("studio/client/h2.lua", second)]);
+    assert_eq!(
+        labels(&fx, "studio/client/h1.lua"),
+        ["his1", "his2", "other file"],
+        "each string once, at the same rank; not a single letter, not a string of two lines"
+    );
+    let f = indexed(&fx);
+    let (doc, at) = fx.caret("studio/client/h1.lua");
+    let items = f.completion(&fx.cx(&doc), at, None);
+    assert_eq!(items[0].detail.as_deref(), Some("History"));
+    assert_eq!(items[0].replace, Some(doc.range(at, at)));
+
+    let colon = project(&[
+        ("studio/client/h2.lua", second),
+        ("studio/client/h3.lua", "local obj = {}\nobj:test('<caret>')"),
+        ("studio/client/h4.lua", "test('first', 'sec<caret>')"),
+    ]);
+    assert_eq!(
+        labels(&colon, "studio/client/h3.lua"),
+        ["fromColon", "fromDot", "sec"],
+        "the object of a call written with a colon counts as its first argument"
+    );
+    assert_eq!(labels(&colon, "studio/client/h4.lua"), ["fromColon", "fromDot"], "the second argument of each");
+}
+
+#[test]
+fn an_event_is_not_offered_twice() {
+    let fx = project(&[("studio/client/h5.lua", "TriggerEvent('custom:ping')\nAddEventHandler('custom:<caret>')")]);
+    let listed = labels(&fx, "studio/client/h5.lua");
+    assert_eq!(listed.iter().filter(|label| *label == "custom:ping").count(), 1, "{listed:?}");
+}
