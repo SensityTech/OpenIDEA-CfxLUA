@@ -691,7 +691,8 @@ fn read_disk(path: &str) -> Disk {
     if missing { Disk::Missing } else { Disk::Unreadable }
 }
 
-fn parse(kind: FileKind, text: &str) -> Source {
+/// The text of a project file as the features read it: analysed when it is Lua that can be read.
+pub(crate) fn parse(kind: FileKind, text: &str) -> Source {
     if matches!(kind, FileKind::Lua | FileKind::Manifest) && !project::is_escrowed(text) {
         Source::new(text)
     } else {

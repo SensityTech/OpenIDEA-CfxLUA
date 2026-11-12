@@ -2,6 +2,7 @@
 //! `LuaShortNamesManager`). A member is kept under each class the declaring file alone can tell it belongs to.
 
 pub mod declare;
+pub mod project;
 
 pub use declare::declare;
 
