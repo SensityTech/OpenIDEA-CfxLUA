@@ -103,9 +103,10 @@ impl Feature for EditorFeature {
         let Some(place) = Self::completed_place(cx, at) else { return Vec::new() };
         let typed = completion::Typed::new(&cx.doc.src, at, place);
         let src = typed.src(&cx.doc.src);
+        let asked = completion::Asked { ws: cx.ws, doc: cx.doc, src, at };
         let listed = self
             .projects
-            .ask(cx.ws, &cx.doc.path, src, |engine, file| completion::complete(engine, file, cx.doc, src, at, place));
+            .ask(cx.ws, &cx.doc.path, src, |engine, file| completion::complete(engine, file, &asked, place));
         listed.unwrap_or_default()
     }
 

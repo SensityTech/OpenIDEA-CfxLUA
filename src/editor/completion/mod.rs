@@ -5,6 +5,7 @@ mod expected;
 mod members;
 mod names;
 mod overrides;
+mod requires;
 mod tables;
 
 use crate::feature::Doc;
@@ -12,6 +13,7 @@ use crate::lua::Source;
 use crate::lua::tree::N;
 use crate::ty::context::{Cx, Psi};
 use crate::ty::{FileId, Ret, Signature, display};
+use crate::workspace::Workspace;
 use openidea_plugin::providers::CompletionItem;
 use std::collections::HashSet;
 
@@ -111,8 +113,19 @@ impl Listing<'_, '_> {
     }
 }
 
-/// What the engine lists at `place`. `src` is the text of `Typed`, `at` the caret in the document.
-pub fn complete(cx: &Cx, file: FileId, doc: &Doc, src: &Source, at: usize, place: Place) -> Vec<CompletionItem> {
+/// The document a completion is asked in.
+pub struct Asked<'a> {
+    pub ws: &'a Workspace,
+    pub doc: &'a Doc,
+    /// The text of `Typed`.
+    pub src: &'a Source,
+    /// The caret, in the document.
+    pub at: usize,
+}
+
+/// What the engine lists at `place`.
+pub fn complete(cx: &Cx, file: FileId, asked: &Asked, place: Place) -> Vec<CompletionItem> {
+    let Asked { ws, doc, src, at } = *asked;
     let mut listing = Listing { cx, doc, bodies: 0, listed: HashSet::new(), items: Vec::new() };
     let typed = |start: usize| &doc.src.text[start..at];
     match place {
@@ -136,7 +149,11 @@ pub fn complete(cx: &Cx, file: FileId, doc: &Doc, src: &Source, at: usize, place
                 names::words(&mut listing, src, typed(start));
             }
         }
-        Place::String(token) => expected::strings(&mut listing, file, src, token, at),
+        Place::String(token) => {
+            if !requires::paths(&mut listing, ws, src, token, at) {
+                expected::strings(&mut listing, file, src, token, at);
+            }
+        }
         Place::Doc(start) => docs::complete(&mut listing, src, start, at),
     }
     listing.items.sort_by(|a, b| a.sort_text.cmp(&b.sort_text));
