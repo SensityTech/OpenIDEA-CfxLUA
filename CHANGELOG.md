@@ -94,6 +94,12 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   for a local, `---@return` or a whole documentation comment for a function, each written with the type the
   plugin infers; set the visibility of a method; keep a parameter of a method in a field (`self.name = name`).
   On a selection, the statements it covers can be surrounded by a `--region` or a `--{{{` pair.
+- **Postfix templates.** After an expression and a dot, completion offers the templates of the JetBrains plugin:
+  `count.if` becomes `if count then ... end`, and likewise `if_not`, `if_nil`, `if_not_nil`, `for`, `for_i`,
+  `for_p`, `return`, `print`, `increase`, `decrease` and `var` for an expression alone on its line; `par`,
+  `tostring` and `tonumber` wrap an expression wherever it stands.
+- **Lua live templates.** `func`, `lfunc`, `for`, `fori`, `forp`, `if`, `elseif`, `ifelse` and `closure` expand
+  into their statement, with tab stops; they are listed under Settings › Editor › Live Templates.
 - **Natives have parameter info, hints, a hover, and type what they return.** A native shows its parameters while
   its arguments are typed and names them before literals; `GetEntityCoords(ped).` lists `x`, `y` and `z`; hovering
   a native shows its documentation: description, example, parameters, hash, side and game.
