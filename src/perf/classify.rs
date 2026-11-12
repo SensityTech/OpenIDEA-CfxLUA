@@ -5,7 +5,8 @@ use crate::lua::Source;
 use crate::natives::{Native, NativeSet, Natives};
 use crate::project::{Game, Side};
 use std::cell::RefCell;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -15,9 +16,23 @@ pub enum Callee {
     Fixed(Spec),
 }
 
+const PATH: u32 = 0;
+const LOCAL: u32 = 1;
+const FIXED: u32 = 2;
+
+/// What a file tells the others: what each of its functions calls and its global functions. A project keeps
+/// the facts of every file, so the callees are packed, and each is kept once per function: what a function
+/// costs is told by what it calls, not by how many times.
 #[derive(Clone, Debug, Default)]
 pub struct FileFacts {
-    pub functions: Vec<Vec<Callee>>,
+    /// Where the callees of each function end in `callees`.
+    ends: Box<[u32]>,
+    /// A kind in the two low bits, then which path, function of the file or spec.
+    callees: Box<[u32]>,
+    /// The paths called, end to end, and where each ends.
+    paths: Box<str>,
+    path_ends: Box<[u32]>,
+    specs: Box<[Spec]>,
     pub globals: Vec<(String, usize)>,
 }
 
@@ -25,20 +40,74 @@ impl FileFacts {
     pub fn of(ast: &Ast, src: &Source) -> Self {
         let named = ast.named_functions();
         let locals = local_paths(ast, &named);
-        let functions = ast
-            .functions
-            .iter()
-            .map(|&f| {
-                let ExprKind::Function { body, .. } = ast.exprs[f].kind else { return Vec::new() };
-                ast.calls(Node::Block(body), &|_| false).into_iter().map(|c| callee(ast, src, &locals, c).1).collect()
-            })
-            .collect();
+        let (mut ends, mut callees, mut path_ends, mut specs) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        let mut paths = String::new();
+        let mut path_ids: HashMap<String, u32> = HashMap::new();
+        let mut seen: HashSet<u32> = HashSet::new();
+        for &f in &ast.functions {
+            let calls = match ast.exprs[f].kind {
+                ExprKind::Function { body, .. } => ast.calls(Node::Block(body), &|_| false),
+                _ => Vec::new(),
+            };
+            seen.clear();
+            for call in calls {
+                let code = match callee(ast, src, &locals, call).1 {
+                    Callee::Path(path) => {
+                        let next = path_ids.len() as u32;
+                        let id = *path_ids.entry(path).or_insert_with_key(|path| {
+                            paths.push_str(path);
+                            path_ends.push(paths.len() as u32);
+                            next
+                        });
+                        (id << 2) | PATH
+                    }
+                    Callee::Local(ordinal) => ((ordinal as u32) << 2) | LOCAL,
+                    Callee::Fixed(spec) => {
+                        let id = specs.iter().position(|other| *other == spec).unwrap_or_else(|| {
+                            specs.push(spec);
+                            specs.len() - 1
+                        });
+                        ((id as u32) << 2) | FIXED
+                    }
+                };
+                if seen.insert(code) {
+                    callees.push(code);
+                }
+            }
+            ends.push(callees.len() as u32);
+        }
         let globals = named
             .into_iter()
             .filter(|n| n.root.is_none())
             .filter_map(|n| Some((n.path, ast.ordinal(n.func)?)))
             .collect();
-        Self { functions, globals }
+        Self {
+            ends: ends.into(),
+            callees: callees.into(),
+            paths: paths.into(),
+            path_ends: path_ends.into(),
+            specs: specs.into(),
+            globals,
+        }
+    }
+
+    /// What the function `ordinal` calls, each callee once, in the order of its body.
+    pub fn callees(&self, ordinal: usize) -> Vec<Callee> {
+        let Some(&end) = self.ends.get(ordinal) else { return Vec::new() };
+        let start = ordinal.checked_sub(1).map_or(0, |before| self.ends[before]);
+        self.callees[start as usize..end as usize].iter().map(|code| self.callee(*code)).collect()
+    }
+
+    fn callee(&self, code: u32) -> Callee {
+        let at = (code >> 2) as usize;
+        match code & 3 {
+            PATH => {
+                let start = at.checked_sub(1).map_or(0, |before| self.path_ends[before]);
+                Callee::Path(self.paths[start as usize..self.path_ends[at] as usize].to_owned())
+            }
+            LOCAL => Callee::Local(at),
+            _ => Callee::Fixed(self.specs[at]),
+        }
     }
 
     fn global(&self, path: &str) -> Option<usize> {
@@ -54,33 +123,44 @@ fn local_paths(ast: &Ast, named: &[Named]) -> LocalPaths {
 
 #[derive(Default)]
 pub struct ProjectIndex {
-    files: HashMap<String, FileFacts>,
-    by_name: HashMap<String, BTreeSet<String>>,
+    files: HashMap<Rc<str>, FileFacts>,
+    /// The files that define a global function, sorted: one file, most often.
+    by_name: HashMap<String, Vec<Rc<str>>>,
 }
 
 impl ProjectIndex {
     pub fn set(&mut self, path: &str, facts: FileFacts) {
         self.remove(path);
+        let path: Rc<str> = path.into();
         for (name, _) in &facts.globals {
-            self.by_name.entry(name.clone()).or_default().insert(path.to_owned());
+            match self.by_name.entry(name.clone()) {
+                Entry::Vacant(entry) => {
+                    entry.insert(vec![path.clone()]);
+                }
+                Entry::Occupied(mut entry) => {
+                    let files = entry.get_mut();
+                    if let Err(at) = files.binary_search(&path) {
+                        files.insert(at, path.clone());
+                    }
+                }
+            }
         }
-        self.files.insert(path.to_owned(), facts);
+        self.files.insert(path, facts);
     }
 
     pub fn remove(&mut self, path: &str) {
         let Some(old) = self.files.remove(path) else { return };
         for (name, _) in &old.globals {
-            if let Some(files) = self.by_name.get_mut(name) {
-                files.remove(path);
-                if files.is_empty() {
-                    self.by_name.remove(name);
-                }
+            let Some(files) = self.by_name.get_mut(name) else { continue };
+            files.retain(|file| **file != *path);
+            if files.is_empty() {
+                self.by_name.remove(name);
             }
         }
     }
 
     fn function(&self, path: &str, except: &str) -> Option<(&str, usize)> {
-        let file = self.by_name.get(path)?.iter().find(|f| f.as_str() != except)?;
+        let file = self.by_name.get(path)?.iter().find(|file| ***file != *except)?;
         Some((file, self.files.get(file)?.global(path)?))
     }
 }
@@ -320,11 +400,9 @@ impl<'a> Perf<'a> {
             None => {}
         }
         self.summaries.borrow_mut().insert(key.clone(), None);
-        let callees: Vec<Callee> = match &fcx.file {
-            None => self.facts.functions.get(ordinal).cloned().unwrap_or_default(),
-            Some(f) => {
-                self.index.files.get(f).and_then(|facts| facts.functions.get(ordinal)).cloned().unwrap_or_default()
-            }
+        let callees = match &fcx.file {
+            None => self.facts.callees(ordinal),
+            Some(f) => self.index.files.get(f.as_str()).map(|facts| facts.callees(ordinal)).unwrap_or_default(),
         };
         let mut work = Work::Pure;
         let mut yields = Yield::None;
@@ -462,7 +540,7 @@ mod tests {
     #[test]
     fn facts_follow_aliases_and_local_tables() {
         let src = Source::new(
-            "local Wait = Citizen.Wait\nlocal M = {}\nfunction M.tick() Wait(0) end\nfunction Loop() M.tick() Draw() local f = function() Hidden() end end\nUtils = { go = function() print(1) end }",
+            "local Wait = Citizen.Wait\nlocal M = {}\nfunction M.tick() Wait(0) Wait(500) end\nfunction Loop() M.tick() Draw() M.tick() obj:Method() Draw() local f = function() Hidden() end end\nUtils = { go = function() print(1) end }",
         );
         let ast = super::super::ast::parse(&src);
         let facts = FileFacts::of(&ast, &src);
@@ -471,10 +549,15 @@ mod tests {
         let loop_ord = facts.global("Loop").unwrap();
         let tick = ast.named_functions().iter().find(|n| n.path == "M.tick").and_then(|n| ast.ordinal(n.func)).unwrap();
         assert_eq!(
-            facts.functions[loop_ord],
-            [Callee::Local(tick), Callee::Path("Draw".into())],
-            "nested functions are skipped"
+            facts.callees(loop_ord),
+            [Callee::Local(tick), Callee::Path("Draw".into()), Callee::Fixed(Spec::UNKNOWN)],
+            "nested functions are skipped, and what is called again is kept once"
         );
-        assert_eq!(facts.functions[tick], [Callee::Path("Citizen.Wait".into())]);
+        assert_eq!(facts.callees(tick), [Callee::Path("Citizen.Wait".into())]);
+        let go = facts.global("Utils.go").unwrap();
+        assert_eq!(facts.callees(go), [Callee::Path("print".into())]);
+        let every: Vec<Vec<Callee>> = (0..ast.functions.len()).map(|ordinal| facts.callees(ordinal)).collect();
+        assert_eq!(every.iter().map(Vec::len).sum::<usize>(), 6, "{every:?}");
+        assert_eq!(facts.callees(ast.functions.len()), [], "no such function");
     }
 }
