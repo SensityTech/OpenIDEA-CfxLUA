@@ -1198,6 +1198,25 @@ impl LanguageFeatures for DevKit {
     }
 }
 
+impl openidea_plugin::language_features::Injections for DevKit {
+    // Asked after each edit: the document is not indexed for it.
+    fn injections(&mut self, d: &Document) -> Vec<openidea_plugin::language_features::Injection> {
+        let _timed = Timed::start("injections", d);
+        let found = self.prepare(d).and_then(|ws| {
+            self.with_ctx(ws, |cx, features| {
+                let injected = features.iter().flat_map(|f| f.injections(cx));
+                injected
+                    .map(|found| openidea_plugin::language_features::Injection {
+                        range: cx.doc.range(found.start, found.end),
+                        language: found.language,
+                    })
+                    .collect::<Vec<_>>()
+            })
+        });
+        found.unwrap_or_default()
+    }
+}
+
 impl HoverProvider for DevKit {
     fn hover(&mut self, d: &Document, at: Position) -> Option<Hover> {
         let _timed = Timed::start("hover", d);
@@ -1243,7 +1262,7 @@ impl InlayHints for DevKit {
     }
 }
 
-register_plugin!(DevKit, providers, views, language_features, hover, inlay_hints);
+register_plugin!(DevKit, providers, views, language_features, hover, inlay_hints, injections);
 
 // The semantic tokens are exported here rather than by `register_plugin!`, to send the names of
 // `TOKEN_NAMES` in place of the SDK's.
@@ -1673,6 +1692,19 @@ mod tests {
             grown.iter().map(|r| (r.start.line, r.start.character, r.end.line, r.end.character)).collect();
         assert_eq!(spans, [(2, 6, 2, 10), (2, 5, 2, 11), (2, 0, 2, 11), (0, 0, 3, 0)], "the name, the call, the file");
         assert!(kit.stale.is_some(), "it reads the document alone, which is not indexed for it");
+    }
+
+    #[test]
+    fn a_string_takes_the_language_its_comment_names() {
+        use openidea_plugin::language_features::Injections;
+        let host = openidea_plugin::mock::MockHost::install();
+        let mut kit = shop_resource(&host);
+        let typed = lua(SHOP_CLIENT, 2, "---@language JSON\nlocal body = '{\"a\": 1}'\nprint(body)\n");
+        let injected = kit.injections(&typed);
+        assert_eq!(injected.len(), 1);
+        assert_eq!(injected[0].language, "json");
+        assert_eq!(injected[0].range, Range { start: Position::new(1, 14), end: Position::new(1, 22) });
+        assert!(kit.stale.is_some(), "asked after each edit: the document is not indexed for it");
     }
 
     #[test]

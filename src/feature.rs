@@ -224,4 +224,9 @@ pub trait Feature {
     fn selection_ranges(&self, _cx: &Ctx, _at: usize) -> Vec<(usize, usize)> {
         Vec::new()
     }
+
+    /// The parts of the document that are text of another language.
+    fn injections(&self, _cx: &Ctx) -> Vec<crate::editor::injection::Injected> {
+        Vec::new()
+    }
 }
