@@ -229,4 +229,16 @@ pub trait Feature {
     fn injections(&self, _cx: &Ctx) -> Vec<crate::editor::injection::Injected> {
         Vec::new()
     }
+
+    /// The edits that format the document, or the lines `_range` touches, for an editor that indents by
+    /// `_tab_size` columns, with spaces or with tabs.
+    fn format(
+        &self,
+        _cx: &Ctx,
+        _tab_size: u32,
+        _spaces: bool,
+        _range: Option<(usize, usize)>,
+    ) -> Result<Vec<crate::format::Edit>, crate::format::Unsettled> {
+        Ok(Vec::new())
+    }
 }

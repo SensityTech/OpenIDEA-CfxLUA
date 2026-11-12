@@ -1,6 +1,7 @@
 pub mod completion;
 pub mod definition;
 pub mod folding;
+pub mod formatting;
 pub mod highlights;
 pub mod hints;
 pub mod hover;
@@ -20,6 +21,7 @@ mod markers_tests;
 mod tests;
 
 use crate::feature::{Ctx, Feature, Intention, Problem};
+use crate::format;
 use crate::index::library;
 use crate::index::project::{Projects, Sight};
 use crate::inspect::{self, Inspection};
@@ -296,6 +298,19 @@ impl Feature for EditorFeature {
 
     fn injections(&self, cx: &Ctx) -> Vec<injection::Injected> {
         if Self::applies(cx) { injection::injections(&cx.doc.src) } else { Vec::new() }
+    }
+
+    fn format(
+        &self,
+        cx: &Ctx,
+        tab_size: u32,
+        spaces: bool,
+        range: Option<(usize, usize)>,
+    ) -> Result<Vec<format::Edit>, format::Unsettled> {
+        if !Self::applies(cx) {
+            return Ok(Vec::new());
+        }
+        format::format(&cx.doc.src, &formatting::style(cx.settings, tab_size, spaces), range)
     }
 
     fn highlights(&self, cx: &Ctx, at: usize) -> Vec<highlights::Highlight> {

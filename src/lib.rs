@@ -36,7 +36,7 @@ use natives::Natives;
 use openidea_plugin::hover::{Hover, HoverProvider};
 use openidea_plugin::inlay_hints::{InlayHint, InlayHints, InlayKind};
 use openidea_plugin::language_features::{
-    DocumentSymbol, FoldRange, LanguageFeatures, Parameter, ParameterLabel, Signature, SignatureHelp,
+    DocumentSymbol, FoldRange, FormatOptions, LanguageFeatures, Parameter, ParameterLabel, Signature, SignatureHelp,
 };
 use openidea_plugin::providers::{CodeAction, CompletionItem, CompletionKind, Document, LineMarker, Providers};
 use openidea_plugin::semantic_tokens::{SemanticToken, SemanticTokens, TokenKind, TokenModifier};
@@ -1081,6 +1081,38 @@ impl SemanticTokens for DevKit {
 }
 
 impl LanguageFeatures for DevKit {
+    /// Reformat Code, once the plugin is chosen as the formatter of the language: only the tree is read. What
+    /// is not formatted is said: an empty answer reads in the IDE as a file that is formatted already.
+    fn format(&mut self, d: &Document, range: Option<Range>, options: FormatOptions) -> Result<Vec<TextEdit>, Error> {
+        let _timed = Timed::start("format", d);
+        if d.text.len() > MAX_INDEXED {
+            return Err(Error::Failed(format!("CfxLua does not format a file over {} KB", MAX_INDEXED >> 10)));
+        }
+        let edits = |cx: &Ctx, features: &[Box<dyn Feature>]| {
+            let range = range.map(|range| (cx.doc.offset(range.start), cx.doc.offset(range.end)));
+            let mut out = Vec::new();
+            for feature in features {
+                let Ok(edits) = feature.format(cx, options.tab_size, options.insert_spaces, range) else {
+                    return Err(Error::Failed("CfxLua could not lay this file out: nothing is formatted".to_owned()));
+                };
+                out.extend(edits.into_iter().map(|(start, end, text)| cx.doc.edit(start, end, text)));
+            }
+            Ok(out)
+        };
+        if let Some(ws) = self.prepare(d) {
+            return self.with_ctx(ws, edits).unwrap_or_else(|| Ok(Vec::new()));
+        }
+        if !self.settings.enabled() {
+            return Err(Error::Failed("CfxLua is turned off in the settings of this project".to_owned()));
+        }
+        // A declaration file is not read as a document of the project: its tree is all the formatter needs.
+        self.settings.reset();
+        let ws = self.workspace_for(&d.path);
+        let doc = Doc::new(&self.workspaces[ws], &d.path, &d.language, d.version, &d.text);
+        let cx = Ctx { doc: &doc, ws: &self.workspaces[ws], settings: &self.settings, natives: &self.natives };
+        edits(&cx, &self.features)
+    }
+
     /// Asked at every keystroke while the arguments of a call are typed: the document is not indexed first.
     fn signature_help(&mut self, d: &Document, at: Position) -> Option<SignatureHelp> {
         let _timed = Timed::start("signature help", d);
@@ -1695,6 +1727,57 @@ mod tests {
             grown.iter().map(|r| (r.start.line, r.start.character, r.end.line, r.end.character)).collect();
         assert_eq!(spans, [(2, 6, 2, 10), (2, 5, 2, 11), (2, 0, 2, 11), (0, 0, 3, 0)], "the name, the call, the file");
         assert!(kit.stale.is_some(), "it reads the document alone, which is not indexed for it");
+    }
+
+    #[test]
+    fn reformat_code_rewrites_the_white_space_of_the_document() {
+        let host = openidea_plugin::mock::MockHost::install();
+        let mut kit = shop_resource(&host);
+        // The byte a position stands at, its column counted in UTF-16 units as the IDE counts it.
+        fn byte(text: &str, at: Position) -> usize {
+            let start: usize = text.split_inclusive('\n').take(at.line as usize).map(str::len).sum();
+            let mut units = 0;
+            let within = text[start..].char_indices().find(|(_, character)| {
+                let here = units;
+                units += character.len_utf16() as u32;
+                here >= at.character
+            });
+            start + within.map_or(text.len() - start, |(at, _)| at)
+        }
+        fn applied(text: &str, edits: &[TextEdit]) -> String {
+            let mut text = text.to_owned();
+            for edit in edits.iter().rev() {
+                let (start, end) = (byte(&text, edit.range.start), byte(&text, edit.range.end));
+                text.replace_range(start..end, &edit.text);
+            }
+            text
+        }
+        let spaces = FormatOptions { tab_size: 2, insert_spaces: true };
+        let typed = lua(SHOP_CLIENT, 2, "local a=1;\nif a then print( a ) end\n");
+        let edits = kit.format(&typed, None, spaces.clone()).expect("the edits");
+        assert_eq!(
+            applied(&typed.text, &edits),
+            "local a = 1\nif a then\n  print(a)\nend\n",
+            "indented as the editor indents"
+        );
+        assert!(edits.windows(2).all(|pair| pair[0].range.end <= pair[1].range.start), "in the order of the text");
+        let accents = lua(SHOP_CLIENT, 3, "local s='é😀';print( s,'à' ) -- né\n");
+        let edits = kit.format(&accents, None, spaces.clone()).expect("the edits");
+        assert_eq!(applied(&accents.text, &edits), "local s = 'é😀'\nprint(s, 'à') -- né\n", "columns in UTF-16 units");
+        let declarations = lua(SHOP_CLIENT, 4, "---@meta\nlocal a=1\n");
+        let edits = kit.format(&declarations, None, spaces.clone()).expect("the edits");
+        assert_eq!(applied(&declarations.text, &edits), "---@meta\nlocal a = 1\n", "a declaration file as well");
+        let big = lua(SHOP_CLIENT, 5, &"local a=1\n".repeat(MAX_INDEXED / 10 + 1));
+        assert!(kit.format(&big, None, spaces).is_err(), "a file that is not formatted says so");
+        let typed = lua(SHOP_CLIENT, 6, &typed.text);
+        kit.format(&typed, None, FormatOptions { tab_size: 2, insert_spaces: true }).expect("the edits");
+        assert!(kit.stale.is_some(), "only the tree is read: the document is not indexed for it");
+        let line = Range { start: Position::new(1, 0), end: Position::new(1, 3) };
+        let tabs =
+            kit.format(&typed, Some(line), FormatOptions { tab_size: 4, insert_spaces: false }).expect("the edits");
+        assert!(tabs.iter().all(|edit| edit.range.start.line == 1), "the selected line alone");
+        assert!(tabs.iter().any(|edit| edit.text == "\n\t"), "{tabs:?}");
+        assert!(include_str!("../plugin.toml").contains("\"formatting\""), "the manifest declares the provider");
     }
 
     #[test]

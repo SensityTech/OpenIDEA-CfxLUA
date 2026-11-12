@@ -153,6 +153,75 @@
       "title": "Type safety: name that nothing declares",
       "default": false
     },
+    "format.keepSimpleBlocksInOneLine": {
+      "type": "boolean",
+      "title": "Formatter: keep a block that holds one statement on one line",
+      "description": "Reformat Code writes the body of an if, a loop or a function on its own lines. With this option a block with a single statement that is written on one line stays there: if ok then return end. The formatter runs once the plugin is chosen for lua in Settings, Languages & Frameworks, Plugin Formatters.",
+      "default": false
+    },
+    "format.removeSemicolons": {
+      "type": "boolean",
+      "title": "Formatter: remove the semicolons no statement needs",
+      "description": "A semicolon that separates the fields of a table stays, and so does the one before a statement that starts with a parenthesis.",
+      "default": true
+    },
+    "format.spaceAroundAssignment": {
+      "type": "boolean",
+      "title": "Formatter: space around = and the compound assignments",
+      "default": true
+    },
+    "format.spaceAroundBinaryOperator": {
+      "type": "boolean",
+      "title": "Formatter: space around binary operators",
+      "default": true
+    },
+    "format.spaceBeforeComma": {
+      "type": "boolean",
+      "title": "Formatter: space before a comma",
+      "default": false
+    },
+    "format.spaceAfterComma": {
+      "type": "boolean",
+      "title": "Formatter: space after a comma",
+      "default": true
+    },
+    "format.spaceInsideInlineTable": {
+      "type": "boolean",
+      "title": "Formatter: space inside the braces of a table",
+      "default": true
+    },
+    "format.spaceAfterTableFieldSep": {
+      "type": "boolean",
+      "title": "Formatter: space after the separator of two table fields",
+      "default": true
+    },
+    "format.alignParameters": {
+      "type": "boolean",
+      "title": "Formatter: align the parameters written on several lines",
+      "default": true
+    },
+    "format.alignArguments": {
+      "type": "boolean",
+      "title": "Formatter: align the arguments written on several lines",
+      "description": "Off, an argument that starts a line takes a continuation indent, twice the indent of the editor.",
+      "default": false
+    },
+    "format.alignConsecutiveAssignments": {
+      "type": "boolean",
+      "title": "Formatter: align the = of assignments that follow one another",
+      "default": false
+    },
+    "format.alignTableFieldAssign": {
+      "type": "boolean",
+      "title": "Formatter: align the = of the fields of a table",
+      "default": false
+    },
+    "format.continuationIndent": {
+      "type": "integer",
+      "title": "Formatter: indent of a line that continues the one before it, in columns",
+      "description": "An argument, an operand or a chained call that starts a line. 0 takes twice the indent of the editor, as IntelliJ does: 8 columns for an indent of 4.",
+      "default": 0
+    },
     "natives.autoUpdate": {
       "type": "boolean",
       "title": "Check for new natives automatically",

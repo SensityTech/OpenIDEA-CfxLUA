@@ -30,6 +30,7 @@ kinds = [
     "line-markers",
     "code-actions",
     "semantic-tokens",
+    "formatting",
     "folding",
     "document-symbols",
     "document-highlights",
