@@ -104,6 +104,17 @@ pub struct Simple;
 
 impl Render for Simple {}
 
+/// Whether a class is the one made for a variable, named after it: `[local a]`, `[global a]`.
+pub fn made_for_variable(class: &Class) -> bool {
+    class.flags & (super::ANONYMOUS | super::GLOBAL) != 0 && class.flags & ANONYMOUS_TABLE == 0
+}
+
+/// The type without the classes made for a variable, which say nothing to a reader: `table|[local a]` is
+/// `table`.
+pub fn plain(ty: &Ty) -> Ty {
+    ty.substitute(&mut |class| made_for_variable(class).then_some(Ty::Unknown))
+}
+
 /// The display name of a type; what a function of the code returns is left as `any`.
 pub fn display(ty: &Ty) -> String {
     Simple.render(ty)

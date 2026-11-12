@@ -19,7 +19,7 @@ mod engine_tests;
 #[cfg(test)]
 mod tests;
 
-pub use render::{Render, Simple, display};
+pub use render::{Render, Simple, display, made_for_variable, plain};
 pub use subst::{Bindings, analyze};
 
 /// The type made for a local variable that has no other.

@@ -9,7 +9,7 @@ use crate::lua::tree::{Element, N, Node};
 use crate::ty::context::{Cx, Psi};
 use crate::ty::declarations;
 use crate::ty::doc::Reader;
-use crate::ty::{ANONYMOUS, ANONYMOUS_TABLE, Class, FileId, Function, GLOBAL, Param, Ret, Signature, Ty, display, psi};
+use crate::ty::{FileId, Function, Param, Ret, Signature, Ty, display, made_for_variable, plain, psi};
 
 /// A declaration longer than this is written with one parameter per line.
 const MAX_LINE: usize = 90;
@@ -59,17 +59,6 @@ pub fn document(cx: &Cx, target: &Target) -> Option<String> {
         markdown.push('…');
     }
     (!markdown.is_empty()).then_some(markdown)
-}
-
-/// Whether a class is the one made for a variable, named after it: `[local a]`, `[global a]`.
-fn made_for_variable(class: &Class) -> bool {
-    class.flags & (ANONYMOUS | GLOBAL) != 0 && class.flags & ANONYMOUS_TABLE == 0
-}
-
-/// The type without the classes made for a variable, which say nothing to a reader: `table|[local a]` is
-/// `table`.
-fn plain(ty: &Ty) -> Ty {
-    ty.substitute(&mut |class| made_for_variable(class).then_some(Ty::Unknown))
 }
 
 /// The type with what its functions return, where they do not say it, read in their bodies: `depth`
