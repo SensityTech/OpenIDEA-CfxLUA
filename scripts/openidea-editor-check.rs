@@ -1,10 +1,11 @@
 // Asks a plugin package what the editor would receive for a file, through OpenIDEA's own plugin host and without
-// the editor: semantic tokens, folds, structure, the occurrences of a word and what hovering it shows, what
-// hovering names spread over the file costs, then what the editor asks after an edit, at its own delays. The calls
-// run under the host's limits for editor calls, so a provider that is too slow answers nothing here as it would in
-// the IDE. The host then stops waiting at its deadline and the time printed is its wait, not what the provider
-// costs: `--patient` lifts the deadline to show that cost. An entry of the structure that its parent does not hold
-// fails the check: the IDE would list it at the top.
+// the editor: semantic tokens, folds, structure, the occurrences of a word, what hovering it shows, where it is
+// declared and the parameters shown after its parenthesis, what those questions cost all over the file, the hints
+// of each screen of it, then what the editor asks after an edit, at its own delays. The calls run under the host's
+// limits for editor calls, so a provider that is too slow answers nothing here as it would in the IDE. The host
+// then stops waiting at its deadline and the time printed is its wait, not what the provider costs: `--patient`
+// lifts the deadline to show that cost. An entry of the structure that its parent does not hold fails the check:
+// the IDE would list it at the top.
 // Without `--project`, no project is open in this host and the plugin loads no native catalog: natives come back as
 // unknown globals and completion lists none. With it, the host opens that folder as a project and events are posted
 // until the plugin has read it, as they are while a user moves between files: the file is then asked about as one
@@ -33,8 +34,10 @@ const USAGE: &str = "usage: cfxlua_editor_check [--patient] [--log] [--project <
 const SHOWN: usize = 12;
 /// More event batches than any project needs: a scan that never ends stops the check instead of hanging it.
 const MAX_BATCHES: usize = 5_000;
-/// How many names of the file are hovered.
-const HOVERED: usize = 200;
+/// How many places of the file one question is asked at.
+const SAMPLED: usize = 200;
+/// How many lines the editor asks the hints of at once.
+const SCREEN: u32 = 60;
 const KEYWORDS: [&str; 22] = [
     "and", "break", "do", "else", "elseif", "end", "false", "for", "function", "goto", "if", "in", "local", "nil",
     "not", "or", "repeat", "return", "then", "true", "until", "while",
@@ -152,6 +155,41 @@ fn names(lines: &[&str]) -> Vec<Pos> {
         }
     }
     out
+}
+
+/// Where the arguments of the calls of the text start: after each parenthesis that opens.
+fn calls(lines: &[&str]) -> Vec<Pos> {
+    let mut out = Vec::new();
+    for (line, text) in lines.iter().enumerate() {
+        let mut column = 0;
+        for character in text.chars() {
+            column += character.len_utf16() as u32;
+            if character == '(' {
+                out.push(Pos::new(line as u32, column));
+            }
+        }
+    }
+    out
+}
+
+/// Asks `call` at places spread over `places`: how many answer, how many come after the deadline of the host,
+/// which shows nothing of them, the slowest, and the biggest answer.
+fn sweep(what: &str, unit: &str, places: &[Pos], deadline: Duration, call: impl Fn(Pos) -> Option<usize>) {
+    let (mut count, mut answered, mut late, mut most) = (0, 0, 0, 0);
+    let (mut slowest, mut total) = (Duration::ZERO, Duration::ZERO);
+    for at in places.iter().step_by((places.len() / SAMPLED).max(1)) {
+        let start = Instant::now();
+        let size = call(*at);
+        let took = start.elapsed();
+        count += 1;
+        answered += usize::from(size.is_some());
+        late += usize::from(took >= deadline);
+        most = most.max(size.unwrap_or(0));
+        slowest = slowest.max(took);
+        total += took;
+    }
+    let timed = format!("slowest {slowest:?}, {total:?} in all, {most} {unit} at most");
+    println!("{what}: {count} asked, {answered} answered, {late} late ({timed})");
 }
 
 /// Starts the plugin on the open project and posts events until its first scan ends: it reads a slice per call.
@@ -279,27 +317,51 @@ fn check(
         for line in hovers.iter().flat_map(|hover| hover.markdown.lines()) {
             println!("    {line}");
         }
+        let places = |found: Vec<ide_plugin::Location>| -> Vec<String> {
+            let place = |l: &ide_plugin::Location| {
+                let file = l.path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+                format!("{file}:{}:{}", l.range.start.line + 1, l.range.start.col + 1)
+            };
+            found.iter().map(place).collect()
+        };
+        println!("definition of `{word}`: {}", places(host.provide_definition(&doc, at)).join(", "));
+        println!("type of `{word}`: {}", places(host.language_type_definition(&doc, at)).join(", "));
+        if let Some(open) = word.find('(') {
+            let inside = Pos::new(at.line, at.col + word[..=open].encode_utf16().count() as u32);
+            let start = Instant::now();
+            let help = host.language_signature_help(&doc, inside);
+            let labels: Vec<&str> = help.iter().flat_map(|help| &help.signatures).map(|s| s.label.as_str()).collect();
+            let active = help.as_ref().map_or((0, 0), |help| (help.active_signature, help.active_parameter));
+            let took = start.elapsed();
+            println!("signatures in `{word}`: {} ({took:?}), active {active:?}: {}", labels.len(), labels.join(" | "));
+        }
     }
 
-    // A hover past the deadline shows nothing: the host stops waiting for it.
-    let asked = names(&lines);
-    let (mut count, mut answered, mut late, mut longest) = (0, 0, 0, 0);
-    let (mut slowest, mut total) = (Duration::ZERO, Duration::ZERO);
-    for at in asked.iter().step_by((asked.len() / HOVERED).max(1)) {
-        let start = Instant::now();
-        let hovers = host.provide_hover(&doc, *at);
-        let took = start.elapsed();
-        count += 1;
-        answered += usize::from(!hovers.is_empty());
-        late += usize::from(took >= deadline);
-        longest = longest.max(hovers.iter().map(|hover| hover.markdown.len()).sum::<usize>());
-        slowest = slowest.max(took);
-        total += took;
-    }
-    println!(
-        "hovers: {count} names asked, {answered} answered, {late} late (slowest {slowest:?}, {total:?} in all, \
-         {longest} bytes at most)"
-    );
+    sweep("hovers", "bytes", &names(&lines), deadline, |at| {
+        let hovers = host.provide_hover(&doc, at);
+        (!hovers.is_empty()).then(|| hovers.iter().map(|hover| hover.markdown.len()).sum())
+    });
+    sweep("definitions", "places", &names(&lines), deadline, |at| {
+        Some(host.provide_definition(&doc, at).len()).filter(|found| *found > 0)
+    });
+    sweep("types", "places", &names(&lines), deadline, |at| {
+        Some(host.language_type_definition(&doc, at).len()).filter(|found| *found > 0)
+    });
+    sweep("signatures", "signatures", &calls(&lines), deadline, |at| {
+        host.language_signature_help(&doc, at).map(|help| help.signatures.len())
+    });
+    let screens: Vec<Pos> = (0..lines.len() as u32).step_by(SCREEN as usize).map(|line| Pos::new(line, 0)).collect();
+    let screen = |from: Pos| Range::new(from, Pos::new(from.line + SCREEN, 0));
+    let first: Vec<String> = host
+        .provide_inlay_hints(&doc, screen(Pos::new(0, 0)))
+        .iter()
+        .take(SHOWN)
+        .map(|hint| format!("{}:{} {}", hint.position.line + 1, hint.position.col + 1, hint.label))
+        .collect();
+    println!("hints of the first screen: {}", first.join(", "));
+    sweep("hints", "hints", &screens, deadline, |from| {
+        Some(host.provide_inlay_hints(&doc, screen(from)).len()).filter(|found| *found > 0)
+    });
 
     // What the editor asks after an edit, at the delays of OpenIDEA 0.1.40: completion while typing, occurrences
     // 300 ms after the edit, line markers at 400, code actions at 500, semantic tokens at 600. Each call finds the
