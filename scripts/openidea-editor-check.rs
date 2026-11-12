@@ -1,9 +1,10 @@
 // Asks a plugin package what the editor would receive for a file, through OpenIDEA's own plugin host and without
-// the editor: semantic tokens, folds, structure and the occurrences of a word, then what the editor asks after an
-// edit, at its own delays. The calls run under the host's limits for editor calls, so a provider that is too slow
-// answers nothing here as it would in the IDE. The host then stops waiting at its deadline and the time printed is
-// its wait, not what the provider costs: `--patient` lifts the deadline to show that cost. An entry of the structure
-// that its parent does not hold fails the check: the IDE would list it at the top.
+// the editor: semantic tokens, folds, structure, the occurrences of a word and what hovering it shows, what
+// hovering names spread over the file costs, then what the editor asks after an edit, at its own delays. The calls
+// run under the host's limits for editor calls, so a provider that is too slow answers nothing here as it would in
+// the IDE. The host then stops waiting at its deadline and the time printed is its wait, not what the provider
+// costs: `--patient` lifts the deadline to show that cost. An entry of the structure that its parent does not hold
+// fails the check: the IDE would list it at the top.
 // Without `--project`, no project is open in this host and the plugin loads no native catalog: natives come back as
 // unknown globals and completion lists none. With it, the host opens that folder as a project and events are posted
 // until the plugin has read it, as they are while a user moves between files: the file is then asked about as one
@@ -32,6 +33,12 @@ const USAGE: &str = "usage: cfxlua_editor_check [--patient] [--log] [--project <
 const SHOWN: usize = 12;
 /// More event batches than any project needs: a scan that never ends stops the check instead of hanging it.
 const MAX_BATCHES: usize = 5_000;
+/// How many names of the file are hovered.
+const HOVERED: usize = 200;
+const KEYWORDS: [&str; 22] = [
+    "and", "break", "do", "else", "elseif", "end", "false", "for", "function", "goto", "if", "in", "local", "nil",
+    "not", "or", "repeat", "return", "then", "true", "until", "while",
+];
 
 /// One open project, with no editor on it: what the plugin reads comes from the disk.
 struct Opened(PathBuf);
@@ -125,6 +132,28 @@ fn slice(lines: &[&str], line: u32, from: u32, to: u32) -> String {
     String::from_utf16_lossy(&units[from..to.max(from)])
 }
 
+/// Where the words of the text start, keywords and numbers left out, in comments and strings too: a mouse
+/// stops anywhere.
+fn names(lines: &[&str]) -> Vec<Pos> {
+    let mut out = Vec::new();
+    for (line, text) in lines.iter().enumerate() {
+        let bytes = text.as_bytes();
+        let mut at = 0;
+        while at < bytes.len() {
+            let start = at;
+            while at < bytes.len() && (bytes[at].is_ascii_alphanumeric() || bytes[at] == b'_') {
+                at += 1;
+            }
+            if at == start {
+                at += 1;
+            } else if !bytes[start].is_ascii_digit() && !KEYWORDS.contains(&&text[start..at]) {
+                out.push(Pos::new(line as u32, text[..start].encode_utf16().count() as u32));
+            }
+        }
+    }
+    out
+}
+
 /// Starts the plugin on the open project and posts events until its first scan ends: it reads a slice per call.
 fn read_project(host: &PluginHost, plugin: &str, scan: &Scan) -> Result<(), String> {
     let start = Instant::now();
@@ -156,6 +185,7 @@ fn check(
 ) -> Result<(), String> {
     let scan = Arc::new(Scan::default());
     let seen = scan.clone();
+    let deadline = limits.edit_soft;
     let sink = move |_: Option<&str>, event: PluginEvent| match event {
         PluginEvent::TaskStarted { .. } => {
             seen.slices.fetch_add(1, Ordering::Relaxed);
@@ -243,7 +273,33 @@ fn check(
             .map(|h| format!("{}:{} {}", h.range.start.line + 1, h.range.start.col + 1, h.kind))
             .collect();
         println!("occurrences of `{word}`: {} ({:?}): {}", highlights.len(), start.elapsed(), listed.join(", "));
+        let start = Instant::now();
+        let hovers = host.provide_hover(&doc, at);
+        println!("hover on `{word}`: {} ({:?})", hovers.len(), start.elapsed());
+        for line in hovers.iter().flat_map(|hover| hover.markdown.lines()) {
+            println!("    {line}");
+        }
     }
+
+    // A hover past the deadline shows nothing: the host stops waiting for it.
+    let asked = names(&lines);
+    let (mut count, mut answered, mut late, mut longest) = (0, 0, 0, 0);
+    let (mut slowest, mut total) = (Duration::ZERO, Duration::ZERO);
+    for at in asked.iter().step_by((asked.len() / HOVERED).max(1)) {
+        let start = Instant::now();
+        let hovers = host.provide_hover(&doc, *at);
+        let took = start.elapsed();
+        count += 1;
+        answered += usize::from(!hovers.is_empty());
+        late += usize::from(took >= deadline);
+        longest = longest.max(hovers.iter().map(|hover| hover.markdown.len()).sum::<usize>());
+        slowest = slowest.max(took);
+        total += took;
+    }
+    println!(
+        "hovers: {count} names asked, {answered} answered, {late} late (slowest {slowest:?}, {total:?} in all, \
+         {longest} bytes at most)"
+    );
 
     // What the editor asks after an edit, at the delays of OpenIDEA 0.1.40: completion while typing, occurrences
     // 300 ms after the edit, line markers at 400, code actions at 500, semantic tokens at 600. Each call finds the
