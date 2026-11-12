@@ -118,6 +118,10 @@ impl Files for Reading<'_> {
         Some(src)
     }
 
+    fn path(&self, file: FileId) -> Option<String> {
+        self.project.ids.paths.get(file as usize).cloned()
+    }
+
     /// `require('a.b')` loads `a/b.lua` or `a/b/init.lua`: of the resource of the asking file, then of the
     /// project, then the first file of that name anywhere.
     fn required(&self, path: &str) -> Option<FileId> {

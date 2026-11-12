@@ -166,6 +166,11 @@ pub trait Feature {
         Vec::new()
     }
 
+    /// Where the type of what stands at `at` is declared.
+    fn type_definition(&self, _cx: &Ctx, _at: usize) -> Vec<Location> {
+        Vec::new()
+    }
+
     fn hover(&self, _cx: &Ctx, _at: usize) -> Option<crate::editor::hover::Hover> {
         None
     }

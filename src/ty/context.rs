@@ -46,6 +46,11 @@ pub trait Files {
     fn required(&self, _path: &str) -> Option<FileId> {
         None
     }
+
+    /// Where the file is, as the IDE names it.
+    fn path(&self, _file: FileId) -> Option<String> {
+        None
+    }
 }
 
 /// The settings of the JetBrains plugin the engine depends on, with their defaults.

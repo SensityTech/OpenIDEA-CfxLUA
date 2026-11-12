@@ -1,4 +1,5 @@
 pub mod completion;
+pub mod definition;
 pub mod folding;
 pub mod highlights;
 pub mod hover;
@@ -17,6 +18,7 @@ use crate::lua::token::T;
 use crate::lua::tree::N;
 use crate::project::FileKind;
 use crate::workspace::Workspace;
+use openidea_plugin::Location;
 use openidea_plugin::providers::CompletionItem;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -117,6 +119,27 @@ impl Feature for EditorFeature {
     /// indexing the document at every word: what it declares in sight is read in its tree.
     fn completes_from_index(&self, cx: &Ctx, at: usize) -> bool {
         matches!(Self::completed_place(cx, at), Some(completion::Place::Member(_)))
+    }
+
+    fn definition(&self, cx: &Ctx, at: usize) -> Vec<Location> {
+        if !Self::applies(cx) || cx.doc.kind != FileKind::Lua {
+            return Vec::new();
+        }
+        let src = &cx.doc.src;
+        let found =
+            self.projects.ask(cx.ws, &cx.doc.path, src, |engine, file| definition::definition(engine, file, src, at));
+        found.unwrap_or_default()
+    }
+
+    fn type_definition(&self, cx: &Ctx, at: usize) -> Vec<Location> {
+        if !Self::applies(cx) || cx.doc.kind != FileKind::Lua {
+            return Vec::new();
+        }
+        let src = &cx.doc.src;
+        let found = self
+            .projects
+            .ask(cx.ws, &cx.doc.path, src, |engine, file| definition::type_definition(engine, file, src, at));
+        found.unwrap_or_default()
     }
 
     fn hover(&self, cx: &Ctx, at: usize) -> Option<hover::Hover> {

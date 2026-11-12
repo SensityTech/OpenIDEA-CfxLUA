@@ -887,7 +887,14 @@ impl Providers for DevKit {
                 features.iter().flat_map(|f| f.definition(cx, at)).collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        found.into_iter().map(|l| self.native_location(ws, l)).collect()
+        // Two features may lead to the same place: a state bag key is also a field of its file.
+        let mut once: Vec<Location> = Vec::with_capacity(found.len());
+        for location in found {
+            if !once.contains(&location) {
+                once.push(location);
+            }
+        }
+        once.into_iter().map(|l| self.native_location(ws, l)).collect()
     }
 
     fn line_markers(&mut self, d: &Document) -> Vec<LineMarker> {
@@ -1076,6 +1083,16 @@ impl LanguageFeatures for DevKit {
             active_signature: help.active_signature as u32,
             active_parameter: help.active_parameter as u32,
         })
+    }
+
+    fn type_definition(&mut self, d: &Document, at: Position) -> Vec<Location> {
+        let _timed = Timed::start("type definition", d);
+        let Some(ws) = self.prepare_indexed(d) else { return Vec::new() };
+        let found = self.with_ctx(ws, |cx, features| {
+            let at = cx.doc.offset(at);
+            features.iter().flat_map(|f| f.type_definition(cx, at)).collect::<Vec<_>>()
+        });
+        found.unwrap_or_default().into_iter().map(|l| self.native_location(ws, l)).collect()
     }
 
     fn folding(&mut self, d: &Document) -> Vec<FoldRange> {
