@@ -476,6 +476,54 @@ end
     assert!(!types(&project, "d").contains(&"SynthPoint".to_owned()), "{:?}", types(&project, "d"));
 }
 
+/// Functions that each return what each of the others returns, and the last one a number.
+fn circle_of_functions(count: usize) -> String {
+    let mut text = String::new();
+    for rank in 0..count {
+        text.push_str(&format!("function step{rank}(to)\n"));
+        for other in (0..count).filter(|other| *other != rank) {
+            text.push_str(&format!("    if to == {other} then return step{other}(to) end\n"));
+        }
+        text.push_str(if rank + 1 == count { "    return 7\nend\n" } else { "end\n" });
+    }
+    text.push_str("local reached = step0(1)\nlocal again = step5(1)\n");
+    text
+}
+
+#[test]
+fn functions_that_call_one_another_in_a_circle_are_each_read_once() {
+    // An answer the circle cuts short is kept while the circle is walked: there are more paths through it than
+    // can be walked.
+    let text = circle_of_functions(12);
+    let project = Project::new(&[("main.lua", &text)]);
+    assert_eq!(project.type_of("reached"), "number");
+    assert_eq!(project.type_of("again"), "number", "asked from elsewhere, the answer is complete");
+}
+
+#[test]
+fn fields_given_to_one_another_across_files_are_each_read_once() {
+    // Each file gives each field of a global another field, and one of them a number: every assignment of a
+    // field leads to every assignment of another. An answer of the circle is kept until the first question that
+    // cut it is answered, not only until the last one is.
+    let (fields, count) = (6, 6);
+    let mut files: Vec<(String, String)> = vec![("globals.lua".to_owned(), "Shared = {}\n".to_owned())];
+    for file in 0..count {
+        let mut text = String::new();
+        for field in 0..fields {
+            let given = if file == 0 && field + 1 == fields {
+                "7".to_owned()
+            } else {
+                format!("Shared.f{}", (field + file + 1) % fields)
+            };
+            text.push_str(&format!("Shared.f{field} = {given}\n"));
+        }
+        files.push((format!("file{file}.lua"), text));
+    }
+    files.push(("main.lua".to_owned(), "local reached = Shared.f0\n".to_owned()));
+    let files: Vec<(&str, &str)> = files.iter().map(|(name, text)| (name.as_str(), text.as_str())).collect();
+    assert_eq!(Project::new(&files).type_of("reached"), "number");
+}
+
 #[test]
 fn what_has_no_type_has_no_member() {
     assert!(

@@ -73,6 +73,13 @@ impl Default for Options {
 
 const MAX_DEPTH: u32 = 96;
 
+/// The rank of a guarded question among those opened so far: the questions that are open at one time have
+/// growing ranks, and the youngest is closed first.
+type Serial = u32;
+
+/// What cuts an answer when no open question does: such an answer is never kept.
+const UNBOUND: Serial = Serial::MAX;
+
 /// What an answer is kept for: the type of a node, or what the body of a function returns.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 enum Asked {
@@ -83,6 +90,17 @@ enum Asked {
 struct Guard {
     elem: Elem,
     global: Option<Rc<str>>,
+    serial: Serial,
+}
+
+type Key = (Asked, i32, bool);
+
+/// An answer that questions still open cut short, and those questions, the oldest first: it stands as long
+/// as that one is open, so that each answer of a circle is inferred once while the circle is walked. Once it
+/// is closed the answer may be more complete, and is inferred again.
+struct Provisional {
+    ty: Ty,
+    cut_by: Rc<[Serial]>,
 }
 
 /// One question asked to the engine and what was inferred to answer it (`SearchContext`).
@@ -93,10 +111,13 @@ pub struct Cx<'a> {
     value: Cell<i32>,
     stub: Cell<bool>,
     depth: Cell<u32>,
-    cuts: Cell<u32>,
+    serials: Cell<Serial>,
+    /// The open questions that cut the answer being inferred, each one once.
+    cut_by: RefCell<Vec<Serial>>,
     guards: RefCell<Vec<Guard>>,
-    busy: RefCell<Vec<Elem>>,
-    cache: RefCell<HashMap<(Asked, i32, bool), Ty>>,
+    busy: RefCell<Vec<(Elem, Serial)>>,
+    cache: RefCell<HashMap<Key, Ty>>,
+    provisional: RefCell<HashMap<Key, Provisional>>,
     sources: RefCell<HashMap<FileId, Option<Rc<Source>>>>,
     home: Option<(FileId, &'a Source)>,
 }
@@ -110,10 +131,12 @@ impl<'a> Cx<'a> {
             value: Cell::new(-1),
             stub: Cell::new(false),
             depth: Cell::new(0),
-            cuts: Cell::new(0),
+            serials: Cell::new(0),
+            cut_by: RefCell::default(),
             guards: RefCell::default(),
             busy: RefCell::default(),
             cache: RefCell::default(),
+            provisional: RefCell::default(),
             sources: RefCell::default(),
             home: None,
         }
@@ -191,39 +214,81 @@ impl<'a> Cx<'a> {
         self.kept(Asked::Returned(func), infer)
     }
 
-    /// An answer that a cycle or the depth limit cut short is not kept: asked from elsewhere, it may be
-    /// complete.
+    /// An answer that a cycle or the depth limit cut short is not kept for good: asked from elsewhere, it may
+    /// be complete. It is kept while the oldest question that cut it is open, so that a cycle is walked once
+    /// and not once per path that leads into it.
     fn kept(&self, asked: Asked, infer: impl FnOnce() -> Ty) -> Ty {
         let key = (asked, self.value.get(), self.stub.get());
         if let Some(known) = self.cache.borrow().get(&key) {
             return known.clone();
         }
+        let standing = self.provisional.borrow().get(&key).map(|kept| (kept.ty.clone(), kept.cut_by.clone()));
+        if let Some((ty, cut_by)) = standing {
+            if cut_by.first().is_some_and(|oldest| self.is_open(*oldest)) {
+                cut_by.iter().for_each(|serial| self.cut(*serial));
+                return ty;
+            }
+            self.provisional.borrow_mut().remove(&key);
+        }
         if self.depth.get() >= MAX_DEPTH {
-            self.cut();
+            self.cut(self.youngest().unwrap_or(UNBOUND));
             return Ty::Unknown;
         }
-        let cuts = self.cuts.get();
+        let first = self.serials.get();
+        let outer = std::mem::take(&mut *self.cut_by.borrow_mut());
         self.depth.set(self.depth.get() + 1);
         let ty = infer();
         self.depth.set(self.depth.get() - 1);
-        if self.cuts.get() == cuts {
+        let mut cut_by = std::mem::replace(&mut *self.cut_by.borrow_mut(), outer);
+        // The questions opened to infer this answer are closed: it holds what they found.
+        cut_by.retain(|serial| *serial < first || *serial == UNBOUND);
+        if cut_by.is_empty() {
             self.cache.borrow_mut().insert(key, ty.clone());
+            return ty;
+        }
+        cut_by.sort_unstable();
+        cut_by.iter().for_each(|serial| self.cut(*serial));
+        if cut_by.last() != Some(&UNBOUND) {
+            self.provisional.borrow_mut().insert(key, Provisional { ty: ty.clone(), cut_by: cut_by.into() });
         }
         ty
     }
 
-    fn cut(&self) {
-        self.cuts.set(self.cuts.get() + 1);
+    fn open(&self) -> Serial {
+        let serial = self.serials.get();
+        self.serials.set(serial + 1);
+        serial
+    }
+
+    fn is_open(&self, serial: Serial) -> bool {
+        self.guards.borrow().iter().any(|guard| guard.serial == serial)
+            || self.busy.borrow().iter().any(|(_, open)| *open == serial)
+    }
+
+    /// The question that was opened last among those that are open.
+    fn youngest(&self) -> Option<Serial> {
+        let guarded = self.guards.borrow().last().map(|guard| guard.serial);
+        guarded.max(self.busy.borrow().last().map(|(_, serial)| *serial))
+    }
+
+    /// The answer being inferred is cut short by the open question `by`.
+    fn cut(&self, by: Serial) {
+        let mut cut_by = self.cut_by.borrow_mut();
+        if !cut_by.contains(&by) {
+            cut_by.push(by);
+        }
     }
 
     /// Runs `action` unless it is already running for `elem`, or for a global of the same name.
     pub fn guarded(&self, elem: Elem, global: Option<&str>, action: impl FnOnce() -> Ty) -> Ty {
-        let same = |guard: &Guard| guard.elem == elem || global.is_some() && guard.global.as_deref() == global;
-        if self.guards.borrow().iter().any(same) {
-            self.cut();
+        let same = |guard: &&Guard| guard.elem == elem || global.is_some() && guard.global.as_deref() == global;
+        let running = self.guards.borrow().iter().rev().find(same).map(|guard| guard.serial);
+        if let Some(running) = running {
+            self.cut(running);
             return Ty::Unknown;
         }
-        self.guards.borrow_mut().push(Guard { elem, global: global.map(Rc::from) });
+        let serial = self.open();
+        self.guards.borrow_mut().push(Guard { elem, global: global.map(Rc::from), serial });
         let ty = action();
         self.guards.borrow_mut().pop();
         ty
@@ -231,11 +296,13 @@ impl<'a> Cx<'a> {
 
     /// Runs `action` unless it is already running for `elem`.
     pub fn once(&self, elem: Elem, action: impl FnOnce() -> Ty) -> Option<Ty> {
-        if self.busy.borrow().contains(&elem) {
-            self.cut();
+        let running = self.busy.borrow().iter().rev().find(|(busy, _)| *busy == elem).map(|(_, serial)| *serial);
+        if let Some(running) = running {
+            self.cut(running);
             return None;
         }
-        self.busy.borrow_mut().push(elem);
+        let serial = self.open();
+        self.busy.borrow_mut().push((elem, serial));
         let ty = action();
         self.busy.borrow_mut().pop();
         Some(ty)
