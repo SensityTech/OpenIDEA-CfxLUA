@@ -4,7 +4,7 @@ use super::Listing;
 use crate::lua::Source;
 use crate::lua::doc::tags::Visibility;
 use crate::lua::lexer::Tok;
-use crate::lua::token::is_id_part;
+use crate::lua::token::is_identifier;
 use crate::lua::tree::N;
 use crate::ty::context::{Cx, Psi};
 use crate::ty::members::{self, Listed};
@@ -21,11 +21,6 @@ pub fn sign_before(src: &Source, at: usize) -> Option<usize> {
     }
     let named = src.toks[before].kind == Tok::Name && at <= src.toks[before].end;
     (named && before > 0 && sign(before - 1)).then(|| before - 1)
-}
-
-pub(super) fn is_identifier(name: &str) -> bool {
-    let mut bytes = name.bytes();
-    bytes.next().is_some_and(|first| is_id_part(first) && !first.is_ascii_digit()) && bytes.all(is_id_part)
 }
 
 /// The name of a class a member is shown with; a table or the type made for a variable has none worth it.

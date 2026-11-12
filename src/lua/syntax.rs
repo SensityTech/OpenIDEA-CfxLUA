@@ -150,6 +150,13 @@ impl Source {
         std::iter::once(inner).chain(inner.ancestors()).find(|node| node.is(N::DocComment)).map(Comment)
     }
 
+    /// The statement or the table field of `root()` that `comment` is bound to.
+    pub fn documented_by(&self, comment: Comment) -> Option<Node<'_>> {
+        let root = self.root();
+        let inside = root.tree().node_at(root.source(), comment.0.range().1.saturating_sub(1));
+        std::iter::once(inside).chain(inside.ancestors()).find(|node| self.comment_of(*node) == Some(comment))
+    }
+
     /// The declaration each name refers to, resolved once.
     pub fn scopes(&self) -> &Scopes {
         self.scopes.get_or_init(|| Scopes::new(self.root()))

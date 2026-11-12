@@ -2,12 +2,12 @@
 //! (`LocalAndGlobalCompletionProvider`), and the methods of the object of the method the caret is written in
 //! (`SuggestSelfMemberProvider`).
 
-use super::members::{Mode, context_class, is_identifier};
+use super::members::{Mode, context_class};
 use super::{CARET_NAME, Listing, expected, tables};
 use crate::lua::Source;
 use crate::lua::lexer::Tok;
 use crate::lua::scope::{DeclKind, Scopes};
-use crate::lua::token::{T, is_id_part};
+use crate::lua::token::{T, is_id_part, is_identifier};
 use crate::lua::tree::{N, Node};
 use crate::matching::{self, Match, Query};
 use crate::ty::context::Psi;

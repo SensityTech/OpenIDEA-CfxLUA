@@ -384,6 +384,12 @@ pub fn is_id_part(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
 
+/// Whether `name` can be written as a name of the language.
+pub fn is_identifier(name: &str) -> bool {
+    let mut bytes = name.bytes();
+    bytes.next().is_some_and(is_id_start) && bytes.all(is_id_part)
+}
+
 fn is_space(b: u8) -> bool {
     matches!(b, b' ' | b'\t' | b'\r' | b'\n' | 0x0b | 0x0c)
 }

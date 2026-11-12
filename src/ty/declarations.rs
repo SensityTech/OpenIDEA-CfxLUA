@@ -51,7 +51,8 @@ fn documented(node: Node) -> Option<Node> {
     std::iter::once(node).chain(node.ancestors()).find(|owner| owner.kind().is_statement() || owner.is(N::TableField))
 }
 
-fn comment(psi: Psi) -> Option<Comment> {
+/// The comment that documents what `psi` declares: the one of its statement, or of its table field.
+pub fn comment(psi: Psi) -> Option<Comment> {
     documented(psi.node).and_then(|owner| psi.src.comment_of(owner))
 }
 

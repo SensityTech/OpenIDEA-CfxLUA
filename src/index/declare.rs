@@ -33,11 +33,7 @@ pub fn module_name(src: &Source) -> Option<Rc<str>> {
 
 /// The assignment or the `local` statement a comment documents.
 fn annotated<'a>(src: &'a Source, comment: Comment<'a>) -> Option<Node<'a>> {
-    let at = comment.0.range().1;
-    let after = src.root().tree().node_at(src.root().source(), at.saturating_sub(1));
-    std::iter::once(after)
-        .chain(after.ancestors())
-        .find(|node| matches!(node.kind(), N::AssignStat | N::LocalDef) && src.comment_of(*node) == Some(comment))
+    src.documented_by(comment).filter(|node| matches!(node.kind(), N::AssignStat | N::LocalDef))
 }
 
 /// The table a class annotates: the first value of the statement its comment documents.

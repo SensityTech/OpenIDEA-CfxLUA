@@ -235,13 +235,23 @@ impl Index {
     }
 
     pub fn class(&self, name: &str) -> Option<&ClassDef> {
+        self.class_in(name).map(|(_, class)| class)
+    }
+
+    /// The class `name`, and the file that declares it.
+    pub fn class_in(&self, name: &str) -> Option<(FileId, &ClassDef)> {
         let (file, at) = self.classes.get(name)?.first()?;
-        self.files.get(file)?.classes.get(*at as usize)
+        Some((*file, self.files.get(file)?.classes.get(*at as usize)?))
     }
 
     pub fn alias(&self, name: &str) -> Option<&AliasDef> {
+        self.alias_in(name).map(|(_, alias)| alias)
+    }
+
+    /// The alias `name`, and the file that declares it.
+    pub fn alias_in(&self, name: &str) -> Option<(FileId, &AliasDef)> {
         let (file, at) = self.aliases.get(name)?.first()?;
-        self.files.get(file)?.aliases.get(*at as usize)
+        Some((*file, self.files.get(file)?.aliases.get(*at as usize)?))
     }
 
     /// The names of the classes the project declares, sorted.

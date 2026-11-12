@@ -53,7 +53,9 @@ impl Member<'_> {
         }
     }
 
-    fn worth(&self) -> u32 {
+    /// Which declaration of a name stands for the others: an annotation, then a function, then a field of a
+    /// table, then an assignment.
+    pub fn worth(&self) -> u32 {
         match self {
             Member::Declared(found) => found.member.kind.worth(),
             Member::Field(_) => TABLE_FIELD,
