@@ -38,7 +38,7 @@ Security issues: see [SECURITY.md](SECURITY.md), not a public issue.
 | `src/feature.rs` | The `Feature` trait every area implements, `Doc`, `Ctx`, `Problem`, `Fix`. |
 | `src/lua/` | CfxLua lexer, parser and syntax tree, scopes, documentation comments (`doc/`), and a light structural view (`Source`, chains, calls). |
 | `src/ty/` | The type engine: the types of Lua values, how they are shown, the types written in documentation comments, and the inference of expressions and declarations. |
-| `src/index/` | What the files of a project declare, by name: classes, members, aliases. |
+| `src/index/` | What the files of a project declare, by name: classes, members, aliases; and in `library.rs` what the engine knows without a project writing it (the Lua standard library, the Cfx runtime, the natives). |
 | `src/editor/` | What the editor shows of a Lua file: semantic colours, folding, structure, occurrences, in `completion/` what the type engine completes (members, names, expected values, table keys, documentation comments), in `target.rs` what the name under the caret stands for, in `hover.rs` and `definition.rs` its documentation and where it is declared, in `signature.rs` the parameters of the call being typed, and in `hints.rs` the inlay hints. |
 | `src/project/` | Resources, manifest entries, FXServer globs, client/server/shared side, game. |
 | `src/workspace.rs` | The project files the plugin has read; areas only read the project through it. The text of a script is released once it is indexed and read again on demand. |
@@ -47,7 +47,7 @@ Security issues: see [SECURITY.md](SECURITY.md), not a public issue.
 | `src/memtrace.rs` | The allocation counter of the `mem-trace` build. |
 | `src/<area>/` | `natives`, `runtime`, `manifest`, `escrow`, `statebags`, `events`, `nui`, `values`, `coords`, `perf`, `syntax`, `docs`. |
 | `web/` | The tool window page (rendering only; searching and HTML are built in Rust). |
-| `data/` | Bundled data: natives snapshots, guides, catalogs, value tables, runtime stubs. |
+| `data/` | Bundled data: natives snapshots, guides, catalogs, value tables, runtime stubs, and in `std/` the stubs of the Lua 5.4 standard library. |
 | `plugin.toml`, `settings.schema.json` | Plugin manifest and settings page. |
 
 Two rules matter more than any other:

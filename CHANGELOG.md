@@ -71,6 +71,14 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   function the plugin knows, the name of the parameter is written: `open(door: 2, fast: true)`. Three more hints
   can be turned on in the settings: the types of local variables, the types of parameters, and what functions
   return.
+- **The Lua standard library and the Cfx runtime are known to the type engine.** `print`, `string.format`,
+  `Citizen.Wait` or `vector3` have a hover (their documentation), parameter info and parameter hints, and what
+  they return is typed. After `string.` or `('x'):` the string functions are listed, and the names of Lua itself
+  (`print`, `pairs`, `math`…) are completed. A script only sees the runtime API of its side: a server script is
+  not offered `SendNUIMessage`, a client script is not offered `GetPlayers`.
+- **Natives have parameter info, hints, a hover, and type what they return.** A native shows its parameters while
+  its arguments are typed and names them before literals; `GetEntityCoords(ped).` lists `x`, `y` and `z`; hovering
+  a native shows its documentation: description, example, parameters, hash, side and game.
 - **The memory the plugin holds is written in the IDE log** when it has read a project
   (`resources indexed (N MiB)`): OpenIDEA gives a plugin 256 MiB.
 
