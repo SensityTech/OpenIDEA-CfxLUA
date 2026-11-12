@@ -14,7 +14,9 @@ use openidea_plugin::Severity;
 use openidea_plugin::providers::{CompletionItem, CompletionKind};
 use sites::{Kind, Scope, Site};
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
+use std::rc::Rc;
 use tables::Tables;
 
 pub mod keys {
@@ -30,39 +32,66 @@ pub mod keys {
 
 pub const CODE: &str = "CfxMagicValue";
 
+/// The spellings of one hash, sorted, each with how many files write it: one spelling, most often.
+type Spellings = Vec<(Rc<str>, u32)>;
+
+/// The names a file writes: the hash of each and the one copy of its spelling.
+type Written = Box<[(i32, Rc<str>)]>;
+
 #[derive(Default)]
 struct HashIndex {
-    files: HashMap<String, Vec<(i32, String)>>,
-    names: HashMap<i32, BTreeMap<String, u32>>,
+    files: HashMap<String, Written>,
+    names: HashMap<i32, Spellings>,
 }
 
 impl HashIndex {
     fn set(&mut self, path: &str, names: Vec<(i32, String)>) {
         self.remove(path);
-        for (hash, name) in &names {
-            *self.names.entry(*hash).or_default().entry(name.clone()).or_default() += 1;
+        let kept = names.into_iter().map(|(hash, name)| (hash, self.keep(hash, name))).collect();
+        self.files.insert(path.to_owned(), kept);
+    }
+
+    /// Counts one more file that writes the name, and gives the one copy of it that is kept.
+    fn keep(&mut self, hash: i32, name: String) -> Rc<str> {
+        let spellings = match self.names.entry(hash) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => {
+                let name: Rc<str> = name.into();
+                entry.insert(vec![(name.clone(), 1)]);
+                return name;
+            }
+        };
+        match spellings.binary_search_by(|(other, _)| (**other).cmp(&name)) {
+            Ok(at) => {
+                spellings[at].1 += 1;
+                spellings[at].0.clone()
+            }
+            Err(at) => {
+                let name: Rc<str> = name.into();
+                spellings.insert(at, (name.clone(), 1));
+                name
+            }
         }
-        self.files.insert(path.to_owned(), names);
     }
 
     fn remove(&mut self, path: &str) {
-        for (hash, name) in self.files.remove(path).unwrap_or_default() {
-            if let Some(spellings) = self.names.get_mut(&hash) {
-                if let Some(n) = spellings.get_mut(&name) {
-                    *n -= 1;
-                    if *n == 0 {
-                        spellings.remove(&name);
-                    }
+        for (hash, name) in self.files.remove(path).into_iter().flat_map(Vec::from) {
+            let Entry::Occupied(mut entry) = self.names.entry(hash) else { continue };
+            let spellings = entry.get_mut();
+            if let Ok(at) = spellings.binary_search_by(|(other, _)| other.cmp(&name)) {
+                spellings[at].1 -= 1;
+                if spellings[at].1 == 0 {
+                    spellings.remove(at);
                 }
-                if spellings.is_empty() {
-                    self.names.remove(&hash);
-                }
+            }
+            if spellings.is_empty() {
+                entry.remove();
             }
         }
     }
 
     fn find(&self, hash: i32) -> Option<&str> {
-        self.names.get(&hash)?.keys().next().map(String::as_str)
+        self.names.get(&hash)?.first().map(|(name, _)| &**name)
     }
 }
 

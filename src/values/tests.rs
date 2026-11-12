@@ -178,6 +178,24 @@ fn indexed_names() {
     assert_eq!(index.find(1), Some("b_name"));
     index.set("/a.lua", Vec::new());
     assert_eq!(index.find(1), None);
+    assert!(index.names.is_empty() && index.files["/a.lua"].is_empty());
+
+    // A spelling stays as long as a file writes it, and is kept once however many do.
+    index.set("/a.lua", vec![(1, "b_name".into()), (2, "other".into())]);
+    index.set("/b.lua", vec![(1, "b_name".into()), (1, "a_name".into())]);
+    index.set("/c.lua", vec![(1, "c_name".into()), (1, "b_name".into())]);
+    assert_eq!(
+        index.names[&1].iter().map(|(name, files)| (&**name, *files)).collect::<Vec<_>>(),
+        [("a_name", 1), ("b_name", 3), ("c_name", 1)]
+    );
+    assert_eq!(Rc::strong_count(&index.names[&1][1].0), 4, "the files share the one copy");
+    index.remove("/b.lua");
+    assert_eq!((index.find(1), index.find(2)), (Some("b_name"), Some("other")));
+    index.set("/a.lua", vec![(1, "b_name".into())]);
+    index.remove("/c.lua");
+    assert_eq!((index.find(1), index.find(2), index.names[&1][0].1), (Some("b_name"), None, 1));
+    index.remove("/a.lua");
+    assert!(index.names.is_empty() && index.files.is_empty());
 }
 
 #[test]
