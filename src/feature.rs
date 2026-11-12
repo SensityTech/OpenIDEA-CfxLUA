@@ -219,4 +219,9 @@ pub trait Feature {
     fn highlights(&self, _cx: &Ctx, _at: usize) -> Vec<crate::editor::highlights::Highlight> {
         Vec::new()
     }
+
+    /// What Extend Selection grows through from `_at`, the innermost range first.
+    fn selection_ranges(&self, _cx: &Ctx, _at: usize) -> Vec<(usize, usize)> {
+        Vec::new()
+    }
 }

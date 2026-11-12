@@ -33,6 +33,7 @@ kinds = [
     "folding",
     "document-symbols",
     "document-highlights",
+    "selection-ranges",
 ]
 languages = ["lua"]
 

@@ -4,6 +4,7 @@ pub mod folding;
 pub mod highlights;
 pub mod hints;
 pub mod hover;
+pub mod selection;
 pub mod semantic;
 pub mod signature;
 pub mod symbols;
@@ -257,6 +258,10 @@ impl Feature for EditorFeature {
 
     fn symbols(&self, cx: &Ctx) -> Vec<symbols::Symbol> {
         if Self::applies(cx) { symbols::symbols(&cx.doc.src) } else { Vec::new() }
+    }
+
+    fn selection_ranges(&self, cx: &Ctx, at: usize) -> Vec<(usize, usize)> {
+        if Self::applies(cx) { selection::ranges(&cx.doc.src, at) } else { Vec::new() }
     }
 
     fn highlights(&self, cx: &Ctx, at: usize) -> Vec<highlights::Highlight> {

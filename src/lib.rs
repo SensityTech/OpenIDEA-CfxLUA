@@ -1184,6 +1184,18 @@ impl LanguageFeatures for DevKit {
         });
         highlights.unwrap_or_default()
     }
+
+    fn selection_ranges(&mut self, d: &Document, at: Position) -> Vec<Range> {
+        let _timed = Timed::start("selection", d);
+        let ranges = self.prepare(d).and_then(|ws| {
+            self.with_ctx(ws, |cx, features| {
+                let at = cx.doc.offset(at);
+                let ranges = features.iter().flat_map(|f| f.selection_ranges(cx, at));
+                ranges.map(|(start, end)| cx.doc.range(start, end)).collect::<Vec<_>>()
+            })
+        });
+        ranges.unwrap_or_default()
+    }
 }
 
 impl HoverProvider for DevKit {
@@ -1649,6 +1661,18 @@ mod tests {
             text: "---@return number\n".into(),
         };
         assert_eq!(actions[0].edits, [(SHOP_CLIENT.to_owned(), vec![above])]);
+    }
+
+    #[test]
+    fn a_selection_grows_from_the_name_at_the_caret() {
+        let host = openidea_plugin::mock::MockHost::install();
+        let mut kit = shop_resource(&host);
+        let typed = lua(SHOP_CLIENT, 2, "---@language JSON\nlocal body = '{\"a\": 1}'\nprint(body)\n");
+        let grown = kit.selection_ranges(&typed, Position::new(2, 7));
+        let spans: Vec<(u32, u32, u32, u32)> =
+            grown.iter().map(|r| (r.start.line, r.start.character, r.end.line, r.end.character)).collect();
+        assert_eq!(spans, [(2, 6, 2, 10), (2, 5, 2, 11), (2, 0, 2, 11), (0, 0, 3, 0)], "the name, the call, the file");
+        assert!(kit.stale.is_some(), "it reads the document alone, which is not indexed for it");
     }
 
     #[test]
