@@ -2,7 +2,6 @@ pub mod stubs;
 
 use crate::feature::{Ctx, Feature};
 use crate::lua::Source;
-use crate::lua::lexer::Tok;
 use crate::project::Side;
 use crate::settings::{Settings, keys};
 use openidea_plugin::providers::{CompletionItem, CompletionKind};
@@ -31,7 +30,7 @@ impl Feature for RuntimeFeature {
         let doc = cx.doc;
         let mut parts = visible_parts(cx.settings, doc.side);
         parts.retain(|p| !cx.ws.luals.parts.contains(p));
-        if !doc.is_lua() || parts.is_empty() || in_literal(&doc.src, at) {
+        if !doc.is_lua() || parts.is_empty() || doc.src.in_literal(at) {
             return Vec::new();
         }
         let text = doc.text();
@@ -50,17 +49,6 @@ impl Feature for RuntimeFeature {
             _ => global_items(rt, &parts, prefix),
         }
     }
-}
-
-fn in_literal(src: &Source, at: usize) -> bool {
-    if src.in_comment(at) {
-        return true;
-    }
-    src.tok_at(at).map(|i| src.toks[i]).is_some_and(|t| match t.kind {
-        Tok::Str { closed } | Tok::Hash { closed } => t.start < at && (at < t.end || !closed),
-        Tok::LongStr => t.start < at && at < t.end,
-        _ => false,
-    })
 }
 
 fn global_items(rt: &Runtime, parts: &[Part], prefix: &str) -> Vec<CompletionItem> {

@@ -1,18 +1,15 @@
 //! Completion of the members of what stands before a `.` or a `:` (`ClassMemberCompletionProvider`).
 
-use crate::feature::Doc;
+use super::Listing;
 use crate::lua::Source;
 use crate::lua::doc::tags::Visibility;
 use crate::lua::lexer::Tok;
 use crate::lua::token::is_id_part;
 use crate::lua::tree::N;
 use crate::ty::context::{Cx, Psi};
-use crate::ty::members::{self, Listed, Member};
-use crate::ty::{Detail, FileId, Function, Ret, SELF, Signature, Ty, display, psi};
+use crate::ty::members::{self, Listed};
+use crate::ty::{Detail, FileId, Function, SELF, Ty, display, psi};
 use openidea_plugin::providers::{CompletionItem, CompletionKind};
-
-/// How many functions without a `@return` have their body read to show what they return.
-const BODIES_READ: usize = 60;
 
 /// The `.` or the `:` the caret names a member after, as an index in the code tokens: the caret stands
 /// right after it, or in the name that follows it.
@@ -40,7 +37,7 @@ fn class_name(class: &Ty) -> Option<&str> {
 }
 
 /// The class of the method the caret is written in: what its private members are visible from.
-fn context_class(cx: &Cx, from: Psi) -> Ty {
+pub(super) fn context_class(cx: &Cx, from: Psi) -> Ty {
     let method = from.node.ancestors().find(|node| node.is(N::ClassMethodDef));
     let owner = method.and_then(psi::method_owner);
     let ty = owner.map_or(Ty::Unknown, |owner| cx.with_value(0, || cx.infer(from.at(owner))));
@@ -59,162 +56,113 @@ fn is_visible(cx: &Cx, class: &Ty, context: &Ty, visibility: Visibility) -> bool
     }
 }
 
-struct Listing<'a, 'c> {
-    cx: &'a Cx<'c>,
-    doc: &'a Doc,
-    colon: bool,
+/// How the members of a class are listed.
+pub(super) struct Mode<'m> {
+    /// After a colon: what can take the object, and no field.
+    pub colon: bool,
+    /// What a label is written after: `self:` where the object of a method is not written.
+    pub object: &'m str,
+    /// Whether the type of a member its file did not keep is read there.
+    pub read: bool,
     /// From the sign to the caret: what an entry that is no name replaces, the sign included.
-    replaced: (usize, usize),
-    bodies: usize,
-    /// The label and the type of each entry listed so far.
-    listed: Vec<(String, String)>,
-    items: Vec<CompletionItem>,
+    pub replaced: Option<(usize, usize)>,
 }
 
 impl Listing<'_, '_> {
     /// Adds an entry unless the same one came from another class of the object: a global named as a class
     /// holds the members of that class too.
-    fn push(&mut self, mut item: CompletionItem, class: &Ty, own: bool) {
-        let entry = (item.label.clone(), item.detail.clone().unwrap_or_default());
-        if self.listed.contains(&entry) {
+    fn entry(&mut self, mut item: CompletionItem, declaring: &Ty, sort: &str) {
+        if !self.listed.insert((item.label.clone(), item.detail.clone().unwrap_or_default())) {
             return;
         }
-        self.listed.push(entry);
-        if let (Some(detail), Some(class)) = (&mut item.detail, class_name(class)) {
+        if let (Some(detail), Some(class)) = (&mut item.detail, class_name(declaring)) {
             detail.push_str(&format!("  [{class}]"));
         }
-        let name = item.filter_text.as_deref().unwrap_or(&item.label).to_lowercase();
-        item.sort_text = Some(format!("{}{name}", if own { 0 } else { 1 }));
+        item.sort_text = Some(sort.to_owned());
         self.items.push(item);
     }
 
-    /// What a signature returns, as far as it costs little to tell.
-    fn returned(&mut self, signature: &Signature) -> Option<Ty> {
-        match &signature.ret {
-            Ret::Ty(ty) => Some(ty.clone()),
-            Ret::Body(_) if self.bodies < BODIES_READ => {
-                self.bodies += 1;
-                Some(self.cx.ret(&signature.ret))
-            }
-            Ret::Body(_) => None,
-        }
-    }
-
-    fn function(&mut self, name: &str, function: &Function, declaring: &Ty, asked: &Ty) {
+    fn function(&mut self, name: &str, function: &Function, declaring: &Ty, asked: &Ty, mode: &Mode, sort: &str) {
         for signature in function.signatures() {
-            if self.colon {
+            if mode.colon {
                 let first = signature.declared(Some(declaring)).into_iter().next();
                 let fits = first.is_some_and(|first| members::is_subtype(self.cx, asked, &first.ty, true));
                 if !fits {
                     continue;
                 }
             }
-            let mut params: Vec<String> =
-                signature.args(None, self.colon).iter().map(|param| param.name.to_string()).collect();
-            if signature.vararg.is_some() {
-                params.push("...".to_owned());
-            }
-            let returned = self.returned(signature).map_or(String::new(), |ty| format!(": {}", display(&ty)));
-            let kind = if self.colon { CompletionKind::Method } else { CompletionKind::Function };
-            let mut item = CompletionItem::new(name, kind);
-            item.detail = Some(format!("({}){returned}", params.join(", ")));
-            self.push(item, declaring, declaring == asked);
+            let kind = if mode.colon { CompletionKind::Method } else { CompletionKind::Function };
+            let mut item = CompletionItem::new(&format!("{}{name}", mode.object), kind);
+            item.detail = Some(self.signature(signature, mode.colon));
+            self.entry(item, declaring, sort);
         }
     }
 
-    fn field(&mut self, name: &str, ty: &Ty, declaring: &Ty, asked: &Ty) {
+    fn field(&mut self, name: &str, ty: Option<&Ty>, declaring: &Ty, mode: &Mode, sort: &str) {
         let mut item = CompletionItem::new(name, CompletionKind::Field);
-        item.detail = Some(display(ty));
-        if !is_identifier(name) {
+        item.detail = ty.map(display);
+        if let Some(replaced) = mode.replaced.filter(|_| !is_identifier(name)) {
             item.label = format!("['{name}']");
             item.insert_text = item.label.clone();
             item.filter_text = Some(name.to_owned());
-            item.replace = Some(self.doc.range(self.replaced.0, self.replaced.1));
+            item.replace = Some(self.doc.range(replaced.0, replaced.1));
         }
-        self.push(item, declaring, declaring == asked);
+        self.entry(item, declaring, sort);
     }
 
-    fn class(&mut self, asked: &Ty, context: &Ty) {
-        for Listed { member, class } in members::visible(self.cx, asked) {
-            let visibility = match &member {
-                Member::Declared(found) => found.member.visibility,
-                Member::Field(_) | Member::Written(_) => Visibility::Public,
-            };
-            if !is_visible(self.cx, &class, context, visibility) {
-                continue;
+    /// The entries of one member of the class `asked`, seen from a method of `context`: a field, or a
+    /// function once per signature. `sort` is their sort key.
+    pub(super) fn member(&mut self, listed: &Listed, asked: &Ty, context: &Ty, mode: &Mode, sort: &str) {
+        let Listed { member, class: declaring } = listed;
+        if !is_visible(self.cx, declaring, context, member.visibility()) {
+            return;
+        }
+        let ty = if mode.read { Some(members::type_of(self.cx, member)) } else { member.kept_type() };
+        let Some(ty @ Ty::Function(_)) = &ty else {
+            if !mode.colon {
+                self.field(member.name(), ty.as_ref(), declaring, mode, sort);
             }
-            let ty = members::type_of(self.cx, &member);
-            if !matches!(ty, Ty::Function(_)) {
-                if !self.colon {
-                    self.field(member.name(), &ty, &class, asked);
-                }
-                continue;
-            }
-            // `self` in a signature is the class the member is asked on.
-            let on_class = ty.substitute(&mut |named| (&*named.name == SELF).then(|| asked.clone()));
-            if let Ty::Function(function) = &on_class {
-                self.function(member.name(), function, &class, asked);
-            }
+            return;
+        };
+        // `self` in a signature is the class the member is asked on.
+        let on_class = ty.substitute(&mut |named| (&*named.name == SELF).then(|| asked.clone()));
+        if let Ty::Function(function) = &on_class {
+            self.function(member.name(), function, declaring, asked, mode, sort);
         }
     }
 }
 
-/// The members of the expression before the `.` or the `:` that precedes the caret.
-pub fn members(cx: &Cx, file: FileId, doc: &Doc, at: usize) -> Vec<CompletionItem> {
-    let src = &doc.src;
-    let Some(sign) = sign_before(src, at) else { return Vec::new() };
+/// The members of the expression before the sign, a `.` or a `:`, that precedes the caret.
+pub(super) fn members(listing: &mut Listing, file: FileId, src: &Source, sign: usize, at: usize) {
     let sign = src.toks[sign];
     let index = src.root().tree().node_at(&src.text, sign.start);
-    let Some(prefix) = psi::prefix(index).filter(|_| index.is(N::IndexExpr)) else { return Vec::new() };
+    let Some(prefix) = psi::prefix(index).filter(|_| index.is(N::IndexExpr)) else { return };
     let from = Psi { file, src, node: index };
-    let ty = cx.infer(from.at(prefix));
-    let context = context_class(cx, from);
-    let colon = sign.text(&src.text) == ":";
-    let mut listing =
-        Listing { cx, doc, colon, replaced: (sign.start, at), bodies: 0, listed: Vec::new(), items: Vec::new() };
+    let ty = listing.cx.infer(from.at(prefix));
+    let context = context_class(listing.cx, from);
+    let mode = Mode { colon: sign.text(&src.text) == ":", object: "", read: true, replaced: Some((sign.start, at)) };
     for class in ty.top_classes() {
-        listing.class(class, &context);
+        for listed in members::visible(listing.cx, class) {
+            let inherited = u8::from(listed.class != *class);
+            let sort = format!("{inherited}{}", listed.member.name().to_lowercase());
+            listing.member(&listed, class, &context, &mode, &sort);
+        }
     }
-    listing.items.sort_by(|a, b| a.sort_text.cmp(&b.sort_text));
-    listing.items
 }
 
 #[cfg(test)]
 mod tests {
     use crate::editor::EditorFeature;
+    use crate::editor::completion::tests::{MAIN, MANIFEST, completed, labels, shown};
     use crate::feature::Feature;
     use crate::testing::Fixture;
-    use openidea_plugin::providers::{CompletionItem, CompletionKind};
+    use openidea_plugin::providers::CompletionKind;
 
-    const MANIFEST: (&str, &str) = (
-        "shop/fxmanifest.lua",
-        "fx_version 'cerulean'\ngame 'gta5'\nshared_script 'shared/*.lua'\nclient_script 'client/*.lua'\n",
-    );
     const CONFIG: (&str, &str) = (
         "shop/shared/config.lua",
         "Config = { debug = false, ['max-items'] = 10 }\nConfig.rate = 2\n---@param name string\n---@return number\n\
          function Config.price(name, ...) end\nfunction Config:reload() return self end\n",
     );
-    const MAIN: &str = "shop/client/main.lua";
-
-    fn completed(files: &[(&str, &str)]) -> Vec<CompletionItem> {
-        let fx = Fixture::new(files);
-        let feature = EditorFeature::default();
-        fx.index(&feature);
-        let (doc, at) = fx.caret(files.last().expect("a file").0);
-        feature.completion(&fx.cx(&doc), at, None)
-    }
-
-    /// Each entry as `label detail`.
-    fn shown(files: &[(&str, &str)]) -> Vec<String> {
-        let entry = |item: &CompletionItem| format!("{} {}", item.label, item.detail.as_deref().unwrap_or_default());
-        completed(files).iter().map(entry).collect()
-    }
-
-    fn labels(files: &[(&str, &str)]) -> Vec<String> {
-        completed(files).into_iter().map(|item| item.label).collect()
-    }
-
     #[test]
     fn the_members_of_a_global_declared_in_another_file() {
         let listed = shown(&[MANIFEST, CONFIG, (MAIN, "local rate = Config.<caret>")]);

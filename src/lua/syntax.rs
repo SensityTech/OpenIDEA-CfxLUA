@@ -258,6 +258,18 @@ impl Source {
         }
     }
 
+    /// Whether `at` stands in a comment, or inside a string or a hash literal.
+    pub fn in_literal(&self, at: usize) -> bool {
+        if self.in_comment(at) {
+            return true;
+        }
+        self.tok_at(at).map(|i| self.toks[i]).is_some_and(|t| match t.kind {
+            Tok::Str { closed } | Tok::Hash { closed } => t.start < at && (at < t.end || !closed),
+            Tok::LongStr => t.start < at && at < t.end,
+            _ => false,
+        })
+    }
+
     pub fn span(&self, a: usize, b: usize) -> (usize, usize) {
         if a >= b || a >= self.toks.len() {
             let at = self.toks.get(a).map_or(self.text.len(), |t| t.start);

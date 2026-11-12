@@ -100,7 +100,7 @@ impl Feature for EditorFeature {
         }
         let listed = self
             .projects
-            .ask(cx.ws, &cx.doc.path, &cx.doc.src, |engine, file| completion::members(engine, file, cx.doc, at));
+            .ask(cx.ws, &cx.doc.path, &cx.doc.src, |engine, file| completion::complete(engine, file, cx.doc, at));
         listed.unwrap_or_default()
     }
 
