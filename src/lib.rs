@@ -4,6 +4,7 @@ pub mod editor;
 pub mod escrow;
 pub mod events;
 pub mod feature;
+pub mod globals;
 pub mod index;
 pub mod lua;
 pub mod luals;

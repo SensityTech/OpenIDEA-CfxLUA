@@ -5,6 +5,7 @@ pub mod text;
 pub mod zones;
 
 use crate::feature::{CommandCx, CommandResult, Ctx, Feature, Fix, Intention, Problem};
+use crate::globals::Definers;
 use crate::lua::Source;
 use crate::natives::NativeSet;
 use crate::perf::ast::{self, Ast, DeclKind, ExprKind, Node};
@@ -13,7 +14,7 @@ use crate::workspace::Workspace;
 use expr::{Coord, Form, analyze, constructor_for, decimals, find_at, is_heading_name, is_xyz_at, nodes_at, round};
 use openidea_plugin::{Error, TextEdit};
 use std::cell::RefCell;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 use zones::ZoneMap;
@@ -28,34 +29,34 @@ pub const CONVERT_SELECTION: &str = "coords.convert-selection";
 
 const MAX_ZONES_FILE: usize = 20 * 1024 * 1024;
 
+/// The global functions of the files that define some, with the names of their parameters.
 #[derive(Default)]
 struct ParamIndex {
-    files: HashMap<String, Vec<(String, Vec<String>)>>,
-    by_name: HashMap<String, BTreeSet<String>>,
+    files: HashMap<Rc<str>, Vec<(String, Vec<String>)>>,
+    definers: Definers,
 }
 
 impl ParamIndex {
     fn set(&mut self, path: &str, functions: Vec<(String, Vec<String>)>) {
         self.remove(path);
-        for (name, _) in &functions {
-            self.by_name.entry(name.clone()).or_default().insert(path.to_owned());
+        if functions.is_empty() {
+            return;
         }
-        self.files.insert(path.to_owned(), functions);
+        let path: Rc<str> = path.into();
+        for (name, _) in &functions {
+            self.definers.add(name, &path);
+        }
+        self.files.insert(path, functions);
     }
 
     fn remove(&mut self, path: &str) {
         for (name, _) in self.files.remove(path).unwrap_or_default() {
-            if let Some(files) = self.by_name.get_mut(&name) {
-                files.remove(path);
-                if files.is_empty() {
-                    self.by_name.remove(&name);
-                }
-            }
+            self.definers.remove(&name, path);
         }
     }
 
     fn params(&self, name: &str, except: &str) -> Option<Vec<String>> {
-        let file = self.by_name.get(name)?.iter().find(|f| f.as_str() != except)?;
+        let file = self.definers.other(name, except)?;
         self.files.get(file)?.iter().find(|(n, _)| n == name).map(|(_, p)| p.clone())
     }
 }

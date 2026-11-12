@@ -1,11 +1,11 @@
 use super::ast::{Ast, DeclKind, ExprKind, Named, Node, StatKind};
 use super::spec::{self, Spam, Spec, Work, Yield};
 use crate::feature::Ctx;
+use crate::globals::Definers;
 use crate::lua::Source;
 use crate::natives::{Native, NativeSet, Natives};
 use crate::project::{Game, Side};
 use std::cell::RefCell;
-use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
@@ -124,8 +124,7 @@ fn local_paths(ast: &Ast, named: &[Named]) -> LocalPaths {
 #[derive(Default)]
 pub struct ProjectIndex {
     files: HashMap<Rc<str>, FileFacts>,
-    /// The files that define a global function, sorted: one file, most often.
-    by_name: HashMap<String, Vec<Rc<str>>>,
+    definers: Definers,
 }
 
 impl ProjectIndex {
@@ -133,17 +132,7 @@ impl ProjectIndex {
         self.remove(path);
         let path: Rc<str> = path.into();
         for (name, _) in &facts.globals {
-            match self.by_name.entry(name.clone()) {
-                Entry::Vacant(entry) => {
-                    entry.insert(vec![path.clone()]);
-                }
-                Entry::Occupied(mut entry) => {
-                    let files = entry.get_mut();
-                    if let Err(at) = files.binary_search(&path) {
-                        files.insert(at, path.clone());
-                    }
-                }
-            }
+            self.definers.add(name, &path);
         }
         self.files.insert(path, facts);
     }
@@ -151,16 +140,12 @@ impl ProjectIndex {
     pub fn remove(&mut self, path: &str) {
         let Some(old) = self.files.remove(path) else { return };
         for (name, _) in &old.globals {
-            let Some(files) = self.by_name.get_mut(name) else { continue };
-            files.retain(|file| **file != *path);
-            if files.is_empty() {
-                self.by_name.remove(name);
-            }
+            self.definers.remove(name, path);
         }
     }
 
     fn function(&self, path: &str, except: &str) -> Option<(&str, usize)> {
-        let file = self.by_name.get(path)?.iter().find(|file| ***file != *except)?;
+        let file = self.definers.other(path, except)?;
         Some((file, self.files.get(file)?.global(path)?))
     }
 }
