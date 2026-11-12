@@ -1,8 +1,12 @@
-//! The inspections of the JetBrains plugin that read the tree and the scopes of one file
-//! (`codeInsight/inspection`): what is declared and never used, what hides a local, what does nothing.
+//! The inspections of the JetBrains plugin (`codeInsight/inspection`). Those of this file read the tree and
+//! the scopes of one file: what is declared and never used, what hides a local, what does nothing. Those of
+//! `indexed` read what the project declares.
 
+pub mod indexed;
 pub mod suppress;
 
+#[cfg(test)]
+mod indexed_tests;
 #[cfg(test)]
 mod tests;
 
@@ -29,7 +33,17 @@ pub const EMPTY_BODY: Inspection = Inspection { code: "EmptyBody", setting: "ins
 pub const UNREACHABLE: Inspection = Inspection { code: "UnreachableStatement", setting: "inspections.unreachable" };
 pub const ZERO_INDEX: Inspection = Inspection { code: "ArrayIndexZero", setting: "inspections.zeroIndex" };
 
+pub const DUPLICATE_CLASS: Inspection =
+    Inspection { code: "DuplicateClassDeclaration", setting: "inspections.duplicateClass" };
+pub const DEPRECATED: Inspection = Inspection { code: "LuaDeprecation", setting: "inspections.deprecated" };
+pub const UNRESOLVED_TYPE: Inspection = Inspection { code: "UnresolvedClass", setting: "inspections.unresolvedType" };
+pub const UNRESOLVED_PARAM: Inspection =
+    Inspection { code: "UnresolvedSymbolInEmmyDoc", setting: "inspections.unresolvedParam" };
+
+/// The inspections that read one file.
 pub const ALL: [Inspection; 6] = [UNUSED, SHADOWED, SIMPLIFY, EMPTY_BODY, UNREACHABLE, ZERO_INDEX];
+/// The inspections that read what the project declares.
+pub const INDEXED: [Inspection; 4] = [DUPLICATE_CLASS, DEPRECATED, UNRESOLVED_TYPE, UNRESOLVED_PARAM];
 
 const UNDERLINE: &str = "_";
 

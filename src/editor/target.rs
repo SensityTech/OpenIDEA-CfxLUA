@@ -33,6 +33,26 @@ impl Target {
             Member::Written(field) => Target::Written(class.clone(), field),
         }
     }
+
+    /// Whether a `@deprecated` marks it: the comment of the statement that declares a member, of a field of a
+    /// table, or of the tag of a class (`LuaClassMember.isDeprecated`, `LuaDocTagClass.isDeprecated`).
+    pub fn is_deprecated(&self, cx: &Cx) -> bool {
+        let Target::Elem(elem) = self else { return false };
+        let Some(declared) = cx.index.file(elem.file) else { return false };
+        if elem.doc {
+            return declared.classes.iter().any(|class| class.node == elem.node && class.deprecated);
+        }
+        let kept = declared.members.iter().find(|kept| kept.node == elem.node && kept.kind != MemberKind::DocField);
+        match kept {
+            Some(member) => member.deprecated,
+            None => {
+                let marked = |psi: Psi| {
+                    psi.node.is(N::TableField) && psi.src.comment_of(psi.node).is_some_and(Comment::is_deprecated)
+                };
+                cx.at(elem.file, elem.node, marked).unwrap_or(false)
+            }
+        }
+    }
 }
 
 /// A name of the document, and what it stands for.
@@ -65,7 +85,7 @@ pub fn at(cx: &Cx, file: FileId, src: &Source, at: usize) -> Option<Named> {
 }
 
 /// What the identifier written directly in `psi.node` stands for.
-fn named(cx: &Cx, psi: Psi) -> Option<Target> {
+pub fn named(cx: &Cx, psi: Psi) -> Option<Target> {
     let own = Target::Elem(psi.elem());
     Some(match psi.node.kind() {
         N::NameExpr => name(cx, psi),
@@ -152,11 +172,17 @@ fn in_comment(cx: &Cx, file: FileId, src: &Source, at: usize) -> Option<Named> {
     Some(Named { range: (tokens.start(index), tokens.end(index)), target })
 }
 
-/// The class or the alias a type names (`LuaClassNameReference`); a generic parameter is neither.
-fn type_named(cx: &Cx, reference: Node) -> Option<Target> {
+/// Whether a type names a generic parameter of its comment: `---@generic T`, or the `T` of `fun<T>(...)`.
+pub fn is_generic(reference: Node) -> bool {
     let name = reference.code().trim_matches('`');
-    let comment = Comment(reference.ancestor(N::DocComment)?);
-    if comment.all(N::DocGenericDef).any(|generic| tags::name(generic) == Some(name)) {
+    let comment = reference.ancestor(N::DocComment).map(Comment);
+    comment.is_some_and(|comment| comment.all(N::DocGenericDef).any(|generic| tags::name(generic) == Some(name)))
+}
+
+/// The class or the alias a type names (`LuaClassNameReference`); a generic parameter is neither.
+pub fn type_named(cx: &Cx, reference: Node) -> Option<Target> {
+    let name = reference.code().trim_matches('`');
+    if is_generic(reference) {
         return None;
     }
     let class = cx.index.class_in(name).map(|(file, class)| (file, class.node));

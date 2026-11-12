@@ -17,6 +17,7 @@ mod tests;
 use crate::feature::{Ctx, Feature, Problem};
 use crate::index::library;
 use crate::index::project::{Projects, Sight};
+use crate::inspect::{self, Inspection};
 use crate::lua::Source;
 use crate::lua::token::T;
 use crate::lua::tree::N;
@@ -28,6 +29,11 @@ use openidea_plugin::Location;
 use openidea_plugin::providers::CompletionItem;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::time::Duration;
+
+/// What the inspections that ask the type engine may spend on one file: they are published by an editor
+/// call, which the IDE drops after 50 ms.
+const INSPECTION_TIME: Duration = Duration::from_millis(20);
 
 /// The names `function name()` statements give to globals, per file and counted over the project.
 #[derive(Default)]
@@ -75,12 +81,27 @@ impl EditorFeature {
     /// Asks the engine about the document, with what its file sees of the libraries: the parts of the Cfx
     /// runtime of its side, unless lua-language-server was given them, and the natives of its game.
     fn ask<R>(&self, cx: &Ctx, src: &Source, ask: impl FnOnce(&Cx, FileId) -> R) -> Option<R> {
+        self.ask_within(None, cx, src, ask)
+    }
+
+    /// `ask`, within `time` when one is given.
+    fn ask_within<R>(
+        &self,
+        time: Option<Duration>,
+        cx: &Ctx,
+        src: &Source,
+        ask: impl FnOnce(&Cx, FileId) -> R,
+    ) -> Option<R> {
         let mut parts = crate::runtime::visible_parts(cx.settings, cx.doc.side);
         parts.retain(|part| !cx.ws.luals.parts.contains(part));
         let games = cx.ws.resource_of(&cx.doc.path).and_then(|resource| resource.games.clone());
         let sets = crate::natives::visible_sets(cx.settings, &cx.ws.detected_games(), cx.doc.side, games.as_deref());
         let native = |name: &str| cx.natives.find(name, &sets).map(library::native_type);
-        self.projects.ask((cx.ws, &cx.doc.path, src), &Sight { parts: &parts, native: &native }, ask)
+        let (asked, sight) = ((cx.ws, cx.doc.path.as_str(), src), Sight { parts: &parts, native: &native });
+        match time {
+            Some(time) => self.projects.ask_within(time, asked, &sight, ask),
+            None => self.projects.ask(asked, &sight, ask),
+        }
     }
 
     fn completed_place(cx: &Ctx, at: usize) -> Option<completion::Place> {
@@ -192,7 +213,20 @@ impl Feature for EditorFeature {
         if !Self::applies(cx) {
             return Vec::new();
         }
-        crate::inspect::problems(&cx.doc.src, &|inspection| cx.settings.bool(inspection.setting, true))
+        let src = &cx.doc.src;
+        let wanted = |inspection: Inspection| cx.settings.bool(inspection.setting, true);
+        let mut found = inspect::problems(src, &wanted);
+        // A project that is still being read declares less than it will: a type would be unknown for a while.
+        if cx.doc.kind == FileKind::Lua && !cx.ws.indexing && inspect::INDEXED.into_iter().any(wanted) {
+            let root = format!("{}/", cx.ws.root);
+            let shown = |path: &str| path.strip_prefix(&root).unwrap_or(path).to_owned();
+            let indexed = self.ask_within(Some(INSPECTION_TIME), cx, src, |engine, file| {
+                inspect::indexed::problems(engine, file, src, &wanted, &shown)
+            });
+            found.extend(indexed.unwrap_or_default());
+            found.sort_by_key(|problem| problem.start);
+        }
+        found
     }
 
     fn semantic_tokens(&self, cx: &Ctx) -> Vec<semantic::Token> {

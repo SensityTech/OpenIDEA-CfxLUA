@@ -240,6 +240,17 @@ impl Projects {
     /// libraries. `None` when the project knows nothing of that file yet.
     pub fn ask<R>(
         &self,
+        asked: (&Workspace, &str, &Source),
+        sight: &Sight,
+        ask: impl FnOnce(&Cx, FileId) -> R,
+    ) -> Option<R> {
+        self.ask_within(TIME_BUDGET, asked, sight, ask)
+    }
+
+    /// `ask`, for a question that is given `time` to infer what it needs: past it, what is left reads as unknown.
+    pub fn ask_within<R>(
+        &self,
+        time: Duration,
         (ws, path, src): (&Workspace, &str, &Source),
         sight: &Sight,
         ask: impl FnOnce(&Cx, FileId) -> R,
@@ -249,6 +260,6 @@ impl Projects {
         let file = project.ids.ids.get(path).copied()?;
         let reading = Reading { ws, project, from: path, left: Cell::new(READ_BUDGET), sight };
         let cx = Cx::new(&reading, &project.index, &self.options).at_home(file, src);
-        Some(ask(&cx.bounded(STEP_BUDGET, TIME_BUDGET), file))
+        Some(ask(&cx.bounded(STEP_BUDGET, time), file))
     }
 }

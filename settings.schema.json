@@ -91,6 +91,27 @@
       "title": "Inspection: table indexed at 0",
       "default": true
     },
+    "inspections.duplicateClass": {
+      "type": "boolean",
+      "title": "Inspection: class declared twice in the project",
+      "default": true
+    },
+    "inspections.deprecated": {
+      "type": "boolean",
+      "title": "Inspection: use of what a ---@deprecated comment marks",
+      "default": true
+    },
+    "inspections.unresolvedType": {
+      "type": "boolean",
+      "title": "Inspection: type of a comment that no class or alias declares",
+      "description": "After a comma, a ---@return reads another type: write a description after a # (---@return boolean ok # true, or nil).",
+      "default": true
+    },
+    "inspections.unresolvedParam": {
+      "type": "boolean",
+      "title": "Inspection: ---@param that names no parameter",
+      "default": true
+    },
     "natives.autoUpdate": {
       "type": "boolean",
       "title": "Check for new natives automatically",
