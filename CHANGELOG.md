@@ -83,6 +83,11 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   setting and a quick fix where one makes sense. A `---@suppress <id>` comment above a statement turns an
   inspection off in it (`---@suppress RemoveUnusedLocal`), for the plugin's CfxLua checks too, and a `---@meta`
   file is not told about its unused names.
+- **Inspections that read the whole project.** Once a project has been read, the plugin also reports a
+  `---@class` that is declared twice, with the file of the other declaration; the use of a function, a field or
+  a class that a `---@deprecated` comment marks, struck through; a type written in a comment that no class, no
+  alias and no generic parameter declares; and a `---@param` that names no parameter of the function it
+  documents, with a fix that removes it. Each has a setting.
 - **Natives have parameter info, hints, a hover, and type what they return.** A native shows its parameters while
   its arguments are typed and names them before literals; `GetEntityCoords(ped).` lists `x`, `y` and `z`; hovering
   a native shows its documentation: description, example, parameters, hash, side and game.
