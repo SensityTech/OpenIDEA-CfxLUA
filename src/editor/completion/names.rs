@@ -189,7 +189,7 @@ pub(super) fn words(listing: &mut Listing, src: &Source, typed: &str) {
     let mut found: Vec<CompletionItem> = Vec::new();
     {
         let mut known: HashSet<&str> = listing.items.iter().map(|item| item.label.as_str()).collect();
-        known.extend([typed, CARET_NAME]);
+        known.insert(typed);
         for token in &src.toks {
             let text = token.text(&src.text);
             let word = match token.kind {
@@ -197,7 +197,8 @@ pub(super) fn words(listing: &mut Listing, src: &Source, typed: &str) {
                 Tok::Str { closed: true } => &text[1..text.len() - 1],
                 _ => continue,
             };
-            if word.len() > 2 && is_identifier(word) && known.insert(word) {
+            // The name written at the caret is no word of the document.
+            if word.len() > 2 && is_identifier(word) && !word.contains(CARET_NAME) && known.insert(word) {
                 found.push(item(word, CompletionKind::Text, None, format!("{WORD}{}", word.to_lowercase())));
                 if found.len() == MAX_WORDS {
                     break;
@@ -266,6 +267,25 @@ mod tests {
     fn named(files: &[(&str, &str)]) -> Vec<String> {
         let entry = |item: &CompletionItem| format!("{} {}", item.label, item.detail.as_deref().unwrap_or_default());
         completed(files).iter().filter(|item| item.kind != Some(CompletionKind::Keyword)).map(entry).collect()
+    }
+
+    #[test]
+    fn a_keyword_being_typed_is_the_start_of_a_name() {
+        // The JetBrains platform writes its dummy identifier at the caret: `in` is then the start of `index`.
+        let head = "local index, door, format = 1, 2, 3\n";
+        let listed = |typed: &str| labels(&[MANIFEST, (MAIN, &format!("{head}{typed}\n"))]);
+        let whole = listed("i<caret>");
+        assert!(whole.iter().any(|name| name == "index") && whole.iter().any(|name| name == "if"));
+        for typed in ["in<caret>", "do<caret>", "for<caret>", "print(in<caret>)", "local x = do<caret>", "fo<caret>r"] {
+            assert_eq!(listed(typed), whole, "{typed}");
+        }
+        let words = with_words(&[MANIFEST, (MAIN, &format!("{head}print('label')\nin<caret>\n"))]);
+        let words: Vec<&str> = words
+            .iter()
+            .filter(|item| item.kind == Some(CompletionKind::Text))
+            .map(|item| item.label.as_str())
+            .collect();
+        assert_eq!(words, ["label", "print"], "the name written at the caret is no word of the file");
     }
 
     #[test]

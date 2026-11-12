@@ -37,7 +37,8 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   parameters and loop variables in sight with their type, the globals the project declares (by their start or by
   the starts of their words: `gsc` finds `GetShopCount`), the keywords, and in a method the methods of its object
   as `self:name`. `function` typed where a value is expected inserts `function() end`. Locals come first, then
-  the globals of the project, the natives and the runtime API, the keywords, and last the words of the file.
+  the globals of the project, the natives and the runtime API, the keywords, and last the words of the file. A
+  name whose first letters read as a keyword is still completed: `in` lists `index`, `do` lists `door`.
 - **Completion of what a place asks for.** Where a typed annotation expects it, the plugin offers the strings of
   a literal type (`'top'|'bottom'`, an alias, `---|` value lines), inside a string or with their quotes; the
   members of an expected `---@enum` (`Mode.PRESS`) and the keys of an `---@enum (key)`; and in a table, the

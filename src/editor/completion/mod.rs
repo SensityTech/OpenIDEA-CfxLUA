@@ -11,6 +11,7 @@ mod tables;
 
 use crate::feature::Doc;
 use crate::lua::Source;
+use crate::lua::lexer::Tok;
 use crate::lua::tree::N;
 use crate::ty::context::{Cx, Psi};
 use crate::ty::{FileId, Ret, Signature, display};
@@ -59,14 +60,22 @@ pub fn place(src: &Source, at: usize) -> Option<Place> {
 }
 
 /// The text a completion reads: the document as it is, or with a name written at the caret where no name is
-/// typed yet.
+/// typed yet, or where what is typed of it reads as a keyword (`in` of `index`, `do` of `door`).
 pub struct Typed {
     written: Option<Source>,
 }
 
 impl Typed {
     pub fn new(src: &Source, at: usize, place: Place) -> Self {
-        let written = matches!(place, Place::Name(start) | Place::Doc(start) if start == at).then(|| {
+        let keyword = |start: usize| {
+            src.tok_at(at).is_some_and(|i| src.toks[i].start == start && src.toks[i].kind == Tok::Keyword)
+        };
+        let unnamed = match place {
+            Place::Name(start) => start == at || keyword(start),
+            Place::Doc(start) => start == at,
+            _ => false,
+        };
+        let written = unnamed.then(|| {
             let mut text = String::with_capacity(src.text.len() + CARET_NAME.len());
             text.push_str(&src.text[..at]);
             text.push_str(CARET_NAME);
