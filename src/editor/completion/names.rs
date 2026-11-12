@@ -2,21 +2,24 @@
 //! (`LocalAndGlobalCompletionProvider`), and the methods of the object of the method the caret is written in
 //! (`SuggestSelfMemberProvider`).
 
-use super::members::{Mode, context_class};
-use super::{Listing, expected, tables};
+use super::members::{Mode, context_class, is_identifier};
+use super::{CARET_NAME, Listing, expected, tables};
 use crate::lua::Source;
 use crate::lua::lexer::Tok;
 use crate::lua::scope::{DeclKind, Scopes};
 use crate::lua::token::{T, is_id_part};
 use crate::lua::tree::{N, Node};
-use crate::matching::{Match, Query};
+use crate::matching::{self, Match, Query};
 use crate::ty::context::Psi;
 use crate::ty::members::{self, Listed};
 use crate::ty::{FileId, G, SELF, Ty, display, psi};
 use openidea_plugin::providers::{CompletionItem, CompletionKind};
+use std::collections::HashSet;
 
 /// How many globals of the project one list holds: the best matches of what is typed.
 const MAX_GLOBALS: usize = 2000;
+/// How many words of the document one list holds.
+const MAX_WORDS: usize = 2000;
 
 /// `if`, `for` and `elseif` are live templates in the JetBrains plugin: they are plain keywords here.
 const KEYWORDS: &[&str] = &[
@@ -29,7 +32,9 @@ const VALUES: &[&str] = &["false", "nil", "true", SELF];
 const LOCAL: char = '2';
 const OWN_METHOD: char = '3';
 const GLOBAL: char = '4';
+const SUGGESTED: char = '7';
 const KEYWORD: char = '8';
+const WORD: char = '9';
 
 /// Where the name the caret stands in starts, or the caret itself where a name could start: not in a number,
 /// nor right after a literal or a `..`, where the JetBrains plugin completes nothing.
@@ -142,8 +147,66 @@ fn own_methods(listing: &mut Listing, here: Psi) {
     }
 }
 
-/// What a name that starts at `start` may be, `typed` being what is written of it.
-pub(super) fn names(listing: &mut Listing, file: FileId, src: &Source, start: usize, typed: &str) {
+/// The names the classes of the project suggest for a local being declared: `data` and `playerData` for
+/// `PlayerData` (`SuggestLocalNameProvider`).
+fn suggested(listing: &mut Listing) {
+    let mut names: Vec<String> = Vec::new();
+    for class in listing.cx.index.class_names() {
+        let words = matching::words(class.rsplit('.').next().unwrap_or(class));
+        for from in (0..words.len()).rev() {
+            let first = words[from];
+            let shouted = first.len() > 1 && !first.bytes().any(|b| b.is_ascii_lowercase());
+            let lowered = if shouted { first.len() } else { 1 };
+            let name =
+                format!("{}{}{}", first[..lowered].to_ascii_lowercase(), &first[lowered..], words[from + 1..].concat());
+            if is_identifier(&name) && !KEYWORDS.contains(&name.as_str()) && !VALUES.contains(&name.as_str()) {
+                names.push(name);
+            }
+        }
+    }
+    for name in names {
+        let sort = format!("{SUGGESTED}{}", name.to_lowercase());
+        listing.push(item(&name, CompletionKind::Variable, None, sort));
+    }
+}
+
+/// The labels of the blocks a `goto` is written in, up to its function.
+fn labels(listing: &mut Listing, goto: Node) {
+    for block in goto.ancestors().take_while(|node| !node.is(N::FuncBody)) {
+        for label in block.children_of(N::LabelStat).filter_map(|label| label.token(T::Id)) {
+            listing.push(item(label.text(), CompletionKind::Reference, None, format!("{LOCAL}{}", label.text())));
+        }
+    }
+}
+
+/// The identifiers of the document, and its strings that read as one, that nothing else offers: those of
+/// more than two letters (`suggestWordsInFile`). `typed` is the word at the caret.
+pub(super) fn words(listing: &mut Listing, src: &Source, typed: &str) {
+    let mut found: Vec<CompletionItem> = Vec::new();
+    {
+        let mut known: HashSet<&str> = listing.items.iter().map(|item| item.label.as_str()).collect();
+        known.extend([typed, CARET_NAME]);
+        for token in &src.toks {
+            let text = token.text(&src.text);
+            let word = match token.kind {
+                Tok::Name => text,
+                Tok::Str { closed: true } => &text[1..text.len() - 1],
+                _ => continue,
+            };
+            if word.len() > 2 && is_identifier(word) && known.insert(word) {
+                found.push(item(word, CompletionKind::Text, None, format!("{WORD}{}", word.to_lowercase())));
+                if found.len() == MAX_WORDS {
+                    break;
+                }
+            }
+        }
+    }
+    listing.items.extend(found);
+}
+
+/// What a name that starts at `start` may be, `typed` being what is written of it. Tells whether the words
+/// of the document may be offered too: not where only a few names can stand.
+pub(super) fn names(listing: &mut Listing, file: FileId, src: &Source, start: usize, typed: &str) -> bool {
     let leaf = src.root().tree().node_at(&src.text, start);
     let here = Psi { file, src, node: leaf };
     match leaf.kind() {
@@ -168,14 +231,29 @@ pub(super) fn names(listing: &mut Listing, file: FileId, src: &Source, start: us
             locals(listing, here);
             globals(listing, here, typed);
         }
+        // `local na`: a local is being named.
+        N::NameDef => suggested(listing),
+        N::GotoStat => {
+            labels(listing, leaf);
+            return false;
+        }
+        // `local a <co`
+        N::Attribute => {
+            for attribute in ["const", "close"] {
+                listing.push(item(attribute, CompletionKind::Keyword, None, format!("{KEYWORD}{attribute}")));
+            }
+            return false;
+        }
+        N::LabelStat => return false,
         _ => {}
     }
+    true
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::editor::completion::tests::{MAIN, MANIFEST, completed, labels, shown};
+    use crate::editor::completion::tests::{MAIN, MANIFEST, completed, labels, shown, with_words};
 
     const GLOBALS: (&str, &str) =
         ("shop/shared/globals.lua", "gVar1 = 1\n\ngVar2 = {\n    aaa = 2,\n    bbb = 3\n}\ngVar2.ccc = 4\n");
@@ -302,6 +380,66 @@ mod tests {
         let at = |label: &str| listed.iter().position(|listed| listed == label).unwrap_or_else(|| panic!("{label}"));
         assert!(at("shop") < at("self:send") && at("self:send") < at("Shared") && at("Shared") < at("self"));
         assert!(at("shop") < at("shown"), "locals by name");
+    }
+
+    /// The words of the file offered at the caret.
+    fn words_at(text: &str) -> Vec<String> {
+        let items = with_words(&[MANIFEST, (MAIN, text)]);
+        items.into_iter().filter(|item| item.kind == Some(CompletionKind::Text)).map(|item| item.label).collect()
+    }
+
+    fn every_label(text: &str) -> Vec<String> {
+        with_words(&[MANIFEST, (MAIN, text)]).into_iter().map(|item| item.label).collect()
+    }
+
+    #[test]
+    fn the_words_of_the_file_nothing_else_offers() {
+        let text = concat!(
+            "local shop = { title = 'welcome', ['max-items'] = 3, id = 1 }\n",
+            "print(shop.title, unknownName)\n",
+            "-- inComment\n",
+            "local other = sho<caret>"
+        );
+        assert_eq!(
+            words_at(text),
+            ["other", "print", "title", "unknownName", "welcome"],
+            "no local in sight, no keyword, nothing of two letters, no comment, not what is being typed"
+        );
+        assert_eq!(words_at("local shop = {}\nshop.title = 1\nUnknown.<caret>"), ["shop", "title", "Unknown"]);
+        assert_eq!(words_at("local shop = {}\nshop.title = 1\nshop.ti<caret>"), ["shop"], "`title` is a member");
+        assert!(words_at("local title = 'in a string <caret>'").is_empty());
+        assert!(words_at("local title = 1\n---@type <caret>\nlocal a").is_empty());
+    }
+
+    #[test]
+    fn the_labels_a_goto_may_name_and_the_attributes_of_a_local() {
+        let text = concat!(
+            "::top::\n",
+            "local function f()\n",
+            "    ::start::\n",
+            "    do\n",
+            "        ::inner::\n",
+            "        goto <caret>\n",
+            "    end\n",
+            "    ::after::\n",
+            "end\n",
+            "::bottom::\n"
+        );
+        assert_eq!(every_label(text), ["after", "inner", "start"], "the labels of its function, and no word");
+        assert_eq!(every_label(&text.replace("goto <caret>", "goto st<caret>")), ["after", "inner", "start"]);
+        assert_eq!(every_label("local name <co<caret>> = 1"), ["close", "const"]);
+    }
+
+    #[test]
+    fn the_names_the_classes_suggest_for_a_local() {
+        let classes = (
+            "shop/shared/classes.lua",
+            "---@class PlayerData\n---@class ui.Panel\n---@class shop_item\n---@class End\n",
+        );
+        let listed = labels(&[MANIFEST, classes, (MAIN, "local da<caret>")]);
+        assert_eq!(listed, ["data", "item", "panel", "playerData", "shopitem"], "`end` is a keyword");
+        assert_eq!(labels(&[MANIFEST, classes, (MAIN, "local first, da<caret>")]), listed);
+        assert!(labels(&[MANIFEST, classes, (MAIN, "local function f(da<caret>) end")]).is_empty(), "a parameter");
     }
 
     #[test]

@@ -31,7 +31,7 @@ use feature::{CommandCx, Ctx, Doc, Feature, Problem};
 use lua::Source;
 use natives::Natives;
 use openidea_plugin::language_features::{DocumentSymbol, FoldRange, LanguageFeatures};
-use openidea_plugin::providers::{CodeAction, CompletionItem, Document, LineMarker, Providers};
+use openidea_plugin::providers::{CodeAction, CompletionItem, CompletionKind, Document, LineMarker, Providers};
 use openidea_plugin::semantic_tokens::{SemanticToken, SemanticTokens, TokenKind, TokenModifier};
 use openidea_plugin::views::{View, ViewEvent, Viewport, Views};
 use openidea_plugin::{
@@ -851,16 +851,28 @@ impl Plugin for DevKit {
     }
 }
 
+/// The words of the file one feature lists, without those another feature offers as what they are: a key, an
+/// event, a native.
+fn without_repeated_words(items: Vec<CompletionItem>) -> Vec<CompletionItem> {
+    let word = |item: &CompletionItem| item.kind == Some(CompletionKind::Text);
+    if !items.iter().any(word) {
+        return items;
+    }
+    let named: std::collections::HashSet<String> =
+        items.iter().filter(|item| !word(item)).map(|item| item.label.clone()).collect();
+    items.into_iter().filter(|item| !word(item) || !named.contains(&item.label)).collect()
+}
+
 impl Providers for DevKit {
     fn completion(&mut self, d: &Document, at: Position, trigger: Option<&str>) -> Vec<CompletionItem> {
         let _timed = Timed::start("completion", d);
         let Some(ws) = self.prepare(d) else { return Vec::new() };
         self.index_stale(|feature, cx| feature.completes_from_index(cx, cx.doc.offset(at)));
-        self.with_ctx(ws, |cx, features| {
+        let items = self.with_ctx(ws, |cx, features| {
             let at = cx.doc.offset(at);
             features.iter().flat_map(|f| f.completion(cx, at, trigger)).collect()
-        })
-        .unwrap_or_default()
+        });
+        without_repeated_words(items.unwrap_or_default())
     }
 
     fn definition(&mut self, d: &Document, at: Position) -> Vec<Location> {
@@ -1364,6 +1376,12 @@ mod tests {
         Document { path: path.to_owned(), language: "lua".into(), version, text: text.to_owned() }
     }
 
+    /// What a completion offers, the words of the file left out.
+    fn offered(kit: &mut DevKit, doc: &Document, at: Position) -> Vec<String> {
+        let items = kit.completion(doc, at, None).into_iter();
+        items.filter(|item| item.kind != Some(CompletionKind::Text)).map(|item| item.label).collect()
+    }
+
     /// The features that have not indexed the document being edited.
     fn waiting(kit: &DevKit) -> Vec<&'static str> {
         let left = kit.stale.as_ref().map_or(0, |stale| stale.features);
@@ -1394,9 +1412,9 @@ mod tests {
         assert!(labels.iter().any(|l| l == "typed:here"), "the event of the line above: {labels:?}");
         assert_eq!(waiting(&kit), ["statebags", "values", "coords", "perf", "editor", "escrow"]);
         let typed = lua(SHOP_CLIENT, 3, "LocalPlayer.state.typedKey = 1\nlocal v = LocalPlayer.state.ty\n");
-        let labels: Vec<String> =
+        let all: Vec<String> =
             kit.completion(&typed, Position::new(1, 30), None).into_iter().map(|i| i.label).collect();
-        assert_eq!(labels, ["typedKey"], "the key of the line above");
+        assert_eq!(all, ["typedKey", "LocalPlayer", "state"], "the key of the line above, once, then the words");
         // After a dot the editor feature lists members: it reads what the document declares too.
         assert_eq!(waiting(&kit), ["events", "nui", "values", "coords", "perf", "escrow"]);
     }
@@ -1448,9 +1466,7 @@ mod tests {
 
         // The fields of the table are read in the file that writes them, which the IDE gives again.
         let typed = lua(SHOP_CLIENT, 2, "TriggerServerEvent('shop:sell', 1)\nConfig.");
-        let labels: Vec<String> =
-            kit.completion(&typed, Position::new(1, 7), None).into_iter().map(|item| item.label).collect();
-        assert_eq!(labels, ["debug", "load", "rate"]);
+        assert_eq!(offered(&mut kit, &typed, Position::new(1, 7)), ["debug", "load", "rate"]);
         assert_eq!(kit.workspaces[0].text(SHOP_CLIENT), Some(typed.text.as_str()), "what the editor shows is kept");
         assert_eq!(kit.workspaces[0].text("/project/res/shared/config.lua"), None, "read, not kept");
 
@@ -1458,9 +1474,7 @@ mod tests {
         // another text than the one indexed.
         host.add_file("res/shared/other.lua", "Other = { added = 1 }\n");
         let other = lua(SHOP_CLIENT, 3, "TriggerServerEvent('shop:sell', 1)\nOther.");
-        let labels: Vec<String> =
-            kit.completion(&other, Position::new(1, 6), None).into_iter().map(|item| item.label).collect();
-        assert_eq!(labels, ["run"], "only what the index keeps");
+        assert_eq!(offered(&mut kit, &other, Position::new(1, 6)), ["run"], "only what the index keeps");
     }
 
     #[test]

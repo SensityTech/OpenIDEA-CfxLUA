@@ -114,6 +114,7 @@ impl Listing<'_, '_> {
 /// What the engine lists at `place`. `src` is the text of `Typed`, `at` the caret in the document.
 pub fn complete(cx: &Cx, file: FileId, doc: &Doc, src: &Source, at: usize, place: Place) -> Vec<CompletionItem> {
     let mut listing = Listing { cx, doc, bodies: 0, listed: HashSet::new(), items: Vec::new() };
+    let typed = |start: usize| &doc.src.text[start..at];
     match place {
         Place::Member(sign) => {
             let named = Psi { file, src, node: src.root().tree().node_at(&src.text, src.toks[sign].start) };
@@ -128,8 +129,13 @@ pub fn complete(cx: &Cx, file: FileId, doc: &Doc, src: &Source, at: usize, place
                 }
                 _ => members::members(&mut listing, file, src, sign, at),
             }
+            names::words(&mut listing, src, typed(src.toks[sign].end.min(at)));
         }
-        Place::Name(start) => names::names(&mut listing, file, src, start, &doc.src.text[start..at]),
+        Place::Name(start) => {
+            if names::names(&mut listing, file, src, start, typed(start)) {
+                names::words(&mut listing, src, typed(start));
+            }
+        }
         Place::String(token) => expected::strings(&mut listing, file, src, token, at),
         Place::Doc(start) => docs::complete(&mut listing, src, start, at),
     }
@@ -142,7 +148,7 @@ mod tests {
     use crate::editor::EditorFeature;
     use crate::feature::Feature;
     use crate::testing::Fixture;
-    use openidea_plugin::providers::CompletionItem;
+    use openidea_plugin::providers::{CompletionItem, CompletionKind};
 
     pub const MANIFEST: (&str, &str) = (
         "shop/fxmanifest.lua",
@@ -150,13 +156,18 @@ mod tests {
     );
     pub const MAIN: &str = "shop/client/main.lua";
 
-    /// What the editor feature lists at the `<caret>` of the last file.
-    pub fn completed(files: &[(&str, &str)]) -> Vec<CompletionItem> {
+    /// Everything the editor feature lists at the `<caret>` of the last file.
+    pub fn with_words(files: &[(&str, &str)]) -> Vec<CompletionItem> {
         let fx = Fixture::new(files);
         let feature = EditorFeature::default();
         fx.index(&feature);
         let (doc, at) = fx.caret(files.last().expect("a file").0);
         feature.completion(&fx.cx(&doc), at, None)
+    }
+
+    /// What it lists there, the words of the file left out.
+    pub fn completed(files: &[(&str, &str)]) -> Vec<CompletionItem> {
+        with_words(files).into_iter().filter(|item| item.kind != Some(CompletionKind::Text)).collect()
     }
 
     /// Each entry as `label detail`.

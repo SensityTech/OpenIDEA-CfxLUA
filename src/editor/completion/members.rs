@@ -23,7 +23,7 @@ pub fn sign_before(src: &Source, at: usize) -> Option<usize> {
     (named && before > 0 && sign(before - 1)).then(|| before - 1)
 }
 
-fn is_identifier(name: &str) -> bool {
+pub(super) fn is_identifier(name: &str) -> bool {
     let mut bytes = name.bytes();
     bytes.next().is_some_and(|first| is_id_part(first) && !first.is_ascii_digit()) && bytes.all(is_id_part)
 }
