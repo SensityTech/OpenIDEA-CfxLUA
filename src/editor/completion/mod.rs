@@ -5,6 +5,7 @@ mod expected;
 mod members;
 mod names;
 mod overrides;
+mod postfix;
 mod requires;
 mod tables;
 
@@ -145,7 +146,10 @@ pub fn complete(cx: &Cx, file: FileId, asked: &Asked, place: Place) -> Vec<Compl
                         tables::keys(&mut listing, named.at(table), named.node);
                     }
                 }
-                _ => members::members(&mut listing, file, src, sign, at),
+                _ => {
+                    members::members(&mut listing, file, src, sign, at);
+                    postfix::templates(&mut listing, src, sign, at);
+                }
             }
             names::words(&mut listing, src, typed(src.toks[sign].end.min(at)));
         }
@@ -167,7 +171,7 @@ pub fn complete(cx: &Cx, file: FileId, asked: &Asked, place: Place) -> Vec<Compl
 
 #[cfg(test)]
 pub(in crate::editor) mod tests {
-    use super::LIBRARY;
+    use super::{LIBRARY, postfix};
     use crate::editor::EditorFeature;
     use crate::feature::Feature;
     use crate::testing::Fixture;
@@ -193,11 +197,13 @@ pub(in crate::editor) mod tests {
         with_words(files).into_iter().filter(|item| item.kind != Some(CompletionKind::Text)).collect()
     }
 
-    /// What it lists there of the project: the words of the file, and what the libraries declare where
-    /// names are listed, are left out.
+    /// What it lists there of the project: the words of the file, what the libraries declare where names are
+    /// listed, and the postfix templates are left out.
     pub fn completed(files: &[(&str, &str)]) -> Vec<CompletionItem> {
-        let library = |item: &CompletionItem| item.sort_text.as_deref().is_some_and(|sort| sort.starts_with(LIBRARY));
-        with_libraries(files).into_iter().filter(|item| !library(item)).collect()
+        let sorted =
+            |item: &CompletionItem, key: &str| item.sort_text.as_deref().is_some_and(|sort| sort.starts_with(key));
+        let aside = |item: &CompletionItem| sorted(item, &LIBRARY.to_string()) || sorted(item, postfix::SORT);
+        with_libraries(files).into_iter().filter(|item| !aside(item)).collect()
     }
 
     /// Each entry as `label detail`.

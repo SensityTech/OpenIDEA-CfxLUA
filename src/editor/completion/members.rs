@@ -19,7 +19,8 @@ pub fn sign_before(src: &Source, at: usize) -> Option<usize> {
     if sign(before) {
         return Some(before);
     }
-    let named = src.toks[before].kind == Tok::Name && at <= src.toks[before].end;
+    // A word that happens to be a keyword is still what is typed after the sign: `count.if`.
+    let named = matches!(src.toks[before].kind, Tok::Name | Tok::Keyword) && at <= src.toks[before].end;
     (named && before > 0 && sign(before - 1)).then(|| before - 1)
 }
 
@@ -236,8 +237,9 @@ mod tests {
         let doc = crate::feature::Doc::new(&fx.ws, &Fixture::path(MAIN), "lua", 2, typed);
         feature.index_file(&fx.ws, &doc.path, doc.kind, &doc.src);
         let items = feature.completion(&fx.cx(&doc), typed.len(), None);
-        let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
-        assert_eq!(labels, ["first", "second"]);
+        let members = items.iter().filter(|item| item.kind != Some(CompletionKind::Keyword));
+        let labels: Vec<&str> = members.map(|item| item.label.as_str()).collect();
+        assert_eq!(labels, ["first", "second"], "the postfix templates aside");
     }
 
     #[test]

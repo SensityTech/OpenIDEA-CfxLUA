@@ -1492,10 +1492,11 @@ mod tests {
         Document { path: path.to_owned(), language: "lua".into(), version, text: text.to_owned() }
     }
 
-    /// What a completion offers, the words of the file left out.
+    /// What a completion offers, the words of the file and the postfix templates left out.
     fn offered(kit: &mut DevKit, doc: &Document, at: Position) -> Vec<String> {
         let items = kit.completion(doc, at, None).into_iter();
-        items.filter(|item| item.kind != Some(CompletionKind::Text)).map(|item| item.label).collect()
+        let template = |item: &CompletionItem| item.sort_text.as_deref().is_some_and(|sort| sort.starts_with("9~"));
+        items.filter(|item| item.kind != Some(CompletionKind::Text) && !template(item)).map(|item| item.label).collect()
     }
 
     /// The features that have not indexed the document being edited.
@@ -1647,8 +1648,9 @@ mod tests {
             kit.completion(&typed, Position::new(1, 30), None).into_iter().map(|i| i.label).collect();
         assert_eq!(
             all,
-            ["typedKey", "set", "set", "LocalPlayer", "state"],
-            "the key of the line above, once, the two ways to set a key of a state bag, then the words"
+            ["typedKey", "set", "set", "LocalPlayer", "state", "par", "tonumber", "tostring"],
+            "the key of the line above, once, the two ways to set a key of a state bag, the words, then the \
+             postfix templates"
         );
         // After a dot the editor feature lists members: it reads what the document declares too.
         assert_eq!(waiting(&kit), ["events", "nui", "values", "coords", "perf", "escrow"]);
