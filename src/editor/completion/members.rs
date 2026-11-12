@@ -251,15 +251,17 @@ mod tests {
     #[test]
     fn nothing_is_listed_where_no_member_is_named() {
         for text in [
-            "local a = 1 .. <caret>",
             "local a = 'Config.<caret>'",
-            "local a = Config<caret>",
             "function Config.<caret>",
             "local n = 12.<caret>",
             "Unknown.<caret>",
             "-- Config.<caret>",
         ] {
             assert!(labels(&[MANIFEST, CONFIG, (MAIN, text)]).is_empty(), "{text}");
+        }
+        for text in ["local a = 1 .. <caret>", "local a = Config<caret>"] {
+            let listed = labels(&[MANIFEST, CONFIG, (MAIN, text)]);
+            assert!(listed.contains(&"Config".to_owned()) && !listed.contains(&"rate".to_owned()), "{text}: names");
         }
     }
 }

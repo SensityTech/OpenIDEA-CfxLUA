@@ -1,10 +1,10 @@
 //! What the type engine completes in a Lua file (`editor/completion/` of the JetBrains plugin).
 
 mod members;
-
-pub use members::sign_before;
+mod names;
 
 use crate::feature::Doc;
+use crate::lua::Source;
 use crate::ty::context::Cx;
 use crate::ty::{FileId, Ret, Signature, display};
 use openidea_plugin::providers::CompletionItem;
@@ -12,6 +12,52 @@ use std::collections::HashSet;
 
 /// How many functions without a `@return` have their body read to show what they return.
 const BODIES_READ: usize = 60;
+
+/// The name written at the caret where none is typed, as the JetBrains platform does: the tree then has a
+/// name to tell the place from.
+const CARET_NAME: &str = "__caret";
+
+/// Where the caret stands, told from the tokens alone: nothing is analysed before a place is found.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Place {
+    /// After a `.` or a `:`, the code token of that index: a member is named.
+    Member(usize),
+    /// In a name that starts at that offset, or where one could start.
+    Name(usize),
+}
+
+pub fn place(src: &Source, at: usize) -> Option<Place> {
+    if src.in_literal(at) {
+        return None;
+    }
+    if let Some(sign) = members::sign_before(src, at) {
+        return Some(Place::Member(sign));
+    }
+    names::start(src, at).map(Place::Name)
+}
+
+/// The text a completion reads: the document as it is, or with a name written at the caret where no name is
+/// typed yet.
+pub struct Typed {
+    written: Option<Source>,
+}
+
+impl Typed {
+    pub fn new(src: &Source, at: usize, place: Place) -> Self {
+        let written = matches!(place, Place::Name(start) if start == at).then(|| {
+            let mut text = String::with_capacity(src.text.len() + CARET_NAME.len());
+            text.push_str(&src.text[..at]);
+            text.push_str(CARET_NAME);
+            text.push_str(&src.text[at..]);
+            Source::new(&text)
+        });
+        Self { written }
+    }
+
+    pub fn src<'a>(&'a self, document: &'a Source) -> &'a Source {
+        self.written.as_ref().unwrap_or(document)
+    }
+}
 
 /// The entries of one completion, as they are built.
 struct Listing<'a, 'c> {
@@ -24,6 +70,13 @@ struct Listing<'a, 'c> {
 }
 
 impl Listing<'_, '_> {
+    /// Adds an entry, unless one that reads the same is listed.
+    fn push(&mut self, item: CompletionItem) {
+        if self.listed.insert((item.label.clone(), item.detail.clone().unwrap_or_default())) {
+            self.items.push(item);
+        }
+    }
+
     /// `(a, b, ...): returned`, as far as what a function returns costs little to tell.
     fn signature(&mut self, signature: &Signature, colon: bool) -> String {
         let mut params: Vec<String> = signature.args(None, colon).iter().map(|param| param.name.to_string()).collect();
@@ -43,11 +96,12 @@ impl Listing<'_, '_> {
     }
 }
 
-/// The members of what stands before the `.` or the `:` that precedes the caret.
-pub fn complete(cx: &Cx, file: FileId, doc: &Doc, at: usize) -> Vec<CompletionItem> {
+/// What the engine lists at `place`. `src` is the text of `Typed`, `at` the caret in the document.
+pub fn complete(cx: &Cx, file: FileId, doc: &Doc, src: &Source, at: usize, place: Place) -> Vec<CompletionItem> {
     let mut listing = Listing { cx, doc, bodies: 0, listed: HashSet::new(), items: Vec::new() };
-    if let Some(sign) = members::sign_before(&doc.src, at) {
-        members::members(&mut listing, file, &doc.src, sign, at);
+    match place {
+        Place::Member(sign) => members::members(&mut listing, file, src, sign, at),
+        Place::Name(start) => names::names(&mut listing, file, src, start, &doc.src.text[start..at]),
     }
     listing.items.sort_by(|a, b| a.sort_text.cmp(&b.sort_text));
     listing.items

@@ -381,6 +381,13 @@ impl Ty {
         self.class_name().is_some()
     }
 
+    pub fn as_function(&self) -> Option<&Function> {
+        match self {
+            Ty::Function(function) => Some(function),
+            _ => None,
+        }
+    }
+
     /// The classes a value of this type may be: those of a union, or of the first value of a tuple.
     pub fn top_classes(&self) -> Vec<&Ty> {
         match self {

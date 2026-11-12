@@ -60,6 +60,11 @@ impl EditorFeature {
     fn applies(cx: &Ctx) -> bool {
         cx.settings.enabled() && (cx.doc.is_lua() || matches!(cx.doc.kind, FileKind::Lua | FileKind::Manifest))
     }
+
+    fn completed_place(cx: &Ctx, at: usize) -> Option<completion::Place> {
+        let script = Self::applies(cx) && cx.doc.kind == FileKind::Lua;
+        script.then(|| completion::place(&cx.doc.src, at)).flatten()
+    }
 }
 
 fn global_functions(src: &Source) -> Vec<Box<str>> {
@@ -94,18 +99,20 @@ impl Feature for EditorFeature {
     }
 
     fn completion(&self, cx: &Ctx, at: usize, _trigger: Option<&str>) -> Vec<CompletionItem> {
-        // Asked at every keystroke: nothing is analysed unless the caret names a member.
-        if !self.completes_from_index(cx, at) {
-            return Vec::new();
-        }
+        // Nothing is analysed unless the tokens around the caret tell a place the engine completes.
+        let Some(place) = Self::completed_place(cx, at) else { return Vec::new() };
+        let typed = completion::Typed::new(&cx.doc.src, at, place);
+        let src = typed.src(&cx.doc.src);
         let listed = self
             .projects
-            .ask(cx.ws, &cx.doc.path, &cx.doc.src, |engine, file| completion::complete(engine, file, cx.doc, at));
+            .ask(cx.ws, &cx.doc.path, src, |engine, file| completion::complete(engine, file, cx.doc, src, at, place));
         listed.unwrap_or_default()
     }
 
+    /// A member is read from what the document declares, typed a moment ago or not. A name is not worth
+    /// indexing the document at every word: what it declares in sight is read in its tree.
     fn completes_from_index(&self, cx: &Ctx, at: usize) -> bool {
-        Self::applies(cx) && cx.doc.kind == FileKind::Lua && completion::sign_before(&cx.doc.src, at).is_some()
+        matches!(Self::completed_place(cx, at), Some(completion::Place::Member(_)))
     }
 
     fn semantic_tokens(&self, cx: &Ctx) -> Vec<semantic::Token> {

@@ -127,7 +127,7 @@ fn item(n: &Native, rank: usize, documented: bool) -> CompletionItem {
     let signature = n.typed_signature();
     let mut item = CompletionItem::new(&n.lua_name, CompletionKind::Function);
     item.detail = signature.get(n.lua_name.len()..).map(str::to_owned);
-    item.sort_text = Some(format!("{rank:04}"));
+    item.sort_text = Some(format!("5{rank:04}"));
     item.documentation = documented.then(|| markdown(n));
     item
 }

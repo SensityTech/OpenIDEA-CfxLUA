@@ -158,6 +158,7 @@ fn item(rt: &Runtime, d: &Decl) -> CompletionItem {
     let mut item = CompletionItem::new(&d.name, kind);
     item.detail = Some(signature(rt, d));
     item.documentation = Some(markdown(rt, d));
+    item.sort_text = Some(format!("6{}", d.name));
     item
 }
 
