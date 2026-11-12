@@ -1340,7 +1340,8 @@ mod tests {
         let labels: Vec<String> =
             kit.completion(&typed, Position::new(1, 30), None).into_iter().map(|i| i.label).collect();
         assert_eq!(labels, ["typedKey"], "the key of the line above");
-        assert_eq!(waiting(&kit), ["events", "nui", "values", "coords", "perf", "editor", "escrow"]);
+        // After a dot the editor feature lists members: it reads what the document declares too.
+        assert_eq!(waiting(&kit), ["events", "nui", "values", "coords", "perf", "escrow"]);
     }
 
     #[test]

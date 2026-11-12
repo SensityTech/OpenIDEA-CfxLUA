@@ -1,3 +1,4 @@
+pub mod completion;
 pub mod folding;
 pub mod highlights;
 pub mod semantic;
@@ -7,11 +8,13 @@ pub mod symbols;
 mod tests;
 
 use crate::feature::{Ctx, Feature};
+use crate::index::project::Projects;
 use crate::lua::Source;
 use crate::lua::token::T;
 use crate::lua::tree::N;
 use crate::project::FileKind;
 use crate::workspace::Workspace;
+use openidea_plugin::providers::CompletionItem;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -45,10 +48,12 @@ impl GlobalFunctions {
     }
 }
 
-/// What the editor shows of a Lua file beyond its text: colours, folds, outline, occurrences.
+/// What the editor shows of a Lua file beyond its text: colours, folds, outline, occurrences, and what the
+/// type engine tells of it.
 #[derive(Default)]
 pub struct EditorFeature {
     functions: RefCell<GlobalFunctions>,
+    projects: Projects,
 }
 
 impl EditorFeature {
@@ -72,21 +77,35 @@ fn global_functions(src: &Source) -> Vec<Box<str>> {
 }
 
 impl Feature for EditorFeature {
-    fn index_file(&self, _ws: &Workspace, path: &str, kind: FileKind, src: &Source) {
+    fn index_file(&self, ws: &Workspace, path: &str, kind: FileKind, src: &Source) {
         let mut functions = self.functions.borrow_mut();
         if kind == FileKind::Lua {
             functions.set(path, global_functions(src));
+            self.projects.declare(ws, path, src);
         } else {
             functions.remove(path);
+            self.projects.forget(path);
         }
     }
 
     fn forget_file(&self, path: &str) {
         self.functions.borrow_mut().remove(path);
+        self.projects.forget(path);
     }
 
-    fn completes_from_index(&self, _cx: &Ctx, _at: usize) -> bool {
-        false
+    fn completion(&self, cx: &Ctx, at: usize, _trigger: Option<&str>) -> Vec<CompletionItem> {
+        // Asked at every keystroke: nothing is analysed unless the caret names a member.
+        if !self.completes_from_index(cx, at) {
+            return Vec::new();
+        }
+        let listed = self
+            .projects
+            .ask(cx.ws, &cx.doc.path, &cx.doc.src, |engine, file| completion::members(engine, file, cx.doc, at));
+        listed.unwrap_or_default()
+    }
+
+    fn completes_from_index(&self, cx: &Ctx, at: usize) -> bool {
+        Self::applies(cx) && cx.doc.kind == FileKind::Lua && completion::sign_before(&cx.doc.src, at).is_some()
     }
 
     fn semantic_tokens(&self, cx: &Ctx) -> Vec<semantic::Token> {
