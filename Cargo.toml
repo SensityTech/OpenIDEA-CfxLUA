@@ -22,6 +22,10 @@ serde_json = "1"
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 
+[features]
+# Counts every allocation and logs what each part of the plugin keeps once a project is read.
+mem-trace = []
+
 [profile.release]
 opt-level = 3
 lto = true

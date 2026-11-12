@@ -8,6 +8,7 @@ pub mod index;
 pub mod lua;
 pub mod luals;
 pub mod manifest;
+pub mod memtrace;
 pub mod natives;
 pub mod nui;
 pub mod perf;
@@ -82,6 +83,23 @@ impl Drop for Timed {
         }
     }
 }
+
+/// The features, in the order of `all_features`: how logs and measurements name them.
+pub const FEATURES: [&str; 13] = [
+    "natives",
+    "runtime",
+    "manifest",
+    "statebags",
+    "events",
+    "nui",
+    "values",
+    "coords",
+    "perf",
+    "syntax",
+    "editor",
+    "escrow",
+    "luals",
+];
 
 pub fn all_features() -> Vec<Box<dyn Feature>> {
     vec![
@@ -197,12 +215,14 @@ impl DevKit {
         paths.dedup();
         let ws = &mut self.workspaces[i];
         let pending = self.unread.len();
+        let listed = memtrace::live();
         for path in paths {
             ws.set(&path, None);
             if project::file_kind(&path) != FileKind::Other {
                 self.unread.push((i, path));
             }
         }
+        memtrace::keep("file list", listed);
         let zones = self.settings.string("coords.zonesFile", "");
         if !zones.trim().is_empty() {
             let zones = slash(zones.trim());
@@ -267,7 +287,7 @@ impl DevKit {
             for ws in &mut self.workspaces {
                 ws.indexing = false;
             }
-            host::log(LogLevel::Info, &format!("resources indexed{}", memory_note()));
+            host::log(LogLevel::Info, &format!("resources indexed{}{}", memory_note(), memtrace::report()));
             self.docs.indexed();
         }
     }
@@ -280,7 +300,9 @@ impl DevKit {
                 if start.elapsed().as_millis() > 10 {
                     return false;
                 }
+                let since = memtrace::live();
                 self.features[self.derived].indexed(&self.workspaces[i]);
+                memtrace::keep(&format!("{} derived", FEATURES[self.derived]), since);
                 self.derived += 1;
             }
             self.derived = 0;
@@ -302,7 +324,9 @@ impl DevKit {
             let Some((i, path)) = self.unread.pop() else { break };
             let ws = &mut self.workspaces[i];
             let text = projects.iter().find(|(root, _)| *root == ws.root).and_then(|(_, p)| p.read_file(&path).ok());
+            let since = memtrace::live();
             ws.set(&path, text.as_deref());
+            memtrace::keep("texts", since);
             if text.is_some() {
                 self.pending.push((i, slash(&path)));
             }
@@ -322,7 +346,9 @@ impl DevKit {
             let games = natives::project_games(&self.settings, &self.workspaces[i].detected_games());
             for set in games.into_iter().map(natives::NativeSet::for_game).chain([natives::NativeSet::Server]) {
                 loaded |= !self.natives.is_loaded(set);
+                let since = memtrace::live();
                 self.natives.catalog(set);
+                memtrace::keep("catalogs", since);
             }
         }
         loaded
@@ -340,15 +366,22 @@ impl DevKit {
             if text.len() > MAX_INDEXED {
                 continue;
             }
-            let cost = if f.kind == FileKind::Web { 2 * text.len() } else { text.len() };
+            let cost = memtrace::COST * if f.kind == FileKind::Web { 2 * text.len() } else { text.len() };
             if used + cost > slice.bytes && (used > 0 || !slice.heavy) {
                 self.pending.push((i, path));
                 break;
             }
             used += cost;
             let src = parse(f.kind, text);
-            for feature in &self.features {
-                feature.index_file(ws, &f.path, f.kind, &src);
+            for (feature, name) in self.features.iter().zip(FEATURES) {
+                let since = memtrace::live();
+                if memtrace::COUNTING {
+                    // Its own analysis, freed before the count: what a feature builds in a shared one is not kept.
+                    feature.index_file(ws, &f.path, f.kind, &parse(f.kind, text));
+                } else {
+                    feature.index_file(ws, &f.path, f.kind, &src);
+                }
+                memtrace::keep(name, since);
             }
             // The workspace holds what the editor last sent: nothing of that document is left to index.
             self.stale.take_if(|stale| stale.ws == i && stale.path == path);
@@ -1076,21 +1109,7 @@ const _: () = {
 mod tests {
     use super::*;
 
-    const FEATURE_NAMES: [&str; 13] = [
-        "natives",
-        "runtime",
-        "manifest",
-        "statebags",
-        "events",
-        "nui",
-        "values",
-        "coords",
-        "perf",
-        "syntax",
-        "editor",
-        "escrow",
-        "luals",
-    ];
+    const FEATURE_NAMES: [&str; 13] = FEATURES;
 
     type Section = (String, Vec<(String, String)>);
 
