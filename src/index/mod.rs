@@ -10,7 +10,10 @@ pub use declare::declare;
 
 use crate::lua::doc::tags::Visibility;
 use crate::ty::{FileId, Ty, global_type_name};
-use std::collections::{BTreeMap, HashMap};
+use std::borrow::Borrow;
+use std::cmp::Ordering;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::ops::Bound;
 use std::rc::Rc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -40,8 +43,8 @@ impl MemberKind {
 
 #[derive(Clone, Debug)]
 pub struct Member {
-    /// The classes it belongs to.
-    pub owners: Vec<Rc<str>>,
+    /// The classes it belongs to. The members a file declares on the same classes share the list.
+    pub owners: Rc<[Rc<str>]>,
     pub name: Rc<str>,
     pub kind: MemberKind,
     /// The node that declares it: of the documentation tree for a `DocField`, of the Lua tree otherwise.
@@ -109,10 +112,63 @@ type Places = Vec<(FileId, u32)>;
 /// Where each name is declared; sorted, so that what is listed comes out in the same order every time.
 type Names = BTreeMap<Rc<str>, Places>;
 
+/// Where a member is declared, under one of the classes it belongs to. Sorted by class, then by name, then
+/// by file: the members of a class are listed by name, and those of one name always in the same order.
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+struct Place {
+    class: Rc<str>,
+    name: Rc<str>,
+    file: FileId,
+    at: u32,
+}
+
+/// A place as it is searched for: its names are not owned.
+trait Placed {
+    fn key(&self) -> (&str, &str, FileId, u32);
+}
+
+impl Placed for Place {
+    fn key(&self) -> (&str, &str, FileId, u32) {
+        (&self.class, &self.name, self.file, self.at)
+    }
+}
+
+impl Placed for (&str, &str, FileId, u32) {
+    fn key(&self) -> (&str, &str, FileId, u32) {
+        *self
+    }
+}
+
+impl<'a> Borrow<dyn Placed + 'a> for Place {
+    fn borrow(&self) -> &(dyn Placed + 'a) {
+        self
+    }
+}
+
+impl PartialEq for dyn Placed + '_ {
+    fn eq(&self, other: &Self) -> bool {
+        self.key() == other.key()
+    }
+}
+
+impl Eq for dyn Placed + '_ {}
+
+impl PartialOrd for dyn Placed + '_ {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for dyn Placed + '_ {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.key().cmp(&other.key())
+    }
+}
+
 #[derive(Default)]
 pub struct Index {
     files: HashMap<FileId, Declared>,
-    members: HashMap<Rc<str>, Names>,
+    members: BTreeSet<Place>,
     classes: Names,
     aliases: Names,
 }
@@ -134,9 +190,9 @@ impl Index {
     pub fn set(&mut self, file: FileId, declared: Declared) {
         self.remove(file);
         for (at, member) in declared.members.iter().enumerate() {
-            for owner in &member.owners {
-                let named = self.members.entry(owner.clone()).or_default();
-                named.entry(member.name.clone()).or_default().push((file, at as u32));
+            for owner in member.owners.iter() {
+                let (class, name) = (owner.clone(), member.name.clone());
+                self.members.insert(Place { class, name, file, at: at as u32 });
             }
         }
         for (at, class) in declared.classes.iter().enumerate() {
@@ -150,13 +206,10 @@ impl Index {
 
     pub fn remove(&mut self, file: FileId) {
         let Some(declared) = self.files.remove(&file) else { return };
-        for member in &declared.members {
-            for owner in &member.owners {
-                let Some(named) = self.members.get_mut(&**owner) else { continue };
-                forget(named, &member.name, file);
-                if named.is_empty() {
-                    self.members.remove(&**owner);
-                }
+        for (at, member) in declared.members.iter().enumerate() {
+            for owner in member.owners.iter() {
+                let place: &dyn Placed = &(&**owner, &*member.name, file, at as u32);
+                self.members.remove(place);
             }
         }
         for class in &declared.classes {
@@ -167,9 +220,16 @@ impl Index {
         }
     }
 
-    fn found(&self, place: &(FileId, u32)) -> Option<Found<'_>> {
-        let member = self.files.get(&place.0)?.members.get(place.1 as usize)?;
-        Some(Found { file: place.0, member })
+    fn found(&self, place: &Place) -> Option<Found<'_>> {
+        let member = self.files.get(&place.file)?.members.get(place.at as usize)?;
+        Some(Found { file: place.file, member })
+    }
+
+    /// The places kept under `class`, from the name `name` on.
+    fn from(&self, class: &str, name: &str) -> impl Iterator<Item = &Place> {
+        let first: &dyn Placed = &(class, name, 0, 0);
+        let places = self.members.range::<dyn Placed, _>((Bound::Included(first), Bound::Unbounded));
+        places.take_while(move |place| *place.class == *class)
     }
 
     pub fn class(&self, name: &str) -> Option<&ClassDef> {
@@ -184,14 +244,13 @@ impl Index {
 
     /// The members declared under the very name `class`.
     pub fn own(&self, class: &str) -> impl Iterator<Item = Found<'_>> {
-        let named = self.members.get(class).into_iter().flat_map(|named| named.values());
-        named.flatten().filter_map(|place| self.found(place))
+        self.from(class, "").filter_map(|place| self.found(place))
     }
 
     /// The members `name` declared under the very name `class`.
     pub fn own_named(&self, class: &str, name: &str) -> impl Iterator<Item = Found<'_>> {
-        let places = self.members.get(class).and_then(|named| named.get(name));
-        places.into_iter().flatten().filter_map(|place| self.found(place))
+        let named = self.from(class, name).take_while(move |place| *place.name == *name);
+        named.filter_map(|place| self.found(place))
     }
 
     /// The other names the members of a declared class are kept under: the table it annotates and, when a
@@ -305,7 +364,7 @@ mod tests {
 
     fn member(owner: &str, name: &str, kind: MemberKind) -> Member {
         Member {
-            owners: vec![owner.into()],
+            owners: [Rc::from(owner)].into(),
             name: name.into(),
             kind,
             node: 0,
@@ -390,8 +449,20 @@ mod tests {
         assert_eq!(names(index.own("Shop").collect()), ["Shop.close", "Shop.open"]);
         assert_eq!(index.own_named("Shop", "open").map(|found| found.file).collect::<Vec<_>>(), [2]);
         assert!(index.own("_G").next().is_none());
+
+        // A file that declares again keeps its place among the others: by file, not by who came last.
+        index.set(1, Declared { members: vec![member("Shop", "open", MemberKind::Method)], ..Declared::default() });
+        assert_eq!(index.own_named("Shop", "open").map(|found| found.file).collect::<Vec<_>>(), [1, 2]);
+        let twice = vec![member("Shop", "open", MemberKind::Field), member("Shop", "open", MemberKind::Method)];
+        index.set(2, Declared { members: twice, ..Declared::default() });
+        let kinds: Vec<MemberKind> = index.own_named("Shop", "open").map(|found| found.member.kind).collect();
+        assert_eq!(kinds, [MemberKind::Method, MemberKind::Field, MemberKind::Method], "in the order of the file");
+        assert!(index.own_named("Shop", "ope").next().is_none() && index.own_named("Sho", "open").next().is_none());
+        assert!(index.own("Sho").next().is_none() && index.own("Shop2").next().is_none());
+
         index.remove(1);
         index.remove(2);
         assert!(index.own("Shop").next().is_none() && index.file(1).is_none());
+        assert!(index.members.is_empty());
     }
 }

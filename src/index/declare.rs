@@ -10,6 +10,7 @@ use crate::ty::context::{Cx, Psi};
 use crate::ty::doc::Reader;
 use crate::ty::expressions::table_type_name;
 use crate::ty::{FileId, G, Ty, psi, resolve};
+use std::collections::HashSet;
 use std::rc::Rc;
 
 /// The name `---@module Name` gives to a file, or else the name its first `module("name")` statement is
@@ -45,6 +46,8 @@ struct Declaring<'a, 'c> {
     file: FileId,
     src: &'a Source,
     module: Rc<str>,
+    /// The lists of classes the members of the file belong to, each kept once.
+    owners: HashSet<Rc<[Rc<str>]>>,
     out: Declared,
 }
 
@@ -92,6 +95,16 @@ impl Declaring<'_, '_> {
         }
     }
 
+    /// The one copy of a list of classes.
+    fn shared(&mut self, owners: Vec<Rc<str>>) -> Rc<[Rc<str>]> {
+        if let Some(kept) = self.owners.get(owners.as_slice()) {
+            return kept.clone();
+        }
+        let kept: Rc<[Rc<str>]> = owners.into();
+        self.owners.insert(kept.clone());
+        kept
+    }
+
     fn member(
         &mut self,
         owners: Vec<Rc<str>>,
@@ -100,6 +113,7 @@ impl Declaring<'_, '_> {
         (node, documented): (Node, Node),
         ty: Option<Ty>,
     ) {
+        let owners = self.shared(owners);
         self.out.members.push(Member {
             owners,
             name: name.into(),
@@ -192,8 +206,9 @@ impl Declaring<'_, '_> {
         let named = tag.child(N::DocClassNameRef).map(Node::code);
         let class = named.or_else(|| comment.tag(N::DocTagClass).and_then(tags::name));
         let Some(class) = class else { return };
+        let owners = self.shared(vec![class.into()]);
         self.out.members.push(Member {
-            owners: vec![class.into()],
+            owners,
             name: name.into(),
             kind: MemberKind::DocField,
             node: tag.id(),
@@ -229,6 +244,7 @@ pub fn declare(cx: &Cx, file: FileId, src: &Source) -> Declared {
         file,
         src,
         module: module.clone().unwrap_or_else(|| G.into()),
+        owners: HashSet::new(),
         out: Declared { module, ..Declared::default() },
     };
     for node in src.root().descendants() {
@@ -247,5 +263,6 @@ pub fn declare(cx: &Cx, file: FileId, src: &Source) -> Declared {
     for comment in src.docs().children_of(N::DocComment) {
         declaring.comment(Comment(comment));
     }
+    declaring.out.members.shrink_to_fit();
     declaring.out
 }
