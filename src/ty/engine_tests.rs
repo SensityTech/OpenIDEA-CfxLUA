@@ -501,6 +501,22 @@ fn functions_that_call_one_another_in_a_circle_are_each_read_once() {
 }
 
 #[test]
+fn a_question_that_spends_its_steps_or_its_time_says_less() {
+    let text = circle_of_functions(12);
+    let project = Project::new(&[("main.lua", &text)]);
+    let (_, src) = project.main();
+    let reached = src.root().descendants().find(|node| node.is(N::NameDef) && node.code() == "reached");
+    let reached = project.psi(reached.expect("the local"));
+    let asked = |cx: Cx| (cx.infer(reached).each().contains(&Ty::NUMBER), cx.steps());
+    let (complete, steps) = asked(project.cx());
+    assert!(complete && (40..2_000).contains(&steps), "{steps} inferences");
+    let minute = std::time::Duration::from_secs(60);
+    assert_eq!(asked(project.cx().bounded(20, minute)), (false, 20), "past its steps nothing more is inferred");
+    assert_eq!(asked(project.cx().bounded(steps, minute)), (true, steps), "with enough of them, all is");
+    assert!(!asked(project.cx().bounded(u32::MAX, std::time::Duration::ZERO)).0, "nor past its time");
+}
+
+#[test]
 fn fields_given_to_one_another_across_files_are_each_read_once() {
     // Each file gives each field of a global another field, and one of them a number: every assignment of a
     // field leads to every assignment of another. An answer of the circle is kept until the first question that

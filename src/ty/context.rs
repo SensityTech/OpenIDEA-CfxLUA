@@ -5,6 +5,7 @@ use crate::lua::tree::Node;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 /// A node of a file the engine reads: of its Lua tree, or of its documentation tree.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -72,6 +73,8 @@ impl Default for Options {
 }
 
 const MAX_DEPTH: u32 = 96;
+/// How many inferences are made between two looks at the clock.
+const TIMED_EVERY: u32 = 16;
 
 /// The rank of a guarded question among those opened so far: the questions that are open at one time have
 /// growing ranks, and the youngest is closed first.
@@ -112,6 +115,10 @@ pub struct Cx<'a> {
     stub: Cell<bool>,
     depth: Cell<u32>,
     serials: Cell<Serial>,
+    /// How many answers were inferred so far, how many may be, and until when.
+    steps: Cell<u32>,
+    budget: u32,
+    until: Option<Instant>,
     /// The open questions that cut the answer being inferred, each one once.
     cut_by: RefCell<Vec<Serial>>,
     guards: RefCell<Vec<Guard>>,
@@ -132,6 +139,9 @@ impl<'a> Cx<'a> {
             stub: Cell::new(false),
             depth: Cell::new(0),
             serials: Cell::new(0),
+            steps: Cell::new(0),
+            budget: u32::MAX,
+            until: None,
             cut_by: RefCell::default(),
             guards: RefCell::default(),
             busy: RefCell::default(),
@@ -147,6 +157,19 @@ impl<'a> Cx<'a> {
     pub fn at_home(mut self, file: FileId, src: &'a Source) -> Cx<'a> {
         self.home = Some((file, src));
         self
+    }
+
+    /// The same question, answered with `steps` inferences at most and within `time`: past either, what is
+    /// asked is unknown, and the answer says less instead of coming late.
+    pub fn bounded(mut self, steps: u32, time: Duration) -> Cx<'a> {
+        self.budget = steps;
+        self.until = Some(Instant::now() + time);
+        self
+    }
+
+    /// How many answers were inferred so far.
+    pub fn steps(&self) -> u32 {
+        self.steps.get()
     }
 
     fn source(&self, file: FileId) -> Option<Rc<Source>> {
@@ -233,6 +256,14 @@ impl<'a> Cx<'a> {
         if self.depth.get() >= MAX_DEPTH {
             self.cut(self.youngest().unwrap_or(UNBOUND));
             return Ty::Unknown;
+        }
+        if self.steps.get() >= self.budget {
+            self.cut(UNBOUND);
+            return Ty::Unknown;
+        }
+        self.steps.set(self.steps.get() + 1);
+        if self.steps.get().is_multiple_of(TIMED_EVERY) && self.until.is_some_and(|until| Instant::now() >= until) {
+            self.steps.set(self.budget);
         }
         let first = self.serials.get();
         let outer = std::mem::take(&mut *self.cut_by.borrow_mut());

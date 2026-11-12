@@ -10,10 +10,16 @@ use crate::workspace::{Stamp, Workspace};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::time::Duration;
 
 /// How much text one question may make the engine read anew: what is over is left unread, and the answer
 /// says less instead of coming late.
 const READ_BUDGET: usize = 400_000;
+/// How many inferences one question may make, and how long it may take: past either, what is asked is unknown.
+/// A question of this project takes hundreds of inferences at most; the IDE stops a plugin whose call runs
+/// 500 ms.
+const STEP_BUDGET: u32 = 50_000;
+const TIME_BUDGET: Duration = Duration::from_millis(200);
 /// How many files, and how much of their text, stay parsed between two questions.
 const KEPT_FILES: usize = 48;
 const KEPT_BYTES: usize = 2_000_000;
@@ -166,6 +172,7 @@ impl Projects {
         let project = projects.get(&ws.root)?;
         let file = project.ids.ids.get(path).copied()?;
         let reading = Reading { ws, project, from: path, left: Cell::new(READ_BUDGET) };
-        Some(ask(&Cx::new(&reading, &project.index, &self.options).at_home(file, src), file))
+        let cx = Cx::new(&reading, &project.index, &self.options).at_home(file, src);
+        Some(ask(&cx.bounded(STEP_BUDGET, TIME_BUDGET), file))
     }
 }
