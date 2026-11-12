@@ -244,6 +244,16 @@ impl Index {
         self.files.get(file)?.aliases.get(*at as usize)
     }
 
+    /// The names of the classes the project declares, sorted.
+    pub fn class_names(&self) -> impl Iterator<Item = &str> {
+        self.classes.keys().map(|name| &**name)
+    }
+
+    /// The names of its aliases, sorted.
+    pub fn alias_names(&self) -> impl Iterator<Item = &str> {
+        self.aliases.keys().map(|name| &**name)
+    }
+
     /// The members declared under the very name `class`.
     pub fn own(&self, class: &str) -> impl Iterator<Item = Found<'_>> {
         self.from(class, "").filter_map(|place| self.found(place))

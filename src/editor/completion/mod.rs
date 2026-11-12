@@ -1,5 +1,6 @@
 //! What the type engine completes in a Lua file (`editor/completion/` of the JetBrains plugin).
 
+mod docs;
 mod expected;
 mod members;
 mod names;
@@ -30,11 +31,16 @@ pub enum Place {
     Name(usize),
     /// Inside the quoted string that is the code token of that index.
     String(usize),
+    /// In a documentation comment, in a word that starts at that offset or where one could start.
+    Doc(usize),
 }
 
 pub fn place(src: &Source, at: usize) -> Option<Place> {
     if let Some(string) = src.quoted_at(at) {
         return Some(Place::String(string));
+    }
+    if let Some(start) = docs::start(src, at) {
+        return Some(Place::Doc(start));
     }
     if src.in_literal(at) {
         return None;
@@ -53,7 +59,7 @@ pub struct Typed {
 
 impl Typed {
     pub fn new(src: &Source, at: usize, place: Place) -> Self {
-        let written = matches!(place, Place::Name(start) if start == at).then(|| {
+        let written = matches!(place, Place::Name(start) | Place::Doc(start) if start == at).then(|| {
             let mut text = String::with_capacity(src.text.len() + CARET_NAME.len());
             text.push_str(&src.text[..at]);
             text.push_str(CARET_NAME);
@@ -125,6 +131,7 @@ pub fn complete(cx: &Cx, file: FileId, doc: &Doc, src: &Source, at: usize, place
         }
         Place::Name(start) => names::names(&mut listing, file, src, start, &doc.src.text[start..at]),
         Place::String(token) => expected::strings(&mut listing, file, src, token, at),
+        Place::Doc(start) => docs::complete(&mut listing, src, start, at),
     }
     listing.items.sort_by(|a, b| a.sort_text.cmp(&b.sort_text));
     listing.items
