@@ -1562,6 +1562,18 @@ mod tests {
     }
 
     #[test]
+    fn a_native_is_documented_once_and_types_what_it_is_given_to() {
+        let host = openidea_plugin::mock::MockHost::install();
+        let mut kit = shop_resource(&host);
+        let typed = lua(SHOP_CLIENT, 2, "local c = GetEntityCoords(PlayerPedId())\nprint(c)\n");
+        let native = kit.hover(&typed, Position::new(0, 14)).expect("the native");
+        assert!(native.markdown.starts_with("```lua\nfunction GetEntityCoords("), "{}", native.markdown);
+        assert!(!native.markdown.contains("\n\n---\n\n"), "the natives document it, the type engine does not");
+        let local = kit.hover(&typed, Position::new(1, 6)).expect("the local");
+        assert_eq!(local.markdown, "```lua\nlocal c: vector3\n```");
+    }
+
+    #[test]
     fn what_another_feature_offers_is_not_offered_again_by_the_type_engine() {
         let host = openidea_plugin::mock::MockHost::install();
         let mut kit = shop_resource(&host);

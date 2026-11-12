@@ -109,10 +109,7 @@ fn the_cfx_runtime_is_documented_from_its_stubs() {
 
 #[test]
 fn a_native_is_the_function_its_catalog_describes() {
-    assert_eq!(
-        declared(&client("local c = GetEntity<caret>Coords(1)")),
-        "GetEntityCoords(entity: number, alive?: boolean): vector3"
-    );
+    assert_eq!(hovered(&client("local c = GetEntity<caret>Coords(1)")), "", "documented by the natives themselves");
     assert_eq!(declared(&client("local c = GetEntityCoords(1)\nprint(c<caret>)")), "local c: vector3");
     assert_eq!(signatures(&client("GetEntityCoords(<caret>)")), ["entity: number, alive?: boolean"]);
     assert_eq!(

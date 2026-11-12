@@ -295,8 +295,10 @@ impl Page<'_, '_> {
         let statement = matches!(node.kind(), N::FuncDef | N::ClassMethodDef);
         let assigned = psi::assign_stat(node);
         let ty = self.cx.with_value(0, || self.cx.infer(member));
-        // A name nothing declares and nothing is known of: there is nothing to say.
-        if matches!(node.kind(), N::IndexExpr | N::NameExpr) && assigned.is_none() && plain(&ty).is_invalid() {
+        // A name nothing declares is a native, which its own feature documents, or is unknown; a field nothing
+        // declares is shown only where its type is known.
+        let read = assigned.is_none() && matches!(node.kind(), N::IndexExpr | N::NameExpr);
+        if read && (node.is(N::NameExpr) || plain(&ty).is_invalid()) {
             return None;
         }
         let owner = self.owner(member);

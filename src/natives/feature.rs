@@ -2,10 +2,12 @@ use super::convert::cmp_ignore_case;
 use super::model::Native;
 use super::parse::longest_backtick_run;
 use super::{NativeSet, client_sets, update, visible_sets};
+use crate::editor::hover::Hover;
 use crate::feature::{CommandCx, CommandResult, Ctx, Feature, Problem};
 use crate::lua::Source;
 use crate::lua::lexer::Tok;
 use crate::lua::syntax::Seg;
+use crate::lua::tree::N;
 use crate::matching::{Match, Query};
 use crate::project::{FileKind, Game, Side};
 use crate::settings::keys;
@@ -73,6 +75,31 @@ impl Feature for NativesFeature {
 
     fn problems(&self, cx: &Ctx) -> Vec<Problem> {
         wrong_side(cx)
+    }
+
+    /// The documentation of the native a name calls: a member, or a name the file declares, is no native.
+    fn hover(&self, cx: &Ctx, at: usize) -> Option<Hover> {
+        if !cx.settings.enabled() || cx.doc.kind != FileKind::Lua || !cx.doc.is_lua() {
+            return None;
+        }
+        let src = &cx.doc.src;
+        // The name that holds the caret, or that ends there.
+        let after = src.toks.partition_point(|token| token.start <= at);
+        let holds = |index: &usize| src.toks[*index].kind == Tok::Name && at <= src.toks[*index].end;
+        let index = [after.checked_sub(1), after.checked_sub(2)].into_iter().flatten().find(holds)?;
+        let token = src.toks[index];
+        if index > 0 && (src.is_op(index - 1, ".") || src.is_op(index - 1, ":")) {
+            return None;
+        }
+        let named = src.root().tree().node_at(&src.text, token.start);
+        if !named.is(N::NameExpr) || src.scopes().resolve(named).is_some() {
+            return None;
+        }
+        let mut sets = visible_sets(cx.settings, &cx.ws.detected_games(), cx.doc.side, resource_games(cx));
+        // lua-language-server documents the natives of its definitions.
+        sets.retain(|set| !cx.ws.luals.sets.contains(set));
+        let native = cx.natives.find(token.text(&src.text), &sets)?;
+        Some(Hover { range: (token.start, token.end), markdown: markdown(native) })
     }
 }
 
@@ -325,6 +352,29 @@ mod tests {
             .into_iter()
             .map(|p| (doc.text()[p.start..p.end].to_owned(), p.message))
             .collect()
+    }
+
+    #[test]
+    fn a_native_is_documented_where_it_is_named() {
+        let hovered = |rel: &str, text: &str| {
+            let fx = fixture(rel, text);
+            let (doc, at) = fx.caret(rel);
+            let hover = NativesFeature.hover(&fx.cx(&doc), at)?;
+            Some((doc.text()[hover.range.0..hover.range.1].to_owned(), hover.markdown))
+        };
+        let client = "res/client/main.lua";
+        let (name, markdown) = hovered(client, "local c = GetEntity<caret>Coords(ped)").expect("a hover");
+        assert_eq!(name, "GetEntityCoords");
+        assert!(markdown.starts_with("```lua\nfunction GetEntityCoords("), "{markdown}");
+        assert!(hovered(client, "local c = <caret>GetEntityCoords(ped)").is_some(), "on its first letter");
+        assert!(hovered(client, "local c = GetEntityCoords<caret>(ped)").is_some(), "right after its last one");
+        assert!(hovered(client, "local c = lib.GetEntity<caret>Coords(ped)").is_none(), "a field of that name");
+        let local = "local GetEntityCoords = lib.coords\nlocal c = GetEntity<caret>Coords(ped)";
+        assert!(hovered(client, local).is_none(), "a local of that name");
+        assert!(hovered(client, "-- GetEntity<caret>Coords").is_none());
+        assert!(hovered(client, "local s = 'GetEntity<caret>Coords'").is_none());
+        assert!(hovered("res/server/main.lua", "local c = GetEntity<caret>Coords(ped)").is_none(), "a server script");
+        assert!(hovered("res/server/main.lua", "GetPlayer<caret>Identifiers(1)").is_some());
     }
 
     #[test]
