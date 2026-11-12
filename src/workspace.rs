@@ -2,6 +2,7 @@ use crate::luals::{self, Contents, LUARC_FILES};
 use crate::project::{self, FileKind, Resource, Side};
 use crate::text::{parent, slash};
 use std::collections::BTreeMap;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -17,11 +18,37 @@ pub const SCAN: &[(&str, u32)] = &[
 
 pub const MAX_FILE: usize = 3_000_000;
 
+/// What a text is known by once it is no longer kept: its length and a hash of it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Stamp {
+    len: usize,
+    hash: u64,
+}
+
+impl Stamp {
+    pub fn of(text: &str) -> Stamp {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        text.hash(&mut hasher);
+        Stamp { len: text.len(), hash: hasher.finish() }
+    }
+
+    /// The length of the text, in bytes.
+    pub fn size(self) -> usize {
+        self.len
+    }
+}
+
 #[derive(Clone)]
 pub struct WsFile {
     pub path: String,
     pub kind: FileKind,
+    /// The text, while it is kept: always for a manifest, a configuration or what the editor sent; for a
+    /// script read from the disk, until it is indexed.
     pub text: Option<Arc<str>>,
+    /// The stamp of the text the file was last given, kept or not.
+    pub stamp: Option<Stamp>,
+    /// The text came from the editor: the disk may hold another one.
+    pub edited: bool,
 }
 
 #[derive(Default)]
@@ -39,6 +66,8 @@ pub struct Workspace {
     definitions: BTreeMap<String, Contents>,
     /// What lua-language-server loads of the definitions this plugin wrote, and completes itself.
     pub luals: Contents,
+    /// Reads a file of the project where it is stored, for a text that is no longer kept.
+    loader: Option<fn(&str) -> Option<String>>,
 }
 
 impl Workspace {
@@ -48,6 +77,12 @@ impl Workspace {
             native_backslashes: root.contains('\\'),
             ..Self::default()
         }
+    }
+
+    /// The same workspace, reading with `loader` the texts it no longer keeps.
+    pub fn reading(mut self, loader: fn(&str) -> Option<String>) -> Self {
+        self.loader = Some(loader);
+        self
     }
 
     pub fn from_files(root: &str, files: &[(&str, &str)]) -> Self {
@@ -73,16 +108,27 @@ impl Workspace {
         format!("{}/{}", self.root, rel.trim_start_matches('/'))
     }
 
+    /// Gives the file the text read where it is stored, or none for a file that is only listed.
     pub fn set(&mut self, path: &str, text: Option<&str>) {
+        self.give(path, text, false);
+    }
+
+    /// Gives the file the text the editor shows, which the disk may not hold yet.
+    pub fn edit(&mut self, path: &str, text: &str) {
+        self.give(path, Some(text), true);
+    }
+
+    fn give(&mut self, path: &str, text: Option<&str>, edited: bool) {
         let path = slash(path);
         let kind = project::file_kind(&path);
         let definitions = match text.and_then(Contents::of) {
             Some(contents) => self.definitions.insert(path.clone(), contents.clone()) != Some(contents),
             None => self.definitions.remove(&path).is_some(),
         };
-        let text = text.filter(|t| t.len() <= MAX_FILE).map(Arc::from);
+        let text = text.filter(|t| t.len() <= MAX_FILE);
+        let stamp = text.map(Stamp::of);
         if let Some(old) = self.files.get(&path)
-            && old.text.as_deref() == text.as_deref()
+            && old.stamp == stamp
         {
             if definitions {
                 self.refresh_luals();
@@ -90,7 +136,8 @@ impl Workspace {
             return;
         }
         let manifest = kind == FileKind::Manifest;
-        if self.files.insert(path.clone(), WsFile { path: path.clone(), kind, text: text.clone() }).is_none() {
+        let file = WsFile { path: path.clone(), kind, text: text.map(Arc::from), stamp, edited };
+        if self.files.insert(path.clone(), file).is_none() {
             self.listing = LISTINGS.fetch_add(1, Ordering::Relaxed);
         }
         if manifest {
@@ -145,8 +192,44 @@ impl Workspace {
         self.files.get(&slash(path))
     }
 
+    /// The text of a file, while it is kept.
     pub fn text(&self, path: &str) -> Option<&str> {
         self.files.get(&slash(path)).and_then(|f| f.text.as_deref())
+    }
+
+    /// Whether `text` is the text the file was last given.
+    pub fn holds(&self, path: &str, text: &str) -> bool {
+        match self.files.get(&slash(path)) {
+            Some(WsFile { text: Some(kept), .. }) => **kept == *text,
+            Some(file) => file.stamp == Some(Stamp::of(text)),
+            None => false,
+        }
+    }
+
+    pub fn stamp(&self, path: &str) -> Option<Stamp> {
+        self.files.get(&slash(path)).and_then(|f| f.stamp)
+    }
+
+    /// Lets go of the text of a script read from the disk, once what it declares is indexed: its stamp
+    /// stays. What the editor sent is kept, the disk may not hold it.
+    pub fn release(&mut self, path: &str) {
+        if let Some(file) = self.files.get_mut(&slash(path))
+            && matches!(file.kind, FileKind::Lua | FileKind::Web)
+            && !file.edited
+        {
+            file.text = None;
+        }
+    }
+
+    /// The text the file was last given: the one kept, or else the one read again where the file is
+    /// stored, when it is still that text.
+    pub fn read(&self, path: &str) -> Option<Arc<str>> {
+        let file = self.files.get(&slash(path))?;
+        if let Some(kept) = &file.text {
+            return Some(kept.clone());
+        }
+        let read = (self.loader?)(&file.path)?;
+        (file.stamp == Some(Stamp::of(&read))).then(|| Arc::from(read))
     }
 
     pub fn exists(&self, path: &str) -> bool {
@@ -247,5 +330,55 @@ mod tests {
         ws.remove("/p/res/fxmanifest.lua");
         assert_eq!(ws.resource("/p/res").unwrap().manifest, "__resource.lua");
         assert_eq!(ws.side_of("/p/res/a.lua"), crate::project::Side::Server);
+    }
+
+    #[test]
+    fn a_script_read_from_the_disk_lets_go_of_its_text_once_indexed() {
+        fn disk(path: &str) -> Option<String> {
+            match path {
+                "/p/res/a.lua" => Some("local a = 1".to_owned()),
+                "/p/res/changed.lua" => Some("local changed = 2".to_owned()),
+                _ => None,
+            }
+        }
+        let files = [
+            ("res/fxmanifest.lua", "client_script 'a.lua'"),
+            ("res/a.lua", "local a = 1"),
+            ("res/changed.lua", "local changed = 1"),
+            ("res/ui.js", "fetch('x')"),
+            ("res/vite.config.js", "export default {}"),
+            ("res/zones.json", "{}"),
+        ];
+        let mut ws = Workspace::from_files("/p", &files).reading(disk);
+        let generation = ws.generation;
+        for (rel, _) in files {
+            ws.release(&format!("/p/{rel}"));
+        }
+        assert_eq!(ws.text("/p/res/a.lua"), None);
+        assert_eq!(ws.text("/p/res/ui.js"), None);
+        assert!(ws.text("/p/res/fxmanifest.lua").is_some(), "a manifest is read at every question");
+        assert!(ws.text("/p/res/vite.config.js").is_some() && ws.text("/p/res/zones.json").is_some());
+        assert_eq!(ws.generation, generation, "nothing changed");
+        assert!(ws.exists("/p/res/a.lua") && ws.resource_of("/p/res/a.lua").is_some());
+
+        assert!(ws.holds("/p/res/a.lua", "local a = 1") && !ws.holds("/p/res/a.lua", "local a = 2"));
+        assert!(!ws.holds("/p/res/none.lua", ""));
+        assert_eq!(ws.stamp("/p/res/a.lua"), Some(Stamp::of("local a = 1")));
+        assert_eq!(ws.read("/p/res/a.lua").as_deref(), Some("local a = 1"), "read again where it is stored");
+        assert_eq!(ws.read("/p/res/changed.lua"), None, "the disk holds another text: it is not the one indexed");
+        assert_eq!(ws.read("/p/res/ui.js"), None, "it cannot be read any more");
+        assert_eq!(ws.read("/p/res/zones.json").as_deref(), Some("{}"), "a kept text is not read again");
+
+        ws.set("/p/res/a.lua", Some("local a = 1"));
+        assert_eq!((ws.text("/p/res/a.lua"), ws.generation), (None, generation), "the same text is not kept again");
+        ws.edit("/p/res/a.lua", "local a = 1");
+        assert_eq!(ws.text("/p/res/a.lua"), None, "what the editor shows is what the disk holds");
+        ws.edit("/p/res/a.lua", "local a = 1\nlocal b");
+        ws.release("/p/res/a.lua");
+        assert_eq!(ws.text("/p/res/a.lua"), Some("local a = 1\nlocal b"), "the disk does not hold it: it is kept");
+        assert_eq!(ws.read("/p/res/a.lua").as_deref(), Some("local a = 1\nlocal b"));
+        ws.set("/p/res/a.lua", Some("local a = 3"));
+        ws.release("/p/res/a.lua");
+        assert_eq!(ws.text("/p/res/a.lua"), None, "saved and read from the disk again");
     }
 }

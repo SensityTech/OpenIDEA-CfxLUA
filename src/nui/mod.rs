@@ -103,9 +103,9 @@ impl State {
                 if let Some(c) = calls.get(path) {
                     return c.clone();
                 }
-                let read: Rc<[LuaCall]> = match ws.text(path) {
+                let read: Rc<[LuaCall]> = match ws.read(path) {
                     Some(text) => {
-                        let src = Source::new(text);
+                        let src = Source::new(&text);
                         lua::calls(&lua::Analysis::new(&src)).into()
                     }
                     None => Rc::from(Vec::new()),

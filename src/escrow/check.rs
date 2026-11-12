@@ -242,20 +242,20 @@ pub fn check(ws: &Workspace, res: &Resource) -> Report {
     // The indexing reads every file: lexing them here again would overrun the call.
     let mut budget = if ws.indexing { 0 } else { facts::LEXED_PER_CALL };
     for f in files.iter().filter(|f| rules::extension(&f.rel) == "lua" && f.path != manifest_path) {
-        let Some(text) = ws.text(&f.path) else {
+        if ws.stamp(&f.path).is_none() {
             if ws.indexing {
                 unchecked += 1;
             }
-            continue;
-        };
-        if rules::is_protected(text) {
-            protected.push(&f.rel);
             continue;
         }
         let Some(facts) = facts::of(ws, &f.path, &mut budget) else {
             unchecked += 1;
             continue;
         };
+        if facts.protected {
+            protected.push(&f.rel);
+            continue;
+        }
         if f.status == Status::Encrypted
             && let Some((line, error)) = &facts.syntax
         {
@@ -789,6 +789,7 @@ mod tests {
     #[test]
     fn indexed_files_are_not_lexed_again() {
         let expected = lines(&report(&bad()));
+        facts::reset();
         let mut fx = Fixture::new(&bad());
         fx.ws.indexing = true;
         let r = check(&fx.ws, res(&fx));
@@ -852,6 +853,7 @@ mod tests {
         assert!(kinds(&added).iter().any(|k| k.1.contains("(locales/en.lua, locales/fr.lua)")), "{:?}", kinds(&added));
         fx.ws.set("/p/res/fxmanifest.lua", Some(&fixed));
         assert!(cached(&fx.ws, res(&fx)).patterns().is_empty());
+        facts::reset();
         let mut pending = Fixture::new(&bad());
         pending.ws.indexing = true;
         let r = cached(&pending.ws, res(&pending));

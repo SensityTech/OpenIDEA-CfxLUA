@@ -58,6 +58,8 @@ const VIEW: Slice = Slice { reads: 64, bytes: 256 << 10, heavy: false };
 const EDIT: Slice = Slice { reads: 8, bytes: 24 << 10, heavy: false };
 // Bigger files are generated data or bundles: lexing one would take a call on its own.
 const MAX_INDEXED: usize = 1 << 20;
+/// How much text is read before the indexing has to catch up.
+const READ_AHEAD: usize = 4 << 20;
 const DERIVE_EVERY: u32 = 6;
 // The IDE stops the plugin when an editor call runs 500 ms, without saying which call it stopped.
 const SLOW_CALL_MS: u128 = 250;
@@ -137,6 +139,8 @@ pub struct DevKit {
     stale: Option<Stale>,
     unread: Vec<(usize, String)>,
     pending: Vec<(usize, String)>,
+    /// The bytes of the texts read and not indexed yet.
+    read_ahead: usize,
     catalogs: Vec<usize>,
     derive: Vec<usize>,
     derived: usize,
@@ -159,6 +163,7 @@ impl Default for DevKit {
             stale: None,
             unread: Vec::new(),
             pending: Vec::new(),
+            read_ahead: 0,
             catalogs: Vec::new(),
             derive: Vec::new(),
             derived: 0,
@@ -186,7 +191,7 @@ impl DevKit {
                 if let Ok(root) = p.root()
                     && !self.workspaces.iter().any(|w| w.root == slash(&root).trim_end_matches('/'))
                 {
-                    self.workspaces.push(Workspace::new(&root));
+                    self.workspaces.push(Workspace::new(&root).reading(read_text));
                 }
             }
         }
@@ -198,7 +203,7 @@ impl DevKit {
         if let Some(i) = self.workspaces.iter().position(|w| !w.scanned && w.root == dir) {
             return i;
         }
-        self.workspaces.push(Workspace::new(&dir));
+        self.workspaces.push(Workspace::new(&dir).reading(read_text));
         self.workspaces.len() - 1
     }
 
@@ -321,13 +326,18 @@ impl DevKit {
             .filter_map(|p| Some((slash(&p.root().ok()?).trim_end_matches('/').to_owned(), p)))
             .collect();
         for _ in 0..max {
+            // Read no further ahead of the indexing than it takes to feed it: a text is kept until indexed.
+            if self.read_ahead > READ_AHEAD {
+                break;
+            }
             let Some((i, path)) = self.unread.pop() else { break };
             let ws = &mut self.workspaces[i];
             let text = projects.iter().find(|(root, _)| *root == ws.root).and_then(|(_, p)| p.read_file(&path).ok());
             let since = memtrace::live();
             ws.set(&path, text.as_deref());
             memtrace::keep("texts", since);
-            if text.is_some() {
+            if let Some(text) = &text {
+                self.read_ahead += text.len();
                 self.pending.push((i, slash(&path)));
             }
         }
@@ -362,22 +372,25 @@ impl DevKit {
         while let Some((i, path)) = self.pending.pop() {
             let ws = &self.workspaces[i];
             let Some(f) = ws.file(&path) else { continue };
-            let Some(text) = f.text.as_deref() else { continue };
+            let Some(text) = f.text.clone() else { continue };
+            self.read_ahead = self.read_ahead.saturating_sub(text.len());
             if text.len() > MAX_INDEXED {
+                self.workspaces[i].release(&path);
                 continue;
             }
             let cost = memtrace::COST * if f.kind == FileKind::Web { 2 * text.len() } else { text.len() };
             if used + cost > slice.bytes && (used > 0 || !slice.heavy) {
+                self.read_ahead += text.len();
                 self.pending.push((i, path));
                 break;
             }
             used += cost;
-            let src = parse(f.kind, text);
+            let src = parse(f.kind, &text);
             for (feature, name) in self.features.iter().zip(FEATURES) {
                 let since = memtrace::live();
                 if memtrace::COUNTING {
                     // Its own analysis, freed before the count: what a feature builds in a shared one is not kept.
-                    feature.index_file(ws, &f.path, f.kind, &parse(f.kind, text));
+                    feature.index_file(ws, &f.path, f.kind, &parse(f.kind, &text));
                 } else {
                     feature.index_file(ws, &f.path, f.kind, &src);
                 }
@@ -385,6 +398,10 @@ impl DevKit {
             }
             // The workspace holds what the editor last sent: nothing of that document is left to index.
             self.stale.take_if(|stale| stale.ws == i && stale.path == path);
+            drop(text);
+            let since = memtrace::live();
+            self.workspaces[i].release(&path);
+            memtrace::keep("texts", since);
             if self.derive.first() == Some(&i) {
                 self.derived = 0;
             } else if !self.derive.contains(&i) {
@@ -393,6 +410,8 @@ impl DevKit {
         }
         if self.pending.is_empty() {
             self.last = None;
+            // Nothing waits: whatever the count drifted to, no text is read ahead.
+            self.read_ahead = 0;
         }
     }
 
@@ -421,12 +440,13 @@ impl DevKit {
         match read_disk(path) {
             Disk::Text(t) => {
                 let ws = &mut self.workspaces[i];
-                if ws.text(&key) == Some(t.as_str()) {
+                if ws.holds(&key, &t) {
                     return;
                 }
                 ws.set(path, Some(&t));
                 // Indexed by the next slice, under its budget.
                 if ws.text(&key).is_some() {
+                    self.read_ahead += t.len();
                     self.pending.push((i, key));
                 }
             }
@@ -533,8 +553,8 @@ impl DevKit {
             self.flush_stale();
         }
         let ws = &mut self.workspaces[i];
-        let changed = ws.text(&path) != Some(d.text.as_str());
-        ws.set(&path, Some(&d.text));
+        let changed = !ws.holds(&path, &d.text);
+        ws.edit(&path, &d.text);
         if changed {
             // Indexed by the first call that reads the indexes: a completion is asked at every keystroke.
             self.stale = Some(Stale { ws: i, path: path.clone(), features: (1 << self.features.len()) - 1 });
@@ -707,6 +727,14 @@ enum Disk {
     Text(String),
     Missing,
     Unreadable,
+}
+
+/// The text of a file as the IDE gives it, for a workspace that no longer keeps it.
+fn read_text(path: &str) -> Option<String> {
+    match read_disk(path) {
+        Disk::Text(text) => Some(text),
+        Disk::Missing | Disk::Unreadable => None,
+    }
 }
 
 fn read_disk(path: &str) -> Disk {
@@ -1402,6 +1430,35 @@ mod tests {
         }
         let client = lua(SHOP_CLIENT, 1, "TriggerServerEvent('shop:sell', 1)\n");
         assert_eq!(kit.line_markers(&client).len(), 1);
+    }
+
+    #[test]
+    fn the_text_of_an_indexed_script_is_released_and_read_again_when_asked_for() {
+        let host = openidea_plugin::mock::MockHost::install();
+        host.add_file("res/shared/config.lua", "Config = { debug = false, rate = 2 }\nfunction Config.load() end\n");
+        host.add_file("res/shared/other.lua", "Other = { hidden = 1 }\nfunction Other.run() end\n");
+        let mut kit = shop_resource(&host);
+        let ws = &kit.workspaces[0];
+        assert_eq!(ws.text(SHOP_CLIENT), None, "a script read from the disk");
+        assert!(ws.stamp(SHOP_CLIENT).is_some() && ws.exists(SHOP_CLIENT));
+        assert!(ws.text("/project/res/fxmanifest.lua").is_some(), "the manifest is kept");
+        assert_eq!(kit.read_ahead, 0);
+
+        // The fields of the table are read in the file that writes them, which the IDE gives again.
+        let typed = lua(SHOP_CLIENT, 2, "TriggerServerEvent('shop:sell', 1)\nConfig.");
+        let labels: Vec<String> =
+            kit.completion(&typed, Position::new(1, 7), None).into_iter().map(|item| item.label).collect();
+        assert_eq!(labels, ["debug", "load", "rate"]);
+        assert_eq!(kit.workspaces[0].text(SHOP_CLIENT), Some(typed.text.as_str()), "what the editor shows is kept");
+        assert_eq!(kit.workspaces[0].text("/project/res/shared/config.lua"), None, "read, not kept");
+
+        // A file changed on the disk that nothing told the plugin about yet: its fields are not read from
+        // another text than the one indexed.
+        host.add_file("res/shared/other.lua", "Other = { added = 1 }\n");
+        let other = lua(SHOP_CLIENT, 3, "TriggerServerEvent('shop:sell', 1)\nOther.");
+        let labels: Vec<String> =
+            kit.completion(&other, Position::new(1, 6), None).into_iter().map(|item| item.label).collect();
+        assert_eq!(labels, ["run"], "only what the index keeps");
     }
 
     #[test]

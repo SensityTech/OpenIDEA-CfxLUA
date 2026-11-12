@@ -6,11 +6,10 @@ use crate::project::FileKind;
 use crate::text::parent;
 use crate::ty::FileId;
 use crate::ty::context::{Cx, Files, Options};
-use crate::workspace::Workspace;
+use crate::workspace::{Stamp, Workspace};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::Arc;
 
 /// How much text one question may make the engine read anew: what is over is left unread, and the answer
 /// says less instead of coming late.
@@ -41,15 +40,15 @@ impl FileIds {
 /// The files read lately, parsed, the latest first.
 #[derive(Default)]
 struct Kept {
-    files: Vec<(FileId, Arc<str>, Rc<Source>)>,
+    files: Vec<(FileId, Stamp, Rc<Source>)>,
 }
 
 impl Kept {
-    /// The parsed file, when it was read from this very text.
-    fn get(&mut self, file: FileId, text: &Arc<str>) -> Option<Rc<Source>> {
+    /// The parsed file, when it was read from the text of that stamp.
+    fn get(&mut self, file: FileId, stamp: Stamp) -> Option<Rc<Source>> {
         let at = self.files.iter().position(|(kept, _, _)| *kept == file)?;
         let entry = self.files.remove(at);
-        if !Arc::ptr_eq(&entry.1, text) {
+        if entry.1 != stamp {
             return None;
         }
         let src = entry.2.clone();
@@ -57,12 +56,12 @@ impl Kept {
         Some(src)
     }
 
-    fn keep(&mut self, file: FileId, text: Arc<str>, src: Rc<Source>) {
+    fn keep(&mut self, file: FileId, stamp: Stamp, src: Rc<Source>) {
         self.files.retain(|(kept, _, _)| *kept != file);
-        self.files.insert(0, (file, text, src));
+        self.files.insert(0, (file, stamp, src));
         let (mut bytes, mut kept) = (0, 0);
-        for (_, text, _) in self.files.iter().take(KEPT_FILES) {
-            bytes += text.len();
+        for (_, _, src) in self.files.iter().take(KEPT_FILES) {
+            bytes += src.text.len();
             if bytes > KEPT_BYTES && kept > 0 {
                 break;
             }
@@ -99,16 +98,17 @@ impl Files for Reading<'_> {
     fn source(&self, file: FileId) -> Option<Rc<Source>> {
         let path = self.project.ids.paths.get(file as usize)?;
         let known = self.ws.file(path)?;
-        let text = known.text.clone()?;
-        if let Some(kept) = self.project.kept.borrow_mut().get(file, &text) {
+        let stamp = known.stamp?;
+        if let Some(kept) = self.project.kept.borrow_mut().get(file, stamp) {
             return Some(kept);
         }
-        if text.len() > self.left.get() {
+        if stamp.size() > self.left.get() {
             return None;
         }
-        self.left.set(self.left.get() - text.len());
+        self.left.set(self.left.get() - stamp.size());
+        let text = self.ws.read(path)?;
         let src = Rc::new(crate::parse(known.kind, &text));
-        self.project.kept.borrow_mut().keep(file, text, src.clone());
+        self.project.kept.borrow_mut().keep(file, stamp, src.clone());
         Some(src)
     }
 

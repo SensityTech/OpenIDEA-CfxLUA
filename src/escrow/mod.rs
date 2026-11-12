@@ -64,9 +64,9 @@ fn is_main_manifest(ws: &Workspace, path: &str) -> bool {
 }
 
 impl Feature for EscrowFeature {
-    fn index_file(&self, ws: &Workspace, path: &str, kind: FileKind, src: &Source) {
+    fn index_file(&self, _ws: &Workspace, path: &str, kind: FileKind, src: &Source) {
         if kind == FileKind::Lua {
-            facts::record(ws, path, src);
+            facts::record(path, src);
         }
     }
 
