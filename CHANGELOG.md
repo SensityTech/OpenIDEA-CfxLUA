@@ -105,6 +105,9 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   documentation comment it grows through the type, the tag and the comment.
 - **Strings of another language.** A `---@language JSON` comment above a statement, or above a field of a
   table, makes the strings of that statement JSON (or SQL, HTML, JavaScript…): OpenIDEA colours them as such.
+- **Gutter markers of classes and calls.** A method that overrides one of a parent class, or that a subclass
+  overrides, has a marker that leads there; a `---@class` shows whether it has subclasses; a recursive call and
+  a call that is returned (a tail call) are marked. Each kind has a setting.
 - **Natives have parameter info, hints, a hover, and type what they return.** A native shows its parameters while
   its arguments are typed and names them before literals; `GetEntityCoords(ped).` lists `x`, `y` and `z`; hovering
   a native shows its documentation: description, example, parameters, hash, side and game.
