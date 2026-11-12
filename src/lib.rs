@@ -267,7 +267,7 @@ impl DevKit {
             for ws in &mut self.workspaces {
                 ws.indexing = false;
             }
-            host::log(LogLevel::Info, "resources indexed");
+            host::log(LogLevel::Info, &format!("resources indexed{}", memory_note()));
             self.docs.indexed();
         }
     }
@@ -689,6 +689,14 @@ fn read_disk(path: &str) -> Disk {
         }
     }
     if missing { Disk::Missing } else { Disk::Unreadable }
+}
+
+/// How much memory the component holds, for the log: the host gives it 256 MiB.
+fn memory_note() -> String {
+    #[cfg(target_arch = "wasm32")]
+    return format!(" ({} MiB)", core::arch::wasm32::memory_size(0) / 16);
+    #[cfg(not(target_arch = "wasm32"))]
+    String::new()
 }
 
 /// The text of a project file as the features read it: analysed when it is Lua that can be read.
