@@ -31,14 +31,28 @@ pub fn module_name(src: &Source) -> Option<Rc<str>> {
     None
 }
 
-/// The table a class annotates: the first value of the statement its comment documents.
-fn annotated_table<'a>(src: &'a Source, comment: Comment<'a>) -> Option<Node<'a>> {
+/// The assignment or the `local` statement a comment documents.
+fn annotated<'a>(src: &'a Source, comment: Comment<'a>) -> Option<Node<'a>> {
     let at = comment.0.range().1;
     let after = src.root().tree().node_at(src.root().source(), at.saturating_sub(1));
-    let owner = std::iter::once(after)
+    std::iter::once(after)
         .chain(after.ancestors())
-        .find(|node| matches!(node.kind(), N::AssignStat | N::LocalDef) && src.comment_of(*node) == Some(comment))?;
-    owner.child(N::ExprList).and_then(Node::expr).filter(|value| value.is(N::TableExpr))
+        .find(|node| matches!(node.kind(), N::AssignStat | N::LocalDef) && src.comment_of(*node) == Some(comment))
+}
+
+/// The table a class annotates: the first value of the statement its comment documents.
+fn annotated_table<'a>(owner: Option<Node<'a>>) -> Option<Node<'a>> {
+    owner?.child(N::ExprList).and_then(Node::expr).filter(|value| value.is(N::TableExpr))
+}
+
+/// The first name a statement gives a value to, as it is written: `Mode` of `local Mode = {}`, `lib.Mode`
+/// of `lib.Mode = {}`.
+fn first_target<'a>(owner: Node<'a>) -> Option<&'a str> {
+    let named = match owner.kind() {
+        N::LocalDef => owner.child(N::NameList)?.child(N::NameDef),
+        _ => owner.child(N::VarList)?.expr(),
+    };
+    named.map(Node::code)
 }
 
 struct Declaring<'a, 'c> {
@@ -182,19 +196,23 @@ impl Declaring<'_, '_> {
             let key = tags::key_ty(field)?;
             Some((reader.ty(key), tags::ty(field).map_or(Ty::Unknown, |value| reader.ty(value))))
         });
-        let table = annotated_table(self.src, comment);
+        let owner = annotated(self.src, comment);
+        let table = annotated_table(owner);
         let keyed = tag.child(N::DocClassAttr).is_some_and(|attr| attr.tokens().any(|id| id.text() == "key"));
+        let enum_kind = match (tag.has(T::DocTagEnum), keyed) {
+            (false, _) => EnumKind::No,
+            (true, false) => EnumKind::Values,
+            (true, true) => EnumKind::Keys,
+        };
+        let access = owner.filter(|_| enum_kind != EnumKind::No).and_then(first_target);
         self.out.classes.push(ClassDef {
             name: name.into(),
             super_name: parents.next(),
             extra_supers: parents.collect(),
             alias: table.map(|table| table_type_name(self.file, table.code_range().0).into()),
             deprecated: comment.is_deprecated(),
-            enum_kind: match (tag.has(T::DocTagEnum), keyed) {
-                (false, _) => EnumKind::No,
-                (true, false) => EnumKind::Values,
-                (true, true) => EnumKind::Keys,
-            },
+            enum_kind,
+            access: access.map(Rc::from),
             signatures: signatures.collect(),
             node: tag.id(),
         });

@@ -76,6 +76,8 @@ pub struct ClassDef {
     pub alias: Option<Rc<str>>,
     pub deprecated: bool,
     pub enum_kind: EnumKind,
+    /// What the table of an enum is given to, as it is written: its members are read through that name.
+    pub access: Option<Rc<str>>,
     /// The index signatures `---@field [K] V`: key type, value type.
     pub signatures: Vec<(Ty, Ty)>,
     /// The `DocTagClass` of the documentation tree.
@@ -357,6 +359,7 @@ mod tests {
             alias: alias.map(Rc::from),
             deprecated: false,
             enum_kind: EnumKind::No,
+            access: None,
             signatures: Vec::new(),
             node: 0,
         }
