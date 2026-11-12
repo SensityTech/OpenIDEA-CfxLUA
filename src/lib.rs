@@ -7,6 +7,7 @@ pub mod feature;
 pub mod globals;
 pub mod index;
 pub mod inspect;
+pub mod intent;
 pub mod lua;
 pub mod luals;
 pub mod manifest;

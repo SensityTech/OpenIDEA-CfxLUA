@@ -14,7 +14,7 @@ mod library_tests;
 #[cfg(test)]
 mod tests;
 
-use crate::feature::{Ctx, Feature, Problem};
+use crate::feature::{Ctx, Feature, Intention, Problem};
 use crate::index::library;
 use crate::index::project::{Projects, Sight};
 use crate::inspect::{self, Inspection};
@@ -227,6 +227,16 @@ impl Feature for EditorFeature {
             found.sort_by_key(|problem| problem.start);
         }
         found
+    }
+
+    fn intentions(&self, cx: &Ctx, start: usize, end: usize) -> Vec<Intention> {
+        if !Self::applies(cx) || cx.doc.kind != FileKind::Lua {
+            return Vec::new();
+        }
+        let src = &cx.doc.src;
+        let mut found = crate::intent::rewrites(src, start);
+        found.extend(crate::intent::surrounds(src, start, end));
+        found.into_iter().map(|fix| Intention { fix, kind: "refactor" }).collect()
     }
 
     fn semantic_tokens(&self, cx: &Ctx) -> Vec<semantic::Token> {
