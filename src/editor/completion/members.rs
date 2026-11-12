@@ -62,7 +62,8 @@ pub(super) struct Mode<'m> {
     pub colon: bool,
     /// What a label is written after: `self:` where the object of a method is not written.
     pub object: &'m str,
-    /// Whether the type of a member its file did not keep is read there.
+    /// Whether the type of a member its file did not keep, and what a function returns without saying it,
+    /// are read in the file that declares them.
     pub read: bool,
     /// What a member that is no function is listed as: a field of its class, or a variable for a global.
     pub value: CompletionKind,
@@ -95,7 +96,7 @@ impl Listing<'_, '_> {
             }
             let kind = if mode.colon { CompletionKind::Method } else { CompletionKind::Function };
             let mut item = CompletionItem::new(&format!("{}{name}", mode.object), kind);
-            item.detail = Some(self.signature(signature, mode.colon));
+            item.detail = Some(self.signature(signature, mode.colon, mode.read));
             self.entry(item, declaring, sort);
         }
     }

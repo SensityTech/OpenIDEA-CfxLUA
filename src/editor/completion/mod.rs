@@ -94,15 +94,16 @@ impl Listing<'_, '_> {
         }
     }
 
-    /// `(a, b, ...): returned`, as far as what a function returns costs little to tell.
-    fn signature(&mut self, signature: &Signature, colon: bool) -> String {
+    /// `(a, b, ...): returned`, as far as what a function returns costs little to tell: a return that is not
+    /// written is read in the body of a few functions, and of none unless `read`.
+    fn signature(&mut self, signature: &Signature, colon: bool, read: bool) -> String {
         let mut params: Vec<String> = signature.args(None, colon).iter().map(|param| param.name.to_string()).collect();
         if signature.vararg.is_some() {
             params.push("...".to_owned());
         }
         let returned = match &signature.ret {
             Ret::Ty(ty) => Some(ty.clone()),
-            Ret::Body(_) if self.bodies < BODIES_READ => {
+            Ret::Body(_) if read && self.bodies < BODIES_READ => {
                 self.bodies += 1;
                 Some(self.cx.ret(&signature.ret))
             }

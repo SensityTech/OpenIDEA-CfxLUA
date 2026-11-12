@@ -78,7 +78,7 @@ fn locals(listing: &mut Listing, here: Psi) {
         let mut function = false;
         for signature in ty.each().iter().filter_map(Ty::as_function).flat_map(|function| function.signatures()) {
             function = true;
-            let detail = listing.signature(signature, false);
+            let detail = listing.signature(signature, false, true);
             listing.push(item(name, CompletionKind::Function, Some(detail), sort.clone()));
         }
         if !function {
@@ -307,11 +307,11 @@ mod tests {
         let listed = named(&[MANIFEST, functions, (MAIN, "print(getsh<caret>)")]);
         assert_eq!(
             listed,
-            ["GetShop (id, ...): table  [_G]", "GetShopName (id): string  [_G]", "GetShopCount (): number  [_G]"],
-            "the shorter names first; what a function returns is read where it is not written"
+            ["GetShop (id, ...)  [_G]", "GetShopName (id): string  [_G]", "GetShopCount ()  [_G]"],
+            "the shorter names first; what a function returns is shown where it is written: no file is read"
         );
         let by_words = named(&[MANIFEST, functions, (MAIN, "print(gsc<caret>)")]);
-        assert_eq!(by_words, ["GetShopCount (): number  [_G]"], "by the starts of its words");
+        assert_eq!(by_words, ["GetShopCount ()  [_G]"], "by the starts of its words");
         let variable = named(&[MANIFEST, functions, (MAIN, "print(ShopN<caret>)")]);
         assert_eq!(variable, ["ShopName "], "a type no statement tells is not read for a list");
     }
