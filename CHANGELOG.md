@@ -174,6 +174,9 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
 - Server natives whose client name is an alias (`GetVehicleDashboardColour`…) were marked deprecated.
 - The status bar shows the side of the first file opened.
 - **CfxLua: Convert Coordinates** stays enabled when run from Find Action.
+- **Enable FiveM / RedM support turned off, then on again,** left completion, hover, colours and every other
+  editor feature of the plugin off until one of its commands was run or its tool window used: while it is off,
+  the plugin now reads the setting again at each request of the editor.
 
 ### Changed
 

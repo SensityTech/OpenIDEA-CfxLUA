@@ -538,6 +538,8 @@ impl DevKit {
     fn prepare(&mut self, d: &Document) -> Option<usize> {
         self.natives.freeze(true);
         if !self.settings.enabled() {
+            // Asked again at the next call: turned on again, the plugin answers without a command run first.
+            self.settings.reset();
             return None;
         }
         let i = self.workspace_for(&d.path);
@@ -1613,6 +1615,19 @@ mod tests {
         let again = lua(SHOP_SERVER, 3, &typed.text);
         assert!(!kit.completion(&again, Position::new(0, 6), None).is_empty());
         assert!(kit.stale.is_none(), "the same text is not indexed twice");
+    }
+
+    #[test]
+    fn turned_on_again_the_plugin_answers_without_a_command() {
+        let host = openidea_plugin::mock::MockHost::install();
+        let mut kit = shop_resource(&host);
+        let text = "local function open(door) end\nopen(1)\n";
+        assert!(kit.hover(&lua(SHOP_CLIENT, 2, text), Position::new(1, 1)).is_some());
+        host.set_setting(settings::keys::ENABLED, "false");
+        assert!(kit.hover(&lua(SHOP_CLIENT, 3, text), Position::new(1, 1)).is_none(), "read with the next document");
+        assert!(kit.hover(&lua(SHOP_CLIENT, 3, text), Position::new(1, 1)).is_none());
+        host.set_setting(settings::keys::ENABLED, "true");
+        assert!(kit.hover(&lua(SHOP_CLIENT, 3, text), Position::new(1, 1)).is_some(), "the same document, no command");
     }
 
     #[test]
