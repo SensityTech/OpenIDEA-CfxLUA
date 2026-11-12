@@ -118,8 +118,8 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   Languages & Frameworks › Plugin Formatters**, Reformat Code (a file or a selection) and Format on save indent
   blocks, tables and what continues a line, put statements and the bodies of blocks on their own lines, write the
   spaces around operators, `=` and commas and inside the braces of a table, line up the parameters written on
-  several lines and the dots of a chained call, keep two blank lines at most, and take out the semicolons no
-  statement needs. Only white space changes. The indent is the editor's; a line that continues another is
+  several lines and the dots of a chained call, keep one blank line at most between two statements, and take out
+  the semicolons no statement needs. Only white space changes. The indent is the editor's; a line that continues another is
   indented twice, as IntelliJ does, unless a setting gives its width. The other options of the JetBrains plugin
   are settings with IntelliJ's defaults: keeping a block of one statement on one line, aligning arguments, the
   `=` of consecutive assignments and of table fields, and each of the spaces. A semicolon that separates table
