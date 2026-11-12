@@ -2,8 +2,8 @@
 //! (`LocalAndGlobalCompletionProvider`), and the methods of the object of the method the caret is written in
 //! (`SuggestSelfMemberProvider`).
 
-use super::Listing;
 use super::members::{Mode, context_class};
+use super::{Listing, expected};
 use crate::lua::Source;
 use crate::lua::lexer::Tok;
 use crate::lua::scope::{DeclKind, Scopes};
@@ -148,6 +148,7 @@ pub(super) fn names(listing: &mut Listing, file: FileId, src: &Source, start: us
     let here = Psi { file, src, node: leaf };
     match leaf.kind() {
         N::NameExpr => {
+            expected::values(listing, here);
             locals(listing, here);
             own_methods(listing, here);
             globals(listing, here, typed);
@@ -270,6 +271,18 @@ mod tests {
             !outside.iter().any(|label| label.starts_with("self:")),
             "a function declared with a dot has no object"
         );
+    }
+
+    #[test]
+    fn a_local_shows_what_another_file_gives_it() {
+        let config = (
+            "shop/shared/config.lua",
+            "---@class ShopItem\n---@field name string\n\nConfig = { debug = false }\n\n---@param name string\n\
+             ---@return ShopItem?\nfunction Config.find(name)\nend\n",
+        );
+        let text = "local Shop = {}\nfunction Shop:open() end\nlocal found = Config.find('bread')\nfoun<caret>\n";
+        let listed = named(&[MANIFEST, config, (MAIN, text)]);
+        assert_eq!(listed, ["found ShopItem|[local found]", "Shop table|[local Shop]"]);
     }
 
     #[test]

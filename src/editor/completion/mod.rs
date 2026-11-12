@@ -1,5 +1,6 @@
 //! What the type engine completes in a Lua file (`editor/completion/` of the JetBrains plugin).
 
+mod expected;
 mod members;
 mod names;
 
@@ -24,9 +25,14 @@ pub enum Place {
     Member(usize),
     /// In a name that starts at that offset, or where one could start.
     Name(usize),
+    /// Inside the quoted string that is the code token of that index.
+    String(usize),
 }
 
 pub fn place(src: &Source, at: usize) -> Option<Place> {
+    if let Some(string) = src.quoted_at(at) {
+        return Some(Place::String(string));
+    }
     if src.in_literal(at) {
         return None;
     }
@@ -102,6 +108,7 @@ pub fn complete(cx: &Cx, file: FileId, doc: &Doc, src: &Source, at: usize, place
     match place {
         Place::Member(sign) => members::members(&mut listing, file, src, sign, at),
         Place::Name(start) => names::names(&mut listing, file, src, start, &doc.src.text[start..at]),
+        Place::String(token) => expected::strings(&mut listing, file, src, token, at),
     }
     listing.items.sort_by(|a, b| a.sort_text.cmp(&b.sort_text));
     listing.items
