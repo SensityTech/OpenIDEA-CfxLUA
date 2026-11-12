@@ -69,11 +69,19 @@ pub struct Problem {
     pub code: &'static str,
     pub fixes: Vec<Fix>,
     pub deprecated: bool,
+    /// Code that does nothing: the editor fades it.
+    pub unnecessary: bool,
 }
 
 impl Problem {
     pub fn new(code: &'static str, severity: Severity, start: usize, end: usize, message: impl Into<String>) -> Self {
-        Self { start, end, severity, message: message.into(), code, fixes: Vec::new(), deprecated: false }
+        let message = message.into();
+        Self { start, end, severity, message, code, fixes: Vec::new(), deprecated: false, unnecessary: false }
+    }
+
+    pub fn unnecessary(mut self) -> Self {
+        self.unnecessary = true;
+        self
     }
 
     pub fn fix(mut self, fix: Fix) -> Self {

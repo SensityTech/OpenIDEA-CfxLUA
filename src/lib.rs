@@ -656,6 +656,7 @@ impl DevKit {
             .iter()
             .map(|p| Diagnostic {
                 deprecated: p.deprecated,
+                unnecessary: p.unnecessary,
                 ..Diagnostic::new(doc.range(p.start, p.end), p.severity, p.message.clone()).code(p.code)
             })
             .collect();
