@@ -28,6 +28,7 @@ Security issues: see [SECURITY.md](SECURITY.md), not a public issue.
 | `cargo fmt --all` | Formatting (`rustfmt.toml`, 120 columns). |
 | `scripts/build.sh --pack` (`scripts\build.ps1 -Pack`) | Builds `dist/plugin.wasm` and the `.oiplugin` package. |
 | `scripts\build.ps1 -Link` | Links the repository folder into OpenIDEA; **Settings › Plugins › Reload** after each build. |
+| `cargo build --release --target wasm32-wasip2 --features mem-trace` | A build that counts its allocations: once a project is read, the IDE log lists what each part of the plugin keeps. OpenIDEA gives a plugin 256 MiB, so what is kept per project file is measured on a big project before it is kept. |
 
 ## How the code is organised
 
@@ -40,7 +41,9 @@ Security issues: see [SECURITY.md](SECURITY.md), not a public issue.
 | `src/index/` | What the files of a project declare, by name: classes, members, aliases. |
 | `src/editor/` | What the editor shows of a Lua file: semantic colours, folding, structure, occurrences. |
 | `src/project/` | Resources, manifest entries, FXServer globs, client/server/shared side, game. |
-| `src/workspace.rs` | The project files the plugin has read; areas only read the project through it. |
+| `src/workspace.rs` | The project files the plugin has read; areas only read the project through it. The text of a script is released once it is indexed and read again on demand. |
+| `src/globals.rs` | Which files define a global function, for the areas that read a function of another file. |
+| `src/memtrace.rs` | The allocation counter of the `mem-trace` build. |
 | `src/<area>/` | `natives`, `runtime`, `manifest`, `escrow`, `statebags`, `events`, `nui`, `values`, `coords`, `perf`, `syntax`, `docs`. |
 | `web/` | The tool window page (rendering only; searching and HTML are built in Rust). |
 | `data/` | Bundled data: natives snapshots, guides, catalogs, value tables, runtime stubs. |

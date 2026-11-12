@@ -91,6 +91,11 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   file is built once and released with the file, instead of being looked up again by each of them.
 - **The component is compiled for speed** instead of size: through OpenIDEA it answers about 30% faster and reads a
   5,000-file project in 9 s instead of 11.5 s, for a package a tenth bigger (2.6 MB).
+- **The plugin holds less than half the memory on big projects.** OpenIDEA gives a plugin 256 MiB, and a 5,500-file
+  project took 209 of them once it was read: it now takes about 90. The text of a file is released once it is
+  indexed and read again when something needs it, and what the events, performance, magic values, coordinates and
+  NUI features and the type engine keep of each file is packed, each name kept once instead of once per use. What
+  they report is unchanged.
 - The **lua-language-server config (.luarc.json)** template ignores `.cfxlua` as project code (it stays a library)
   and lets completion list up to 1,000 items: lua-language-server stops at 100, which could hide the native you type.
   In an existing `.luarc.json`, add `".cfxlua"` to `workspace.ignoreDir` and `"completion.maxSuggestCount": 1000`.
