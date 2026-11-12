@@ -100,6 +100,11 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   `tostring` and `tonumber` wrap an expression wherever it stands.
 - **Lua live templates.** `func`, `lfunc`, `for`, `fori`, `forp`, `if`, `elseif`, `ifelse` and `closure` expand
   into their statement, with tab stops; they are listed under Settings › Editor › Live Templates.
+- **Extend Selection knows CfxLua.** The selection grows from the word at the caret to what a string holds,
+  then to each expression, statement (with its documentation comment) and block around it; inside a
+  documentation comment it grows through the type, the tag and the comment.
+- **Strings of another language.** A `---@language JSON` comment above a statement, or above a field of a
+  table, makes the strings of that statement JSON (or SQL, HTML, JavaScript…): OpenIDEA colours them as such.
 - **Natives have parameter info, hints, a hover, and type what they return.** A native shows its parameters while
   its arguments are typed and names them before literals; `GetEntityCoords(ped).` lists `x`, `y` and `z`; hovering
   a native shows its documentation: description, example, parameters, hash, side and game.
