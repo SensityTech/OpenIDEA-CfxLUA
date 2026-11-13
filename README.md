@@ -2,7 +2,8 @@
 
 <p align="center">
   <b>FiveM and RedM (CfxLua) support for <a href="https://github.com/l0ng-ai/openidea">OpenIDEA</a>.</b><br>
-  Natives of the right game and side, client/server awareness, state bags, events, fxmanifest, NUI and built-in documentation.
+  A Lua engine of its own (completion, documentation, inspections, refactorings, a formatter) and what only a Cfx.re-aware tool knows:<br>
+  natives of the right game and side, client/server awareness, state bags, events, fxmanifest, NUI and built-in documentation.
 </p>
 
 <p align="center">
@@ -15,11 +16,12 @@
 ---
 
 [OpenIDEA](https://github.com/l0ng-ai/openidea) is *the IDE you know, rebuilt in Rust*: the IntelliJ IDEA way of
-working — keymap, tool windows, search everywhere — in a fast native app. It already reads Lua (tree-sitter
-highlighting and [lua-language-server](https://luals.github.io/)). **OpenIDEA-CfxLUA** adds everything that only
-a Cfx.re-aware tool knows: which natives exist for the game and the side a script runs on, the Cfx runtime API,
-state bags, events, the resource manifest, the NUI bridge, the quirks of the CfxLua dialect and the documentation
-to go with them.
+working — keymap, tool windows, search everywhere — in a fast native app. **OpenIDEA-CfxLUA** makes it an IDE for
+FiveM and RedM. It reads CfxLua with a parser and a type engine of its own, ported from the JetBrains plugin the
+project comes from: completion, documentation, navigation, inspections, intentions, refactorings and a formatter,
+without a language server. And it adds everything that only a Cfx.re-aware tool knows: which natives exist for the
+game and the side a script runs on, the Cfx runtime API, state bags, events, the resource manifest, the NUI
+bridge, the quirks of the CfxLua dialect and the documentation to go with them.
 
 It is an OpenIDEA plugin: a sandboxed WebAssembly component written in Rust that only reads your project through the
 IDE, with the permissions you grant.
@@ -44,6 +46,61 @@ IDE, with the permissions you grant.
 - [Credits and license](#credits-and-license)
 
 ## Features
+
+### Lua, without a language server
+
+The plugin has its own CfxLua parser and its own type engine, a port to Rust of
+[IntelliJ-EmmyLua](https://github.com/EmmyLua/IntelliJ-EmmyLua) as Sensity DevKit, its fork for CfxLua, extends it.
+`---@class`, `---@field`, `---@param`, `---@return`, `---@type`, `---@alias`, `---@generic`, `---@overload` and
+`---@enum` give the types (EmmyDoc and the LuaCATS annotations of lua-language-server are both read); what is not
+annotated is inferred.
+
+- **Completion** of the members of a table, a class or an object after `.` and `:`, of the names in sight (locals
+  first, with their types), of what a place asks for (the strings of a literal type, the fields of the class a
+  table is expected to be), of the methods of the parent classes to define again, of `require` paths, and inside
+  documentation comments; postfix templates (`count.if`) and live templates (`fori`).
+
+  ![The fields and methods of a class listed after a dot, then a method completed after a colon](assets/screenshots/completion-members.gif)
+
+- **Documentation**: hover, parameter info and inlay hints (the names of parameters; the types of locals, of
+  parameters and of what functions return once turned on), for your code, the Lua standard library, the Cfx
+  runtime and the natives.
+
+  ![The hover of a method: its signature, its comment, its parameters and what it returns](assets/screenshots/hover.png)
+
+- **Navigation**: Go to Declaration and Go to Type Declaration, Find Usages of classes, globals, table members,
+  events and state bag keys, the Structure view, folding, the uses of the name under the caret, and gutter
+  markers on methods that override another one, on classes that have subclasses, on recursive and tail calls.
+
+  ![Find Usages of a class, then of an event: the files and the lines that name them](assets/screenshots/find-usages.gif)
+
+- **Inspections** with their quick fixes: unused locals and parameters, a local that hides another, empty bodies,
+  unreachable statements, a table indexed at 0, a class declared twice, the use of what is deprecated, a type
+  nothing declares; type safety (arguments, return values, assignments, undeclared names) and *Global name can be
+  local* once turned on in the settings. A `---@suppress` comment turns one off for a statement.
+
+  ![An unused local faded and warnings underlined, with the messages of a shadowed local, an empty loop and an index 0](assets/screenshots/inspections.gif)
+
+- **Intentions** (Alt+Enter): write `---@param`, `---@type`, `---@return` or a whole documentation comment with
+  the types the plugin infers, invert a boolean, compute an operation between constants, add or remove the
+  parentheses of a call, surround statements with a region.
+- **Refactorings**: rename a local; rename a global or a member across the project, the type engine telling what
+  each use stands for, with the methods that override it; rename or move a Lua file with the `require`s that load
+  it and the manifest that names it; convert a legacy `__resource.lua` to `fxmanifest.lua`.
+
+  ![A method renamed from one of its calls: the call, the method of its class and the one that overrides it change together](assets/screenshots/rename-member.gif)
+
+- **A formatter**, the one of the JetBrains plugin, once the plugin is chosen for `lua` in **Settings › Languages
+  & Frameworks › Plugin Formatters**: Reformat Code (a file or a selection) and Format on save.
+
+  ![A file written without care, then the same file after Reformat Code](assets/screenshots/formatter.gif)
+
+- **In the editor**: semantic colours, coloured documentation comments, the syntax errors of CfxLua, Extend
+  Selection.
+
+  ![A client script whose parameters, fields, methods, natives and hash literal each have their colour](assets/screenshots/semantic-colours.png)
+
+Every feature has its picture in the [changelog of 1.0.0](CHANGELOG.md#100---2026-11-13).
 
 ### Client / server awareness
 
@@ -130,10 +187,19 @@ What the Cfx.re runtime accepts but reads differently, and what people type from
 
 ### Readable magic values
 
-The numbers FiveM code is full of are named: `IsControlJustPressed(0, 38)` → `INPUT_PICKUP (E / LB)`,
-`-1216765807` → `` `adder` ``, blip sprites and colours, marker types, HUD colours, explosion types, animation flags.
-Values are completed with their names where a native expects them. A colour written as red, green and blue components
-in a drawing call has a swatch in the gutter: picking another colour rewrites the components.
+The numbers FiveM code is full of are named, in an inlay hint after the number: `IsControlJustPressed(0, 38)` →
+`INPUT_PICKUP (E / LB)`, `-1216765807` → `` `adder` ``, blip sprites and colours, marker types, HUD colours,
+explosion types, animation flags. Values are completed with their names where a native expects them.
+
+![The name of a blip sprite, a blip colour, a hash and a control written after their numbers](assets/screenshots/value-hints.png)
+
+Hovering such a number, a hash literal, an event name or a state bag key shows what it stands for: the keys of a
+control, the values of a hash, who triggers and who handles an event, where a state bag key is set and read.
+
+![The hovers of a control, a hash literal, an event of the project and a state bag key](assets/screenshots/cfx-hovers.gif)
+
+A colour written as red, green and blue components in a drawing call has a swatch in the gutter: picking another
+colour rewrites the components.
 
 ### Coordinates and performance
 
@@ -146,8 +212,9 @@ in a drawing call has a swatch in the gutter: picking another colour rewrites th
 For resources sold through Cfx Asset Escrow: each file shows whether it will be encrypted or stay open according to
 `escrow_ignore`, checks catch configuration and loaded files that buyers could not edit, encrypted (`FXAP`) files are
 no longer parsed as Lua, and **CfxLua: Check Resource Before Escrow Upload** runs the pre-publish checklist and
-opens its full report — blockers, warnings, suggested `escrow_ignore` patterns, the files kept open and the files
-encrypted — in the **Escrow** tab of the tool window, which lists every resource of the project.
+opens its full report — blockers, warnings, suggested `escrow_ignore` patterns, the files kept open, the files
+encrypted and the size of the resource (more than 1 GB is a blocker) — in the **Escrow** tab of the tool window,
+which lists every resource of the project.
 
 ### Built-in documentation
 
@@ -173,16 +240,18 @@ The tool window follows the IDE theme ([light theme](assets/screenshots/tool-win
 
 ## Installation
 
-**Requirements — both are needed:**
+**Requirement:** [OpenIDEA](https://github.com/l0ng-ai/openidea/releases/latest) 0.1.40 or newer (plugin API 1.4).
 
-| | |
-|---|---|
-| [OpenIDEA](https://github.com/l0ng-ai/openidea/releases/latest) 0.1.40 or newer | The IDE (plugin API 1.4). |
-| [lua-language-server](https://luals.github.io/#install) on your `PATH` | OpenIDEA's Lua support: types of your own code, hover, signature help, references. OpenIDEA-CfxLUA feeds it the natives and the runtime API ([see below](#working-with-lua-language-server)). |
+[lua-language-server](https://luals.github.io/) is no longer needed: since 1.0.0 the plugin has its own Lua engine.
+One thing to do either way, depending on whether OpenIDEA runs lua-language-server for your Lua files:
 
-Install lua-language-server with `winget install LuaLS.lua-language-server`, `brew install lua-language-server`, your
-distribution's package or a [release archive](https://github.com/LuaLS/lua-language-server/releases), then restart
-OpenIDEA so that it finds it.
+- **Without it**, OpenIDEA 0.1.40 reports with its own parser what it cannot read, and that parser does not know
+  CfxLua: `+=`, a set constructor or a C comment get an *Unexpected token*. Turn **Syntax errors** off in
+  **Settings › Editor › Inspections** (group *General*): the plugin reports the syntax errors of CfxLua itself.
+- **With it**, OpenIDEA lists its completion entries and its problems next to the plugin's without merging them:
+  what both know comes twice. To keep the plugin alone, turn lua-language-server off in **Settings › Languages &
+  Frameworks › Language Servers**; to keep both, see
+  [Working with lua-language-server](#working-with-lua-language-server).
 
 ### From a package file
 
@@ -248,7 +317,9 @@ Run them from **Find Action** (`Ctrl+Shift+A` / `Cmd+Shift+A`); bind keys in **S
 | Show the Asset Escrow status of resource files | on | For resources declaring `escrow_ignore`. |
 | Treat every resource as escrowed | off | Escrow checks everywhere. |
 
-The NUI, events, values and performance checks have their own settings on the same page.
+The inlay hints (parameter names are on, types are off), the inspections (type safety and *Global name can be
+local* are off), the gutter markers, the options of the formatter, and the NUI, events, values and performance
+checks have their own settings on the same page.
 
 ## Permissions
 
@@ -269,9 +340,9 @@ start that run configuration.
 
 ## Working with lua-language-server
 
-OpenIDEA runs lua-language-server for Lua itself: the types of your own code and its `---@param` / `---@class`
-annotations, hover, signature help, references. On its own it does not know CfxLua syntax or the natives, and reports
-`+=`, backtick hashes and every native as errors. Two steps teach it:
+The plugin does not need lua-language-server, but OpenIDEA runs it for Lua files when it is installed. On its own
+it does not know CfxLua syntax or the natives, and reports `+=`, backtick hashes and every native as errors. Two
+steps teach it:
 
 1. **The configuration.** At the root of the project, **New › lua-language-server config (.luarc.json)**, named
    `.luarc`:
@@ -321,15 +392,12 @@ program it found: after an artifacts update, approve it again in **Settings › 
 
 ## Known limitations
 
-The plugin was first written for plugin API 1.0 and does not use everything OpenIDEA 0.1.40 offers yet. Until it
-does, it keeps these equivalents:
-
 | Not done yet | Instead |
 |---|---|
+| Find Usages of a member reached through a value (`shop:open()` where `shop` is a value of the class) | Find Usages lists the occurrences of the word; **Rename '…' in the project** tells them apart with the type engine |
 | Hover on the directives of a manifest | Documentation in completion, **CfxLua: Show Documentation**, the tool window |
 | Rename and Find Usages of NUI callbacks and messages | Go to Definition lists every match |
 | Creating files (New Resource) | One **New** template per file |
-| Opening links from the tool window | URLs are shown with a copy button |
 | Opening the tool window from a command | **CfxLua: Show Documentation** shows the entry in the tool window and sums it up in a notification |
 | A plugin icon in **Settings › Plugins** | The generic plugin icon |
 
@@ -338,7 +406,11 @@ OpenIDEA does not offer these to plugins:
 | Not available to plugins | Instead |
 |---|---|
 | File icons by side (a plugin's file icons match file names only) | `client.lua`, `cl_*.lua`, `*_client.lua`… (and the server and shared equivalents) get the side icons; a `client/main.lua` keeps the Lua icon, and the status bar shows its side |
-| Merging a plugin's completion with lua-language-server's | Once lua-language-server loads the generated definitions, their natives and runtime API are left to it |
+| Merging a plugin's completion and problems with lua-language-server's | Once lua-language-server loads the generated definitions, their natives and runtime API are left to it; for the rest, see [Installation](#installation) |
+| Silencing OpenIDEA's own *Syntax errors* inspection, which does not know CfxLua | Turn it off in **Settings › Editor › Inspections** when no language server runs for Lua |
+| Telling a plugin that a file was renamed or moved from the project tree | **Rename file and its requires…** and **Move file and its requires…**, Alt+Enter on the first line of the file |
+| More than 200,000 names of a project for Find Usages | A project of more than 600 Lua files gives its classes and its globals, one of more than 1,200 its classes only; Find Usages lists the occurrences of the word for the rest |
+| The colours of another language in a string (`---@language SQL`) | OpenIDEA 0.1.40 reads such a string as SQL but draws it in the colour of a Lua string |
 
 ## Building from source
 
@@ -366,6 +438,8 @@ issues privately as described in [SECURITY.md](SECURITY.md).
 
 Licensed under the [Apache License 2.0](LICENSE); attributions are in [NOTICE](NOTICE).
 
+- Type engine and formatter: ports to Rust of [IntelliJ-EmmyLua](https://github.com/EmmyLua/IntelliJ-EmmyLua),
+  through Sensity DevKit, its fork for CfxLua; the stubs of the Lua standard library come from it.
 - Natives: the [Cfx.re native database](https://docs.fivem.net/natives/) and
   [alloc8or/rdr3-nativedb-data](https://github.com/alloc8or/rdr3-nativedb-data).
 - Hash names: [calamity-inc/gta-v-joaat-hash-db](https://github.com/calamity-inc/gta-v-joaat-hash-db).
