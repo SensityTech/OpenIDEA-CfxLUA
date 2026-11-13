@@ -5,7 +5,7 @@ pub mod pages;
 pub mod runtime_pages;
 pub mod search;
 pub mod tabs;
-mod target;
+pub(crate) mod target;
 
 use crate::escrow;
 use crate::feature::{CommandCx, CommandResult, Feature};

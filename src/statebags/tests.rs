@@ -9,15 +9,15 @@ const MANIFEST: (&str, &str) = (
     "res/fxmanifest.lua",
     "fx_version 'cerulean'\ngame 'gta5'\nclient_script 'client/*.lua'\nserver_script 'server/*.lua'",
 );
-const MAIN: (&str, &str) = ("res/server/main.lua", SERVER);
+pub(super) const MAIN: (&str, &str) = ("res/server/main.lua", SERVER);
 
-fn fixture(extra: &[(&str, &str)]) -> Fixture {
+pub(super) fn fixture(extra: &[(&str, &str)]) -> Fixture {
     let mut files = vec![MANIFEST];
     files.extend_from_slice(extra);
     Fixture::new(&files)
 }
 
-fn indexed(fx: &Fixture) -> StateBagsFeature {
+pub(super) fn indexed(fx: &Fixture) -> StateBagsFeature {
     let f = StateBagsFeature::default();
     fx.index(&f);
     f
@@ -145,11 +145,11 @@ fn disabled_setting_turns_completion_off() {
 // ---------------------------------------------------------------------------------------------
 // navigation and documentation
 
-const SECOND: (&str, &str) = (
+pub(super) const SECOND: (&str, &str) = (
     "res/server/second.lua",
     "AddEventHandler('playerJoining', function()\n    Player(source).state.test = 'joined'\nend)",
 );
-const HANDLERS: (&str, &str) = (
+pub(super) const HANDLERS: (&str, &str) = (
     "res/client/handlers.lua",
     "AddStateBagChangeHandler('test', nil, function(bagName, key, value) end)\nprint(LocalPlayer.state.test, GlobalState.weather)",
 );

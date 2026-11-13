@@ -3,6 +3,7 @@ pub mod checks;
 pub mod db;
 pub mod editor;
 pub mod flow;
+mod hover;
 pub mod model;
 pub mod packed;
 pub mod spec;
@@ -173,6 +174,10 @@ impl Feature for EventsFeature {
 
     fn completes_from_index(&self, cx: &Ctx, at: usize) -> bool {
         cx.doc.src.quoted_at(at).is_some()
+    }
+
+    fn hover(&self, cx: &Ctx, at: usize) -> Option<crate::editor::hover::Hover> {
+        hover::hover(self, cx, at)
     }
 
     fn definition(&self, cx: &Ctx, at: usize) -> Vec<Location> {

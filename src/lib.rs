@@ -1330,7 +1330,13 @@ impl HoverProvider for DevKit {
         let ws = self.prepare_indexed(d)?;
         let shown = self.with_ctx(ws, |cx, features| {
             let at = cx.doc.offset(at);
-            let hovers: Vec<editor::hover::Hover> = features.iter().filter_map(|f| f.hover(cx, at)).collect();
+            let answers = features.iter().zip(FEATURES).filter_map(|(f, name)| Some((name, f.hover(cx, at)?)));
+            let mut hovers: Vec<(&str, editor::hover::Hover)> = answers.collect();
+            // A state bag key or an event is also a name to the type engine: the page that knows it stands alone.
+            if hovers.iter().any(|(name, _)| *name != TYPE_ENGINE) {
+                hovers.retain(|(name, _)| *name != TYPE_ENGINE);
+            }
+            let hovers: Vec<editor::hover::Hover> = hovers.into_iter().map(|(_, hover)| hover).collect();
             let (start, end) = hovers.first()?.range;
             let parts: Vec<&str> = hovers.iter().map(|hover| hover.markdown.as_str()).collect();
             Some(
@@ -1894,6 +1900,27 @@ mod tests {
         assert!(kit.color_presentations(&typed, elsewhere).is_empty(), "only a range the plugin gave is rewritten");
         let script = "---@meta\nDrawRect(0.5, 0.5, 0.1, 0.1, 255, 128, 0, 200)\n";
         assert!(kit.colors(&lua(SHOP_CLIENT, 3, script)).is_empty(), "a declaration file is not read");
+    }
+
+    #[test]
+    fn the_page_of_a_state_bag_key_a_value_or_a_hash_is_shown_alone() {
+        let host = openidea_plugin::mock::MockHost::install();
+        let mut kit = shop_resource(&host);
+        // The bag is typed: its key is a field of a class to the type engine, which answers too.
+        let text = "---@class Bag\n---@field fuel number\n\n---@type Bag\nlocal state = LocalPlayer.state\nprint(state.fuel)\nIsControlJustPressed(0, 38)\nlocal car = `adder`\n";
+        let typed = lua(SHOP_CLIENT, 2, text);
+        let key = kit.hover(&typed, Position::new(5, 14)).expect("the page of the key");
+        assert!(key.markdown.starts_with("player state bag key **fuel**"), "{}", key.markdown);
+        assert!(!key.markdown.contains("\n\n---\n\n"), "the type engine adds nothing to it: {}", key.markdown);
+        assert_eq!(key.range, Some(Range::new(Position::new(5, 12), Position::new(5, 16))));
+        let control = kit.hover(&typed, Position::new(6, 24)).expect("the page of the control");
+        assert!(control.markdown.contains("INPUT_PICKUP"), "{}", control.markdown);
+        assert_eq!(control.range, Some(Range::new(Position::new(6, 24), Position::new(6, 26))));
+        let hash = kit.hover(&typed, Position::new(7, 14)).expect("the page of the hash");
+        assert!(hash.markdown.starts_with("hash **"), "{}", hash.markdown);
+        assert_eq!(hash.range, Some(Range::new(Position::new(7, 12), Position::new(7, 19))));
+        let name = kit.hover(&typed, Position::new(7, 7)).expect("the hover of a local");
+        assert!(name.markdown.starts_with("```lua\nlocal car"), "the type engine still answers: {}", name.markdown);
     }
 
     #[test]

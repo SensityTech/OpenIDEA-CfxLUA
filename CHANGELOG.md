@@ -134,6 +134,11 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   file, replaces `resource_manifest_version` with `fx_version 'cerulean'` and declares `game 'gta5'` when no game is
   declared, in one action that one undo reverts. It is not offered when a `fxmanifest.lua` already stands beside the
   file.
+- **Hover on magic values, hash literals, events and state bag keys**, as in the JetBrains plugin. A number a native
+  takes as a control, a blip, a marker… shows what it stands for; a hash literal shows its signed, unsigned and
+  hexadecimal values; an event name shows the page of the built-in event or, for an event of the project, who
+  triggers and who handles it; a state bag key shows its types and where it is set, watched and read. Such a page
+  is shown alone: the type engine does not add its own hover of the same name under it.
 - **Colour swatches.** A colour written as red, green and blue components in a call (`DrawRect`, `DrawMarker`,
   `SetParticleFxLoopedColour`…) has a swatch in the gutter, as in the JetBrains plugin. Picking another colour
   rewrites the components, as integers or as floats like the call writes them, and keeps what stands between them.

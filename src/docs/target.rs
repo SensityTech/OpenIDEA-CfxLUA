@@ -132,6 +132,10 @@ pub fn first_sentence(md: &str) -> String {
     out.trim().to_owned()
 }
 
+pub const HASH_DESCRIPTION: &str = "Compile-time Jenkins one-at-a-time hash (joaat) of the ASCII lower-cased text, replaced by a signed 32-bit integer.";
+pub const HASH_INVALID: &str =
+    "Invalid hash literal: it is unterminated or has an escape sequence the runtime rejects.";
+
 pub fn summary(t: &Target) -> (Tab, String, String, String) {
     // The notification shows line breaks as spaces: a dash keeps the signature apart from the description.
     let lines = |head: String, md: &str| {
@@ -159,12 +163,9 @@ pub fn summary(t: &Target) -> (Tab, String, String, String) {
         Target::Hash(literal, value) => {
             let head = match value {
                 Some(v) => format!("Signed (int32): {v} · Unsigned (uint32): {} · Hex: {}", *v as u32, hex(*v)),
-                None => {
-                    "Invalid hash literal: it is unterminated or has an escape sequence the runtime rejects.".into()
-                }
+                None => HASH_INVALID.into(),
             };
-            let md = "Compile-time Jenkins one-at-a-time hash (joaat) of the ASCII lower-cased text, replaced by a signed 32-bit integer.";
-            (Tab::Syntax, "hash-literal".into(), format!("hash {literal}"), lines(head, md))
+            (Tab::Syntax, "hash-literal".into(), format!("hash {literal}"), lines(head, HASH_DESCRIPTION))
         }
     }
 }

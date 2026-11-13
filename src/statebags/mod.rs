@@ -1,3 +1,4 @@
+mod hover;
 pub mod sites;
 
 use crate::events::{display_path, location, md};
@@ -374,6 +375,10 @@ impl Feature for StateBagsFeature {
 
     fn completes_from_index(&self, cx: &Ctx, at: usize) -> bool {
         completes_at(&cx.doc.src, at)
+    }
+
+    fn hover(&self, cx: &Ctx, at: usize) -> Option<crate::editor::hover::Hover> {
+        hover::hover(self, cx, at)
     }
 
     fn definition(&self, cx: &Ctx, at: usize) -> Vec<Location> {

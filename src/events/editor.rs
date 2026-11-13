@@ -439,7 +439,7 @@ fn anchor_location(site: &Site) -> Location {
     Location { path: site.file.to_string(), range: site.anchor().range }
 }
 
-fn site_at_caret<'a>(cx: &Ctx, db: &'a Db, at: usize) -> Option<(&'a Site, usize)> {
+pub(super) fn site_at_caret<'a>(cx: &Ctx, db: &'a Db, at: usize) -> Option<(&'a Site, usize)> {
     let src = &cx.doc.src;
     let i = src.tok_at(at)?;
     let tok = src.toks[i];
