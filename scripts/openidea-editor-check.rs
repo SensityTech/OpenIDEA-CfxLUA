@@ -20,27 +20,37 @@
 // settings as the settings page of the IDE would: it is read as JSON, or as a string when it is none.
 // `--command <id>`, with `--project`, runs that command of the plugin once the project is read, as from the window
 // of the project with no editor focused, and prints how long it took and what it notified.
+// `--rename <n>=<name>`, with `--project`, chooses the action of the file that renames in the project, the one
+// offered at the n-th name that has one (0 is the first), answers `<name>` when the plugin asks the new name, and
+// prints how long the action took to resolve and how many files and edits it gave. `<n>x<count>` resolves that
+// one and the `count - 1` after it, each name once, and ends with how many resolved and the slowest. The text
+// search the plugin asks the IDE for is played here: the Lua files of the project that write the word, whole
+// and in its case.
+// `--fuel <n>` gives each call of the plugin that many instructions instead of the five billion of the IDE: a
+// call that passes with a quarter of them is far from the limit.
 // Built like scripts/openidea-start-check.rs, as an example of OpenIDEA's `ide-host` crate:
 //
 //   cp scripts/openidea-editor-check.rs <openidea>/crates/ide-host/examples/cfxlua_editor_check.rs
 //   cargo run --release --locked -p ide-host --example cfxlua_editor_check -- \
 //       [--patient] [--log] [--project <folder>] [--index] [--set <key>=<value>] [--command <id>] \
-//       [--type <text>] <package.oiplugin> <file.lua> [word]
+//       [--rename <n>[x<count>]=<name>] [--fuel <n>] [--type <text>] <package.oiplugin> <file.lua> [word]
 
-use ide_core::{Pos, Range, TextEdit};
+use ide_core::{CancellationToken, Pos, Range, TextEdit};
 use ide_host::plugins::navigation::{MAX_DOCUMENT_BYTES, Snapshot};
 use ide_host::plugins::{Consent, PluginEvent, PluginHost, PluginWorkspace};
-use ide_plugin::{HostError, Invocation, Limits, ProviderDocument, WorkbenchEvent};
+use ide_plugin::{
+    HostError, Invocation, Limits, Location, ProviderDocument, TextMatch, TextQuery, TextSearch, WorkbenchEvent,
+};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 const USAGE: &str = "usage: cfxlua_editor_check [--patient] [--log] [--project <folder>] [--index] \
-                     [--set <key>=<value>] [--command <id>] [--type <text>] <package.oiplugin> <file.lua> \
-                     [word]";
+                     [--set <key>=<value>] [--command <id>] [--rename <n>[x<count>]=<name>] [--fuel <n>] \
+                     [--type <text>] <package.oiplugin> <file.lua> [word]";
 /// How many entries of the completion are printed.
 const SHOWN: usize = 12;
 /// More event batches than any project needs: a scan that never ends stops the check instead of hanging it.
@@ -60,8 +70,9 @@ type Published = Arc<Mutex<Option<[usize; 5]>>>;
 /// The values the user gave to settings of the plugin.
 type Settings = serde_json::Map<String, serde_json::Value>;
 
-/// One open project, with no editor on it: what the plugin reads comes from the disk.
-struct Opened(PathBuf, Published, Settings);
+/// One open project, with no editor on it: what the plugin reads comes from the disk. Its Lua files are read
+/// once for the searches the plugin asks for.
+struct Opened(PathBuf, Published, Settings, OnceLock<Vec<(PathBuf, String)>>);
 
 impl PluginWorkspace for Opened {
     fn projects(&self) -> Vec<PathBuf> {
@@ -96,6 +107,44 @@ impl PluginWorkspace for Opened {
     fn plugin_settings(&self, _: &str, _: Option<&Path>) -> Settings {
         self.2.clone()
     }
+    /// Stands for Find in Files, for what the plugin asks of it: the Lua files of the project that write a
+    /// word, whole and in its case.
+    fn search_text(
+        &self,
+        _: Option<&str>,
+        root: &Path,
+        query: TextQuery,
+        limit: u32,
+        _: &CancellationToken,
+    ) -> Result<TextSearch, HostError> {
+        let texts = self.3.get_or_init(|| {
+            let mut files = Vec::new();
+            lua_files(root, &mut files);
+            files.sort();
+            files.into_iter().filter_map(|path| Some((std::fs::read_to_string(&path).ok()?, path))).map(|(text, path)| (path, text)).collect()
+        });
+        let word = |near: Option<char>| near.is_some_and(|near| near.is_alphanumeric() || near == '_');
+        let mut out = TextSearch::default();
+        for (path, text) in texts {
+            for (line, written) in text.lines().enumerate() {
+                for (at, found) in written.match_indices(query.pattern.as_str()) {
+                    let inside = word(written[..at].chars().next_back()) || word(written[at + found.len()..].chars().next());
+                    if query.whole_word && inside {
+                        continue;
+                    }
+                    if out.matches.len() >= limit as usize {
+                        out.limit_hit = true;
+                        return Ok(out);
+                    }
+                    let column = written[..at].encode_utf16().count() as u32;
+                    let end = Pos::new(line as u32, column + found.encode_utf16().count() as u32);
+                    let location = Location { path: path.clone(), range: Range::new(Pos::new(line as u32, column), end) };
+                    out.matches.push(TextMatch { location, line: written.to_owned() });
+                }
+            }
+        }
+        Ok(out)
+    }
 }
 
 /// What the plugin tells the IDE while it reads a project.
@@ -105,6 +154,9 @@ struct Scan {
     ended: AtomicBool,
     /// The title and the body of each notification.
     notified: Mutex<Vec<(String, String)>>,
+    /// What is answered to the question the plugin asks next, and the host that takes the answer.
+    answer: Mutex<Option<String>>,
+    host: OnceLock<Weak<PluginHost>>,
 }
 
 fn main() -> ExitCode {
@@ -130,6 +182,41 @@ fn main() -> ExitCode {
         Some(at) if at + 1 < args.len() => {
             args.remove(at);
             Some(args.remove(at))
+        }
+        Some(_) => {
+            eprintln!("{USAGE}");
+            return ExitCode::from(2);
+        }
+        None => None,
+    };
+    let rename = match args.iter().position(|a| a == "--rename") {
+        Some(at) if at + 1 < args.len() => {
+            args.remove(at);
+            let asked = args.remove(at);
+            let parsed = asked.split_once('=').and_then(|(nth, name)| {
+                let (first, count) = nth.split_once('x').unwrap_or((nth, "1"));
+                Some((first.parse::<usize>().ok()?, count.parse::<usize>().ok()?, name.to_owned()))
+            });
+            let Some(parsed) = parsed else {
+                eprintln!("{USAGE}");
+                return ExitCode::from(2);
+            };
+            Some(parsed)
+        }
+        Some(_) => {
+            eprintln!("{USAGE}");
+            return ExitCode::from(2);
+        }
+        None => None,
+    };
+    let fuel = match args.iter().position(|a| a == "--fuel") {
+        Some(at) if at + 1 < args.len() => {
+            args.remove(at);
+            let Ok(fuel) = args.remove(at).parse::<u64>() else {
+                eprintln!("{USAGE}");
+                return ExitCode::from(2);
+            };
+            Some(fuel)
         }
         Some(_) => {
             eprintln!("{USAGE}");
@@ -168,10 +255,13 @@ fn main() -> ExitCode {
     } else {
         Limits::default()
     };
+    let limits = Limits { fuel: fuel.unwrap_or(limits.fuel), ..limits };
     let dir = std::env::temp_dir().join(format!("cfxlua-editor-check-{}", std::process::id()));
     let word = args.get(2).map(String::as_str);
+    let rename = rename.as_ref().map(|(first, count, name)| (*first, *count, name.as_str()));
     let command = command.as_deref();
-    let asked = Asked { project: project.as_deref(), indexed, settings: &settings, command, word, typing: &typing };
+    let project = project.as_deref();
+    let asked = Asked { project, indexed, settings: &settings, command, rename, word, typing: &typing };
     let result = check(&dir, limits, Path::new(package), Path::new(file), &asked);
     let _ = std::fs::remove_dir_all(&dir);
     match result {
@@ -288,6 +378,86 @@ fn run_command(host: &PluginHost, plugin: &str, root: &Path, command: &str, scan
     result.map(|_| ()).map_err(|e| format!("{command}: {e}"))
 }
 
+/// Why a rename was refused, in the words of the plugin that name nothing of the project, or of the host.
+fn refusal(error: &str, notified: &[(String, String)]) -> &'static str {
+    const SAID: [&str; 5] = ["too many places", "too many files", "cannot tell", "could not tell", "does not read"];
+    let said = |reason: &str| notified.iter().any(|(_, body)| body.contains(reason));
+    if let Some(reason) = SAID.into_iter().find(|reason| said(reason)) {
+        return reason;
+    }
+    let error = error.to_lowercase();
+    match () {
+        () if error.contains("budget") || error.contains("fuel") => "cpu budget",
+        () if error.contains("time") || error.contains("deadline") => "timeout",
+        () if error.contains("cancel") => "cancelled",
+        () => "another error",
+    }
+}
+
+/// Chooses the actions that rename in the project at the names of the file that offer one, each name once:
+/// `count` of them from the `first`. Answers `name` to the question each asks and tells how it resolved: how
+/// long, how many files and edits. What is renamed is printed under each line.
+fn rename_in_project(
+    host: &PluginHost,
+    root: &Path,
+    doc: &ProviderDocument,
+    lines: &[&str],
+    (first, count, name): (usize, usize, &str),
+    scan: &Scan,
+) -> Result<(), String> {
+    let root = dunce::canonicalize(root).map_err(|e| format!("{}: {e}", root.display()))?;
+    let mut titles = std::collections::BTreeSet::new();
+    let offered = |at: &Pos| {
+        let actions = host.provide_code_actions(doc, Range::point(*at));
+        actions.into_iter().find(|(_, action)| action.data.is_some() && action.title.ends_with(" in the project…"))
+    };
+    let positions = names(lines);
+    let distinct = positions.iter().filter_map(offered).filter(|(_, action)| titles.insert(action.title.clone()));
+    let chosen: Vec<_> = distinct.skip(first).take(count).collect();
+    if chosen.is_empty() {
+        println!("rename: no action that renames in the project, {first} skipped");
+        return Ok(());
+    }
+    let (mut resolved_count, mut slowest) = (0, Duration::ZERO);
+    for (plugin, action) in &chosen {
+        if let Ok(mut answer) = scan.answer.lock() {
+            *answer = Some(name.to_owned());
+        }
+        let before = scan.notified.lock().map(|notified| notified.len()).unwrap_or(0);
+        let invocation =
+            Invocation { client: Some("main".into()), workspace_root: Some(root.clone()), ..Default::default() };
+        let start = Instant::now();
+        let resolved = host.resolve_code_action(plugin, doc, action.clone(), invocation);
+        let took = start.elapsed();
+        slowest = slowest.max(took);
+        match resolved {
+            Ok(resolved) => {
+                resolved_count += 1;
+                let edits: usize = resolved.edits.iter().map(|(_, edits)| edits.len()).sum();
+                println!("rename: resolved in {took:?}, {} files, {edits} edits", resolved.edits.len());
+                println!("  {}", action.title);
+                for (path, edits) in &resolved.edits {
+                    println!("  {}: {}", path.display(), edits.len());
+                }
+            }
+            Err(e) => {
+                let notified = scan.notified.lock().map(|notified| notified[before..].to_vec()).unwrap_or_default();
+                let why = refusal(&e.to_string(), &notified);
+                println!("rename: refused in {took:?}, {} notifications ({why})", notified.len());
+                println!("  {}: {e}", action.title);
+                for (title, body) in &notified {
+                    println!("  {title}: {body}");
+                }
+            }
+        }
+    }
+    if chosen.len() > 1 {
+        let refused = chosen.len() - resolved_count;
+        println!("renames: {resolved_count} resolved, {refused} refused, slowest {slowest:?}");
+    }
+    Ok(())
+}
+
 /// The Lua files under a folder, hidden folders and `node_modules` left out.
 fn lua_files(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
@@ -348,12 +518,13 @@ struct Asked<'a> {
     indexed: bool,
     settings: &'a Settings,
     command: Option<&'a str>,
+    rename: Option<(usize, usize, &'a str)>,
     word: Option<&'a str>,
     typing: &'a str,
 }
 
 fn check(dir: &Path, limits: Limits, package: &Path, file: &Path, asked: &Asked) -> Result<(), String> {
-    let Asked { project, indexed, settings, command, word, typing } = *asked;
+    let Asked { project, indexed, settings, command, rename, word, typing } = *asked;
     let scan = Arc::new(Scan::default());
     let seen = scan.clone();
     let deadline = limits.edit_soft;
@@ -370,16 +541,34 @@ fn check(dir: &Path, limits: Limits, package: &Path, file: &Path, asked: &Asked)
                 notified.push((title, body));
             }
         }
+        // The call that asks waits for its answer: it is given from another thread, as a window gives it.
+        PluginEvent::PromptRequested { prompt_id, .. } => {
+            let answer = seen.answer.lock().ok().and_then(|mut answer| answer.take());
+            let host = seen.host.get().and_then(Weak::upgrade);
+            if let Some(host) = host {
+                std::thread::spawn(move || {
+                    let answer = answer.map(|answer| vec![answer]);
+                    for _ in 0..400 {
+                        if host.answer_prompt(&prompt_id, answer.clone()) {
+                            break;
+                        }
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                });
+            }
+        }
         _ => {}
     };
-    let host = PluginHost::new(dir.to_path_buf(), Arc::new(sink), limits).map_err(|e| e.to_string())?;
+    let host = Arc::new(PluginHost::new(dir.to_path_buf(), Arc::new(sink), limits).map_err(|e| e.to_string())?);
+    let _ = scan.host.set(Arc::downgrade(&host));
     let published = Published::default();
     if indexed {
         // An indexer runs in a trusted project only.
         host.set_project_policy(Arc::new(|_| true));
     }
     if let Some(root) = project {
-        host.set_workspace(Some(Arc::new(Opened(root.to_path_buf(), published.clone(), settings.clone()))));
+        let opened = Opened(root.to_path_buf(), published.clone(), settings.clone(), OnceLock::new());
+        host.set_workspace(Some(Arc::new(opened)));
     }
     let unpacked = host.unpack_package(package).map_err(|e| e.to_string())?;
     let installed = host.install_from_dir(&unpacked, &Consent::all()).map_err(|e| e.to_string())?;
@@ -556,6 +745,9 @@ fn check(dir: &Path, limits: Limits, package: &Path, file: &Path, asked: &Asked)
 
     if let (true, Some(root)) = (indexed, project) {
         index_project(&host, root, file, &lines)?;
+    }
+    if let (Some(asked), Some(root)) = (rename, project) {
+        rename_in_project(&host, root, &doc, &lines, asked, &scan)?;
     }
     let info = host.info_of(&installed.id).map_err(|e| e.to_string())?;
     println!("{} {}: {:?}, {:?}", info.id, info.version, info.status, info.stats);
