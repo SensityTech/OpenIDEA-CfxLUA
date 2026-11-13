@@ -68,7 +68,7 @@ fn listed(names: &[Rc<str>]) -> String {
 }
 
 /// The classes that name each class as a parent, among those the file sees.
-fn children<'a>(cx: &Cx<'a>) -> HashMap<Rc<str>, Vec<(FileId, &'a ClassDef)>> {
+pub(crate) fn children<'a>(cx: &Cx<'a>) -> HashMap<Rc<str>, Vec<(FileId, &'a ClassDef)>> {
     let mut children: HashMap<Rc<str>, Vec<(FileId, &ClassDef)>> = HashMap::new();
     for (file, class) in cx.index.all_classes().filter(|(file, _)| cx.files.visible(*file)) {
         for parent in class.super_name.iter().chain(&class.extra_supers) {
@@ -79,7 +79,7 @@ fn children<'a>(cx: &Cx<'a>) -> HashMap<Rc<str>, Vec<(FileId, &'a ClassDef)>> {
 }
 
 /// The classes that inherit from `class`, the nearest first (`LuaClassInheritorsSearch`).
-fn inheritors<'a>(
+pub(crate) fn inheritors<'a>(
     children: &HashMap<Rc<str>, Vec<(FileId, &'a ClassDef)>>,
     class: &str,
 ) -> Vec<(FileId, &'a ClassDef)> {
@@ -100,7 +100,7 @@ fn inheritors<'a>(
 }
 
 /// The method `name` a class declares itself, under its name or under the table it annotates.
-fn own_method<'a>(cx: &Cx<'a>, class: &str, name: &str) -> Option<Found<'a>> {
+pub(crate) fn own_method<'a>(cx: &Cx<'a>, class: &str, name: &str) -> Option<Found<'a>> {
     let others = cx.index.other_names(class, cx.options.global_name_as_type);
     let mut kept_under = std::iter::once(Rc::from(class)).chain(others);
     kept_under.find_map(|kept| {
@@ -115,7 +115,7 @@ fn declared(found: Found) -> Target {
 }
 
 /// The class a method statement declares its method on, when the project declares that class.
-fn class_of(cx: &Cx, method: Psi) -> Option<Rc<str>> {
+pub(crate) fn class_of(cx: &Cx, method: Psi) -> Option<Rc<str>> {
     let owner = psi::method_owner(method.node)?;
     let ty = cx.with_value(0, || cx.infer(method.at(owner)));
     let named = ty.top_classes().into_iter().filter_map(|class| class.class_name());

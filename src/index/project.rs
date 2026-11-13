@@ -128,6 +128,24 @@ impl Sight<'_> {
     const NONE: Sight<'static> = Sight { parts: &[], native: &|_| None };
 }
 
+/// What a question that is no editor call may spend: its time, and how much text of other files it may
+/// read anew.
+#[derive(Clone, Copy, Debug)]
+pub struct Budget {
+    pub time: Duration,
+    pub read: usize,
+}
+
+/// What a question cost, and whether it was left short of time, of inferences or of text to read: its
+/// answer then tells less than there is.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Cost {
+    pub steps: u32,
+    /// How much text of other files was read anew, in bytes.
+    pub read: usize,
+    pub short: bool,
+}
+
 /// The files of one project, read for one question.
 struct Reading<'a> {
     ws: &'a Workspace,
@@ -135,6 +153,8 @@ struct Reading<'a> {
     /// The file the question is asked from.
     from: &'a str,
     left: Cell<usize>,
+    /// A file was left unread: over what is left to read, or no longer the text that was indexed.
+    starved: Cell<bool>,
     sight: &'a Sight<'a>,
 }
 
@@ -162,10 +182,14 @@ impl Files for Reading<'_> {
             return Some(kept);
         }
         if stamp.size() > self.left.get() {
+            self.starved.set(true);
             return None;
         }
         self.left.set(self.left.get() - stamp.size());
-        let text = self.ws.read(path)?;
+        let Some(text) = self.ws.read(path) else {
+            self.starved.set(true);
+            return None;
+        };
         let src = Rc::new(crate::parse(known.kind, &text));
         self.project.kept.borrow_mut().keep(file, stamp, src.clone());
         Some(src)
@@ -209,7 +233,8 @@ impl Projects {
         let project = projects.entry(ws.root.clone()).or_insert_with(|| Project::new(&self.options));
         let file = project.ids.id(path);
         let declared = {
-            let reading = Reading { ws, project, from: path, left: Cell::new(0), sight: &Sight::NONE };
+            let (left, starved) = (Cell::new(0), Cell::new(false));
+            let reading = Reading { ws, project, from: path, left, starved, sight: &Sight::NONE };
             declare(&Cx::new(&reading, &project.index, &self.options).at_home(file, src), file, src)
         };
         project.index.set(file, declared);
@@ -238,15 +263,30 @@ impl Projects {
     pub fn ask_within<R>(
         &self,
         time: Duration,
-        (ws, path, src): (&Workspace, &str, &Source),
+        asked: (&Workspace, &str, &Source),
         sight: &Sight,
         ask: impl FnOnce(&Cx, FileId) -> R,
     ) -> Option<R> {
+        self.ask_counted(Budget { time, read: READ_BUDGET }, asked, sight, ask).map(|(answer, _)| answer)
+    }
+
+    /// `ask_within`, for a question that is given its own `budget` and must not tell less than there is: what
+    /// it cost comes with its answer.
+    pub fn ask_counted<R>(
+        &self,
+        budget: Budget,
+        (ws, path, src): (&Workspace, &str, &Source),
+        sight: &Sight,
+        ask: impl FnOnce(&Cx, FileId) -> R,
+    ) -> Option<(R, Cost)> {
         let projects = self.by_root.borrow();
         let project = projects.get(&ws.root)?;
         let file = project.ids.ids.get(path).copied()?;
-        let reading = Reading { ws, project, from: path, left: Cell::new(READ_BUDGET), sight };
-        let cx = Cx::new(&reading, &project.index, &self.options).at_home(file, src);
-        Some(ask(&cx.bounded(STEP_BUDGET, time), file))
+        let (left, starved) = (Cell::new(budget.read), Cell::new(false));
+        let reading = Reading { ws, project, from: path, left, starved, sight };
+        let cx = Cx::new(&reading, &project.index, &self.options).at_home(file, src).bounded(STEP_BUDGET, budget.time);
+        let answer = ask(&cx, file);
+        let short = cx.spent() || reading.starved.get();
+        Some((answer, Cost { steps: cx.steps(), read: budget.read - reading.left.get(), short }))
     }
 }

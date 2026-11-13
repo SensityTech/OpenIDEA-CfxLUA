@@ -33,6 +33,7 @@ pub mod workspace;
 pub mod testing;
 
 use feature::{CommandCx, Ctx, Doc, Feature, Problem};
+use index::project::Budget;
 use lua::Source;
 use natives::Natives;
 use openidea_plugin::file_actions::{FileAction, FileActions, FileOperation};
@@ -51,6 +52,7 @@ use openidea_plugin::{
     TextEdit, host, register_plugin,
 };
 use project::{FileKind, Side};
+use refactor::members::Member;
 use settings::Settings;
 use text::slash;
 use workspace::Workspace;
@@ -82,8 +84,17 @@ const RENAME_FILE: &str = "rename-file";
 const MOVE_FILE: &str = "move-file";
 /// How many matches the text search of the IDE gives at most.
 const MAX_SEARCHED: u32 = 10_000;
-/// How much text of other files one rename parses: a call is paid in instructions, about 100 a byte here.
-const MAX_RENAMED: usize = 6 << 20;
+/// How much text one rename reads: the files that write the word, and what the type engine reads of others
+/// to tell what a member stands for. A call is paid in instructions, about 400 a byte here, of the five
+/// billion the IDE gives it.
+const MAX_RENAMED: usize = 4 << 20;
+/// How much of it telling what the member at the caret is may read.
+const MAX_ASKED: usize = 1 << 20;
+/// How long the type engine is asked what the uses of a member stand for in one rename, and how many
+/// inferences it makes: the IDE gives the action five seconds, and the heaviest rename seen infers a thousand
+/// times.
+const RENAMING: std::time::Duration = std::time::Duration::from_secs(3);
+const MAX_INFERRED: u32 = 20_000;
 /// How much text is read before the indexing has to catch up.
 const READ_AHEAD: usize = 4 << 20;
 const DERIVE_EVERY: u32 = 6;
@@ -692,7 +703,8 @@ impl DevKit {
         ws: usize,
         word: &str,
         skipped: &str,
-        per_file: impl Fn(&str, &Source) -> Vec<(usize, usize, String)>,
+        read: &std::cell::Cell<usize>,
+        per_file: impl Fn(&Doc) -> Result<Vec<(usize, usize, String)>, String>,
     ) -> Result<FileEdits, String> {
         let root = self.workspaces[ws].root.clone();
         let projects = host::projects().map_err(|e| e.to_string())?;
@@ -717,24 +729,33 @@ impl DevKit {
         let mut paths: Vec<String> = written.matches.iter().map(|found| slash(&found.location.path)).collect();
         paths.sort();
         paths.dedup();
+        paths.retain(|path| path != skipped && project::file_kind(path) == FileKind::Lua);
+        let too_many =
+            || format!("'{word}' is written in too many files to go through them in one go: nothing is changed");
+        // What the files weigh is known before any is read.
+        let known = paths.iter().filter_map(|path| self.workspaces[ws].stamp(path)).map(workspace::Stamp::size);
+        if read.get() + known.sum::<usize>() > MAX_RENAMED {
+            return Err(too_many());
+        }
         let mut out = Vec::new();
-        let mut read = 0;
-        for path in paths.iter().filter(|path| *path != skipped && project::file_kind(path) == FileKind::Lua) {
+        for path in &paths {
             let shown = path.strip_prefix(&root).map_or(path.as_str(), |rest| rest.trim_start_matches('/'));
             let unread = || format!("'{word}' is written in {shown}, a file CfxLua does not read: nothing is changed");
             let text = read_text(path).filter(|text| text.len() <= MAX_INDEXED && !project::is_escrowed(text));
             let text = text.ok_or_else(unread)?;
-            read += text.len();
-            if read > MAX_RENAMED {
-                return Err(format!(
-                    "'{word}' is written in too many files to go through them in one go: nothing is changed"
-                ));
+            read.set(read.get() + text.len());
+            if read.get() > MAX_RENAMED {
+                return Err(too_many());
             }
-            let src = Source::new(&text);
-            if src.too_deep() {
+            let file = Doc::new(&self.workspaces[ws], path, "lua", 0, &text);
+            if file.src.too_deep() {
                 return Err(unread());
             }
-            let edits = per_file(path, &src);
+            let edits = per_file(&file)?;
+            // What `per_file` read of other files to tell its edits counts too.
+            if read.get() > MAX_RENAMED {
+                return Err(too_many());
+            }
             if !edits.is_empty() {
                 out.push((self.native_path(ws, path), placed(&text, edits)));
             }
@@ -756,19 +777,51 @@ impl DevKit {
         out
     }
 
-    /// The edits that give the global or the member `key` stands for its new name, in the document and in
-    /// every other Lua file of the project that writes `name`; or why nothing is renamed.
-    fn renamed_everywhere(&self, ws: usize, key: &str, name: &str, new: &str) -> Result<FileEdits, String> {
+    /// The edits that give a global or a member its new name, in the document and in every other Lua file
+    /// of the project that writes `name`; or why nothing is renamed. `key` is what the syntax tells of it,
+    /// `member` what the type engine told: each use it resolves to that member follows, within what one
+    /// rename may read and infer.
+    fn renamed_everywhere(
+        &self,
+        ws: usize,
+        (key, member): (Option<&str>, Option<&Member>),
+        name: &str,
+        new: &str,
+    ) -> Result<FileEdits, String> {
         let (doc, _) = self.last.as_ref().ok_or("the document is no longer read")?;
         let library = |name: &str| refactor::is_library(&self.natives, name);
-        let own = refactor::rename::shared_edits(&doc.src, key, new, &library);
-        let own = own.into_iter().map(|(start, end, text)| doc.edit(start, end, text)).collect();
+        let until = std::time::Instant::now() + RENAMING;
+        // What is read and inferred over all the files is paid in the instructions of this one call.
+        let (read, steps) = (std::cell::Cell::new(0), std::cell::Cell::new(0));
+        let renamed = |file: &Doc| -> Result<Vec<(usize, usize, String)>, String> {
+            let mut edits =
+                key.map_or_else(Vec::new, |key| refactor::rename::shared_edits(&file.src, key, new, &library));
+            if let Some(member) = member {
+                let cx = Ctx { doc: file, ws: &self.workspaces[ws], settings: &self.settings, natives: &self.natives };
+                let budget = Budget {
+                    time: until.saturating_duration_since(std::time::Instant::now()),
+                    read: MAX_RENAMED.saturating_sub(read.get()),
+                };
+                let told = self.features.iter().find_map(|feature| feature.member_uses(&cx, member, budget));
+                let told = told.filter(|(_, cost)| {
+                    read.set(read.get() + cost.read);
+                    steps.set(steps.get() + cost.steps);
+                    steps.get() <= MAX_INFERRED
+                });
+                let untold = || {
+                    let shown = self.workspaces[ws].relative(&file.path);
+                    format!("CfxLua could not tell what '{name}' stands for in {shown}: nothing is changed")
+                };
+                let (uses, _) = told.ok_or_else(untold)?;
+                edits.extend(uses.into_iter().map(|(start, end)| (start, end, new.to_owned())));
+                edits.sort();
+                edits.dedup();
+            }
+            Ok(edits)
+        };
+        let own = renamed(doc)?.into_iter().map(|(start, end, text)| doc.edit(start, end, text)).collect();
         let mut out = vec![(self.native_path(ws, &doc.path), own)];
-        out.extend(
-            self.in_files_writing(ws, name, &doc.path, |_, src| {
-                refactor::rename::shared_edits(src, key, new, &library)
-            })?,
-        );
+        out.extend(self.in_files_writing(ws, name, &doc.path, &read, renamed)?);
         Ok(out)
     }
 
@@ -804,11 +857,15 @@ impl DevKit {
             return Err(format!("'{}' already exists", ws.relative(&to)));
         }
         let loaders = ty::context::Options::default().require_like;
-        let rewrite = |from: &str, src: &Source| match to_folder {
-            true => refactor::files::moved(ws, (from, src), &loaders, path, &to),
-            false => refactor::files::renamed(ws, (from, src), &loaders, path, text::file_name(&to)),
+        let rewrite = |from: &Doc| {
+            let asking = (from.path.as_str(), &from.src);
+            Ok(match to_folder {
+                true => refactor::files::moved(ws, asking, &loaders, path, &to),
+                false => refactor::files::renamed(ws, asking, &loaders, path, text::file_name(&to)),
+            })
         };
-        let mut edits = self.in_files_writing(i, refactor::files::searched_word(path), path, rewrite)?;
+        let read = std::cell::Cell::new(0);
+        let mut edits = self.in_files_writing(i, refactor::files::searched_word(path), path, &read, rewrite)?;
         edits.extend(self.manifests_naming(i, path, &to));
         Ok((to, edits))
     }
@@ -1178,6 +1235,22 @@ impl Providers for DevKit {
         let (doc, _) = self.last.as_ref().ok_or(Error::Cancelled)?;
         let mut ask = |question: &str, value: &str| host::input(question, Some(value)).ok().flatten();
         let library = |name: &str| refactor::is_library(&self.natives, name);
+        let refused = |why: String| {
+            host::notify(openidea_plugin::NotificationLevel::Warning, "CfxLua", &why);
+            Error::Cancelled
+        };
+        // What a member is, is told before its new name is asked: a rename that cannot be made asks nothing.
+        let member = match refactor::rename::member_asked(&doc.src, data, &library) {
+            Some((at, name)) => {
+                let told = self.with_ctx(ws, |cx, features| {
+                    let budget = Budget { time: RENAMING, read: MAX_ASKED };
+                    features.iter().find_map(|feature| feature.member_at(cx, at, budget))
+                });
+                let unknown = || format!("CfxLua cannot tell what '{name}' is here: nothing is renamed");
+                Some(told.flatten().ok_or_else(unknown).map_err(refused)?)
+            }
+            None => None,
+        };
         let chosen = refactor::rename::asked(&doc.src, data, &library, &mut ask).ok_or(Error::Cancelled)?;
         let edits = match chosen {
             refactor::rename::Chosen::Here(edits) => {
@@ -1185,10 +1258,7 @@ impl Providers for DevKit {
                 vec![(self.native_path(ws, &doc.path), own)]
             }
             refactor::rename::Chosen::Everywhere { key, name, new } => {
-                self.renamed_everywhere(ws, &key, &name, &new).map_err(|why| {
-                    host::notify(openidea_plugin::NotificationLevel::Warning, "CfxLua", &why);
-                    Error::Cancelled
-                })?
+                self.renamed_everywhere(ws, (key.as_deref(), member.as_ref()), &name, &new).map_err(refused)?
             }
         };
         Ok(CodeAction { edits, ..action })
@@ -2530,6 +2600,58 @@ mod tests {
     }
 
     #[test]
+    fn a_member_is_renamed_where_a_value_reaches_it_and_with_the_methods_that_override_it() {
+        let base = "---@class Base\nBase = {}\nfunction Base:run() end\n";
+        let child = "---@class Child : Base\nChild = {}\nfunction Child:run() end\n";
+        let calls = "---@param job Child\nlocal function start(job)\n    job:run()\n    job.other:run()\nend\n";
+        let host = openidea_plugin::mock::MockHost::install();
+        host.add_file("res/client/base.lua", base);
+        host.add_file("res/client/child.lua", child);
+        let mut kit = shop_resource(&host);
+        let written = |path: &str| openidea_plugin::TextMatch {
+            location: Location { path: path.to_owned(), range: Range::new(Position::new(0, 0), Position::new(0, 3)) },
+            line: String::new(),
+        };
+        host.on_search(move |_, _| {
+            let files = ["/project/res/client/child.lua", "/project/res/client/base.lua", SHOP_CLIENT];
+            Ok(openidea_plugin::TextSearch { matches: files.into_iter().map(written).collect(), limit_hit: false })
+        });
+        let typed = lua(SHOP_CLIENT, 2, calls);
+        let rename_at = |kit: &mut DevKit, line: u32, column: u32| {
+            let at = Position::new(line, column);
+            let actions = kit.code_actions(&typed, Range::new(at, at));
+            actions.into_iter().find(|action| action.title == "Rename 'run' in the project…").expect("the rename")
+        };
+
+        let through_a_value = rename_at(&mut kit, 2, 9);
+        host.answer_next_prompt(Some(&["execute"]));
+        let resolved = kit.resolve_code_action(&typed, through_a_value).expect("the edits");
+        let after: Vec<(&str, String)> = resolved
+            .edits
+            .iter()
+            .map(|(path, edits)| {
+                let before = [(SHOP_CLIENT, calls), ("/project/res/client/base.lua", base)];
+                let before = before.iter().find(|(known, _)| known == path).map_or(child, |(_, text)| text);
+                (path.as_str(), applied(before, edits))
+            })
+            .collect();
+        assert_eq!(
+            after,
+            [
+                (SHOP_CLIENT, calls.replace("job:run", "job:execute")),
+                ("/project/res/client/base.lua", base.replace("run", "execute")),
+                ("/project/res/client/child.lua", child.replace("run", "execute")),
+            ],
+            "the method of the class of the value, and the one it overrides"
+        );
+
+        let of_nothing_known = rename_at(&mut kit, 3, 15);
+        assert!(matches!(kit.resolve_code_action(&typed, of_nothing_known), Err(Error::Cancelled)));
+        let told: Vec<String> = host.notifications().into_iter().map(|told| told.body).collect();
+        assert_eq!(told, ["CfxLua cannot tell what 'run' is here: nothing is renamed"]);
+    }
+
+    #[test]
     fn a_big_project_gives_the_indexer_its_classes_and_its_cfx_names_only() {
         let host = openidea_plugin::mock::MockHost::install();
         for file in 0..1_201 {
@@ -2790,6 +2912,131 @@ mod tests {
             timed("folding", &mut |kit| kit.folding(&doc).len());
             timed("structure", &mut |kit| kit.document_symbols(&doc).len());
             timed("colours", &mut |kit| kit.colors(&doc).len());
+        }
+    }
+
+    /// What reading one file for a rename costs, part by part, over every script of a project.
+    #[test]
+    #[ignore = "measurement: CFXLUA_PROJECT=<dir> cargo test --release --lib rename_parts_cost_in_a_real_project -- --ignored --nocapture"]
+    fn rename_parts_cost_in_a_real_project() {
+        let all = testing::real_project();
+        let scripts: Vec<&(String, String)> = all
+            .iter()
+            .filter(|(rel, text)| {
+                rel.ends_with(".lua") && !rel.ends_with("fxmanifest.lua") && text.len() <= MAX_INDEXED
+            })
+            .collect();
+        let bytes: usize = scripts.iter().map(|(_, text)| text.len()).sum();
+        let mut spent = [std::time::Duration::ZERO; 5];
+        let library = |_: &str| false;
+        for (_, text) in &scripts {
+            let mut timed = |part: usize, run: &mut dyn FnMut() -> usize| {
+                let start = std::time::Instant::now();
+                std::hint::black_box(run());
+                spent[part] += start.elapsed();
+            };
+            let mut src = None;
+            timed(0, &mut || src.insert(Source::new(text)).toks.len());
+            let Some(src) = src else { continue };
+            timed(1, &mut || src.scopes().decls().len());
+            timed(2, &mut || src.docs().tree().len());
+            timed(3, &mut || refactor::edges::anchors(&src, &library).len());
+            timed(4, &mut || refactor::rename::shared_edits(&src, "lua.member:Nothing#nothing", "x", &library).len());
+        }
+        eprintln!("{} scripts, {bytes} bytes", scripts.len());
+        for (part, took) in ["tree", "scopes", "comments", "anchors", "edits of one key"].iter().zip(spent) {
+            eprintln!("{part}: {took:?}, {:.1} ms per MiB", took.as_secs_f64() * 1000.0 / (bytes as f64 / 1048576.0));
+        }
+    }
+
+    /// Renames a member of one file in `EVERY`, the first one written there, and tells how it went: numbers
+    /// only, never a name. The search is the one of the IDE, played here: each whole word is a match.
+    #[test]
+    #[ignore = "measurement: CFXLUA_PROJECT=<dir> cargo test --release --lib member_rename_cost_in_a_real_project -- --ignored --nocapture"]
+    fn member_rename_cost_in_a_real_project() {
+        const EVERY: usize = 12;
+        let all = testing::real_project();
+        let host = openidea_plugin::mock::MockHost::install();
+        for (rel, text) in &all {
+            host.add_file(rel, text);
+        }
+        let mut kit = DevKit::default();
+        kit.activate(&host.context("sensity.cfxlua")).unwrap();
+        while kit.indexing {
+            kit.handle_events(&[Event::EditorFocused(None)], &host.invocation());
+        }
+        let scripts = |(rel, _): &&(String, String)| rel.ends_with(".lua") && !rel.ends_with("fxmanifest.lua");
+        let lua: std::rc::Rc<Vec<(String, String)>> = std::rc::Rc::new(
+            all.iter().filter(scripts).map(|(rel, text)| (format!("/project/{rel}"), text.clone())).collect(),
+        );
+        let searched = lua.clone();
+        host.on_search(move |query, limit| {
+            let word = |near: Option<char>| near.is_some_and(|near| near.is_alphanumeric() || near == '_');
+            let mut matches = Vec::new();
+            for (path, text) in searched.iter() {
+                for (at, found) in text.match_indices(query.pattern.as_str()) {
+                    if word(text[..at].chars().next_back()) || word(text[at + found.len()..].chars().next()) {
+                        continue;
+                    }
+                    if matches.len() as u64 >= u64::from(limit) {
+                        return Ok(openidea_plugin::TextSearch { matches, limit_hit: true });
+                    }
+                    let location = Location { path: path.clone(), range: Range::default() };
+                    matches.push(openidea_plugin::TextMatch { location, line: String::new() });
+                }
+            }
+            Ok(openidea_plugin::TextSearch { matches, limit_hit: false })
+        });
+        let (mut asked, mut offered) = (0, 0);
+        let mut renamed: Vec<(std::time::Duration, usize, usize)> = Vec::new();
+        let mut refused: std::collections::BTreeMap<&str, Vec<std::time::Duration>> = Default::default();
+        for (path, text) in lua.iter().step_by(EVERY).filter(|(_, text)| text.len() <= MAX_INDEXED) {
+            let src = Source::new(text);
+            let tokens = src.root().tree().tokens();
+            let named = (0..tokens.len()).find_map(|index| {
+                refactor::members::name_at(&src, tokens.start(index)).filter(|(start, end)| end - start >= 3)
+            });
+            let Some((start, _)) = named else { continue };
+            asked += 1;
+            let line = text[..start].matches('\n').count();
+            let column = text[..start].rsplit('\n').next().map_or(0, |before| before.encode_utf16().count());
+            let at = Position::new(line as u32, column as u32);
+            let doc = Document { path: path.clone(), language: "lua".into(), version: 1, text: text.clone() };
+            let actions = kit.code_actions(&doc, Range::new(at, at));
+            let Some(rename) = actions.into_iter().find(|action| action.title.ends_with(" in the project…")) else {
+                continue;
+            };
+            offered += 1;
+            let told = host.notifications().len();
+            host.answer_next_prompt(Some(&["zzRenamedForTheMeasure"]));
+            let start = std::time::Instant::now();
+            let resolved = kit.resolve_code_action(&doc, rename);
+            let took = start.elapsed();
+            match resolved {
+                Ok(action) => {
+                    renamed.push((took, action.edits.len(), action.edits.iter().map(|(_, edits)| edits.len()).sum()));
+                }
+                Err(_) => {
+                    let why = host.notifications().into_iter().nth(told).map(|told| told.body).unwrap_or_default();
+                    let reasons =
+                        ["cannot tell", "could not tell", "too many places", "too many files", "does not read"];
+                    let reason = reasons.into_iter().find(|reason| why.contains(reason)).unwrap_or("another reason");
+                    refused.entry(reason).or_default().push(took);
+                }
+            }
+        }
+        let spread = |times: &mut Vec<std::time::Duration>| {
+            times.sort();
+            let at = |part: usize| times.get((times.len() * part / 100).min(times.len().saturating_sub(1))).copied();
+            format!("median {:?}, 9 in 10 under {:?}, slowest {:?}", at(50), at(90), times.last())
+        };
+        eprintln!("{} scripts, {asked} members asked, {offered} offered a rename in the project", lua.len());
+        let mut times: Vec<std::time::Duration> = renamed.iter().map(|(took, _, _)| *took).collect();
+        let files = renamed.iter().map(|(_, files, _)| *files).max().unwrap_or(0);
+        let places = renamed.iter().map(|(_, _, places)| *places).max().unwrap_or(0);
+        eprintln!("renamed {}: {}; {files} files and {places} places at most", renamed.len(), spread(&mut times));
+        for (reason, mut times) in refused {
+            eprintln!("refused ({reason}) {}: {}", times.len(), spread(&mut times));
         }
     }
 

@@ -5,7 +5,8 @@ use crate::lua::Source;
 use crate::lua::scope::DeclKind;
 use crate::lua::token::{self, T};
 use crate::lua::tree::{N, Node};
-use crate::refactor::edges;
+use crate::refactor::edges::{self, Family};
+use crate::refactor::members;
 
 /// A name the file alone can rename, and where it is written.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -69,14 +70,16 @@ pub fn edits(found: &Renamed, new: &str) -> Vec<(usize, usize, String)> {
 
 const ASKED: &str = "rename:";
 const SHARED: &str = "rename-shared:";
+const MEMBER: &str = "rename-member:";
 
 /// What a fix that renames found once its name was given.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Chosen {
     /// The edits of the file: the name is one it alone holds.
     Here(Vec<(usize, usize, String)>),
-    /// A global or a member the project shares: every file that writes `name` gives the edits of `key`.
-    Everywhere { key: String, name: String, new: String },
+    /// A global or a member the project shares: every file that writes `name` gives the edits of `key`,
+    /// when the syntax tells one, and what the type engine finds of the member `member_asked` gave.
+    Everywhere { key: Option<String>, name: String, new: String },
 }
 
 /// The fix that renames the global or the member named at `at` in every file of the project.
@@ -86,9 +89,27 @@ pub fn shared_fix(
     library: &dyn Fn(&str) -> bool,
     title: impl FnOnce(&str) -> String,
 ) -> Option<Fix> {
-    let found = edges::shared_at(src, at, library)?;
-    let name = src.text.get(found.start..found.end)?;
-    Some(Fix::new(title(name)).asking(format!("{SHARED}{at}:{}", found.key)))
+    if let Some(found) = edges::shared_at(src, at, library) {
+        let name = src.text.get(found.start..found.end)?;
+        return Some(Fix::new(title(name)).asking(format!("{SHARED}{at}:{}", found.key)));
+    }
+    // A member the syntax does not name: the type engine tells what it is once the fix is chosen.
+    let (start, end) = members::name_at(src, at).filter(|(start, _)| !members::from_library(src, *start, library))?;
+    let name = src.text.get(start..end)?;
+    Some(Fix::new(title(name)).asking(format!("{MEMBER}{at}:{name}")))
+}
+
+/// Where a fix `shared_fix` gave names a member, and its name: what the type engine is asked about before a
+/// new name is. Nothing for a global, nor once the document no longer writes that member there.
+pub fn member_asked<'a>(src: &'a Source, data: &str, library: &dyn Fn(&str) -> bool) -> Option<(usize, &'a str)> {
+    if let Some((at, key)) = data.strip_prefix(SHARED).and_then(|rest| rest.split_once(':')) {
+        let found = edges::shared_at(src, at.parse().ok()?, library)?;
+        let member = found.key == key && found.family == Family::Member;
+        return src.text.get(found.start..found.end).filter(|_| member).map(|name| (found.start, name));
+    }
+    let (at, name) = data.strip_prefix(MEMBER)?.split_once(':')?;
+    let (start, end) = members::name_at(src, at.parse().ok()?)?;
+    (src.text.get(start..end) == Some(name)).then_some((start, &src.text[start..end]))
 }
 
 /// The edits that give the name `key` stands for its new name, in one file.
@@ -130,7 +151,11 @@ pub fn asked(
         let found = edges::shared_at(src, at.parse().ok()?, library).filter(|found| found.key == key)?;
         let name = src.text.get(found.start..found.end)?;
         let new = new_name(name, ask)?;
-        return Some(Chosen::Everywhere { key: key.to_owned(), name: name.to_owned(), new });
+        return Some(Chosen::Everywhere { key: Some(key.to_owned()), name: name.to_owned(), new });
+    }
+    if data.starts_with(MEMBER) {
+        let (_, name) = member_asked(src, data, library)?;
+        return Some(Chosen::Everywhere { key: None, name: name.to_owned(), new: new_name(name, ask)? });
     }
     let (at, name) = data.strip_prefix(ASKED)?.split_once(':')?;
     let found = self::at(src, at.parse().ok()?).filter(|found| found.name == name)?;

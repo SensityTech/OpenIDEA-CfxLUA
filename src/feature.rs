@@ -1,5 +1,7 @@
+use crate::index::project::{Budget, Cost};
 use crate::lua::Source;
 use crate::project::{FileKind, Side};
+use crate::refactor::members::Member;
 use crate::settings::Settings;
 use crate::workspace::Workspace;
 use openidea_plugin::providers::{CompletionItem, LineMarker};
@@ -216,6 +218,18 @@ pub trait Feature {
 
     fn intentions(&self, _cx: &Ctx, _start: usize, _end: usize) -> Vec<Intention> {
         Vec::new()
+    }
+
+    /// The member named at `_at` of the document and what a rename of it reaches, when a type engine tells
+    /// all of it within `_budget`.
+    fn member_at(&self, _cx: &Ctx, _at: usize, _budget: Budget) -> Option<Member> {
+        None
+    }
+
+    /// Where the document writes the name of `_member` as that member, when a type engine tells all of them
+    /// within `_budget`, and what telling it cost.
+    fn member_uses(&self, _cx: &Ctx, _member: &Member, _budget: Budget) -> Option<(Vec<(usize, usize)>, Cost)> {
+        None
     }
 
     fn semantic_tokens(&self, _cx: &Ctx) -> Vec<crate::editor::semantic::Token> {

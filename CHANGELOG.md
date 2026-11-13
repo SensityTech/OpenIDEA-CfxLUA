@@ -157,11 +157,16 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   reason. The warning on a local that hides another offers it as its **Rename** fix, as in the JetBrains plugin.
   (Without a language server, OpenIDEA's own Rename does not rename an identifier a plugin indexes.)
 - **Rename a global or a member across the project.** Alt+Enter on a global variable or function, or on a member
-  reached through names (`Config.Debug`, `Shop:open()`), offers **Rename '…' in the project**. It asks the new
-  name, finds the Lua files that write it with the IDE's text search, and rewrites in each of them the
-  occurrences that are this global or this member: not a local of the same name, a comment or a string. The
-  files change as one edit. Nothing is renamed, and a notification says why, when the name is written in more
-  places than the search lists (10,000), in more than 6 MB of files, or in a file the plugin does not read.
+  (`Config.Debug`, `Shop:open()`, `shop:open()` on a value of the class, a field of a table, a `---@field`),
+  offers **Rename '…' in the project**. It asks the new name, finds the Lua files that write it with the IDE's
+  text search, and rewrites in each of them the occurrences that are this global or this member: not a local of
+  the same name, a comment or a string, nor a member of the same name of another class. The type engine tells
+  what each use of a member stands for, as in the JetBrains plugin: a method is renamed where a value of its
+  class calls it, with the methods that override it and those it overrides. The files change as one edit.
+  Nothing is renamed, and a notification says why, when the name is written in more places than the search lists
+  (10,000), in more than 4 MB of files or in a file the plugin does not read, and when what a member stands for
+  cannot be told in full: a value of unknown type, or more to read and infer than one rename may. A rename never
+  leaves a part of the uses behind.
 - **Rename or move a Lua file with its `require`s.** On the first line of a Lua file, Alt+Enter offers **Rename
   file and its requires…** and **Move file and its requires…**. The file is renamed, or moved to a folder of
   the project, and each `require` of another file that loaded it is rewritten in the same change: the last part

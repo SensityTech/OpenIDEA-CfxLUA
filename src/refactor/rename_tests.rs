@@ -294,7 +294,7 @@ fn a_global_or_a_member_is_renamed_in_every_file_that_writes_it() {
     };
     let chosen = asked(&src, global.asked.as_deref().expect("its data"), &library, &mut ask);
     let everywhere =
-        Chosen::Everywhere { key: "lua.global#Config".into(), name: "Config".into(), new: "Settings".into() };
+        Chosen::Everywhere { key: Some("lua.global#Config".into()), name: "Config".into(), new: "Settings".into() };
     assert_eq!(chosen, Some(everywhere));
     let renamed = |text: &str, key: &str, new: &str| {
         let mut text = text.to_owned();
@@ -329,4 +329,38 @@ fn a_global_or_a_member_is_renamed_in_every_file_that_writes_it() {
     let changed = Source::new("Other = 1\nprint(Other)\n");
     let mut never = |_: &str, _: &str| -> Option<String> { panic!("nothing is asked") };
     assert_eq!(asked(&changed, global.asked.as_deref().expect("its data"), &library, &mut never), None);
+}
+
+#[test]
+fn a_member_reached_through_a_value_is_offered_too_and_what_a_library_declares_is_not() {
+    let library = |name: &str| matches!(name, "print" | "string" | "GetPlayerPed");
+    let text =
+        "local shop = Shop.new()\nshop:open()\nprint(string.format('%s', shop.label))\nGetPlayerPed().field = 1\n";
+    let src = Source::new(text);
+    let title = |name: &str| format!("Rename '{name}' in the project…");
+    let start = |name: &str| text.rfind(name).expect("the name in the text");
+    let open = shared_fix(&src, start("open") + 1, &library, title).expect("a fix on the method of a value");
+    assert_eq!(open.title, "Rename 'open' in the project…");
+    let data = open.asked.expect("its data");
+    assert_eq!(data, format!("rename-member:{}:open", start("open") + 1));
+    assert_eq!(member_asked(&src, &data, &library), Some((start("open"), "open")), "the type engine is asked there");
+    assert!(shared_fix(&src, start("format") + 1, &library, title).is_none(), "`string.format` is the library's");
+    assert!(shared_fix(&src, start("field") + 1, &library, title).is_none(), "as is what a native returns");
+
+    let new = shared_fix(&src, start("new"), &library, title).and_then(|fix| fix.asked).expect("a fix on `Shop.new`");
+    assert_eq!(new, format!("rename-shared:{}:lua.member:Shop#new", start("new")));
+    assert_eq!(member_asked(&src, &new, &library), Some((start("new"), "new")), "a member the syntax names too");
+    let global = shared_fix(&src, start("Shop"), &library, title).and_then(|fix| fix.asked).expect("a fix on `Shop`");
+    assert_eq!(member_asked(&src, &global, &library), None, "a global needs no type");
+
+    let mut ask = |question: &str, value: &str| {
+        assert_eq!((question, value), ("Rename 'open' to:", "open"));
+        Some("unlock".to_owned())
+    };
+    let everywhere = Chosen::Everywhere { key: None, name: "open".into(), new: "unlock".into() };
+    assert_eq!(asked(&src, &data, &library, &mut ask), Some(everywhere));
+    let changed = Source::new("local shop = Shop.new()\nshop:close()\n");
+    let mut never = |_: &str, _: &str| -> Option<String> { panic!("nothing is asked") };
+    assert_eq!(asked(&changed, &data, &library, &mut never), None);
+    assert_eq!(member_asked(&changed, &data, &library), None);
 }

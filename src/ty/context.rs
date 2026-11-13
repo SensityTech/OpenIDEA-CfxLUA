@@ -193,6 +193,11 @@ impl<'a> Cx<'a> {
         self.steps.get()
     }
 
+    /// Whether the question ran out of inferences or of time: what it asked since then reads as unknown.
+    pub fn spent(&self) -> bool {
+        self.steps.get() >= self.budget
+    }
+
     fn source(&self, file: FileId) -> Option<Rc<Source>> {
         if let Some(known) = self.sources.borrow().get(&file) {
             return known.clone();

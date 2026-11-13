@@ -23,7 +23,7 @@ mod tests;
 use crate::feature::{Ctx, Feature, Intention, Problem};
 use crate::format;
 use crate::index::library;
-use crate::index::project::{Projects, Sight};
+use crate::index::project::{Budget, Cost, Projects, Sight};
 use crate::inspect::{self, Inspection};
 use crate::lua::Source;
 use crate::lua::token::T;
@@ -31,6 +31,7 @@ use crate::lua::tree::N;
 use crate::project::FileKind;
 use crate::refactor::edges::{is_globals_table, is_local};
 use crate::refactor::is_library;
+use crate::refactor::members::{self, Member};
 use crate::ty::context::Cx;
 use crate::ty::{FileId, psi};
 use crate::workspace::Workspace;
@@ -123,16 +124,33 @@ impl EditorFeature {
         src: &Source,
         ask: impl FnOnce(&Cx, FileId) -> R,
     ) -> Option<R> {
+        Self::seen(cx, src, |asked, sight| match time {
+            Some(time) => self.projects.ask_within(time, asked, sight, ask),
+            None => self.projects.ask(asked, sight, ask),
+        })
+    }
+
+    /// `ask` with a budget of its own, and what the question cost; nothing when its answer tells less than
+    /// there is.
+    fn ask_whole<R>(
+        &self,
+        budget: Budget,
+        cx: &Ctx,
+        src: &Source,
+        ask: impl FnOnce(&Cx, FileId) -> R,
+    ) -> Option<(R, Cost)> {
+        let counted = Self::seen(cx, src, |asked, sight| self.projects.ask_counted(budget, asked, sight, ask));
+        counted.filter(|(_, cost)| !cost.short)
+    }
+
+    /// What a question about the document is asked with: the document, and what its file sees of the libraries.
+    fn seen<R>(cx: &Ctx, src: &Source, ask: impl FnOnce((&Workspace, &str, &Source), &Sight) -> R) -> R {
         let mut parts = crate::runtime::visible_parts(cx.settings, cx.doc.side);
         parts.retain(|part| !cx.ws.luals.parts.contains(part));
         let games = cx.ws.resource_of(&cx.doc.path).and_then(|resource| resource.games.clone());
         let sets = crate::natives::visible_sets(cx.settings, &cx.ws.detected_games(), cx.doc.side, games.as_deref());
         let native = |name: &str| cx.natives.find(name, &sets).map(library::native_type);
-        let (asked, sight) = ((cx.ws, cx.doc.path.as_str(), src), Sight { parts: &parts, native: &native });
-        match time {
-            Some(time) => self.projects.ask_within(time, asked, &sight, ask),
-            None => self.projects.ask(asked, &sight, ask),
-        }
+        ask((cx.ws, cx.doc.path.as_str(), src), &Sight { parts: &parts, native: &native })
     }
 
     fn completed_place(cx: &Ctx, at: usize) -> Option<completion::Place> {
@@ -325,6 +343,18 @@ impl Feature for EditorFeature {
             crate::refactor::rename::shared_fix(src, start, &library, |name| format!("Rename '{name}' in the project…"))
         }));
         found.into_iter().map(|fix| Intention { fix, kind: "refactor" }).collect()
+    }
+
+    fn member_at(&self, cx: &Ctx, at: usize, budget: Budget) -> Option<Member> {
+        let src = &cx.doc.src;
+        let lua = Self::applies(cx) && cx.doc.kind == FileKind::Lua;
+        let told = lua.then(|| self.ask_whole(budget, cx, src, |engine, file| members::at(engine, file, src, at)));
+        told.flatten().and_then(|(member, _)| member)
+    }
+
+    fn member_uses(&self, cx: &Ctx, member: &Member, budget: Budget) -> Option<(Vec<(usize, usize)>, Cost)> {
+        let src = &cx.doc.src;
+        self.ask_whole(budget, cx, src, |engine, file| members::uses(engine, file, src, member))
     }
 
     fn semantic_tokens(&self, cx: &Ctx) -> Vec<semantic::Token> {
