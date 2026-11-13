@@ -171,6 +171,7 @@ fn a_function_is_documented_from_its_header() {
             "Set visibility: private",
             "Set visibility: protected",
             "Set visibility: public",
+            "Rename 'close' in the project…",
         ]
     );
     assert_eq!(
@@ -178,7 +179,7 @@ fn a_function_is_documented_from_its_header() {
         "Shop = {}\n    ---@protected\n    function Shop:close() end"
     );
     let stated = titles("Shop = {}\n---@private\n---@return number\nfunction Shop:clo<caret>se() return 1 end");
-    assert!(stated.is_empty(), "{stated:?}");
+    assert_eq!(stated, ["Rename 'close' in the project…"], "nothing is left to offer but its rename");
     assert_eq!(titles("function get()\n    pri<caret>nt(1)\nend"), Vec::<String>::new(), "inside the body");
     assert!(titles("local get = func<caret>tion() end").iter().all(|title| title == "Create type annotation"));
 }

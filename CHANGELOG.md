@@ -147,6 +147,12 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   parameter and the `goto`s of a label. A keyword or a name that is not an identifier is asked again, with the
   reason. The warning on a local that hides another offers it as its **Rename** fix, as in the JetBrains plugin.
   (Without a language server, OpenIDEA's own Rename does not rename an identifier a plugin indexes.)
+- **Rename a global or a member across the project.** Alt+Enter on a global variable or function, or on a member
+  reached through names (`Config.Debug`, `Shop:open()`), offers **Rename '…' in the project**. It asks the new
+  name, finds the Lua files that write it with the IDE's text search, and rewrites in each of them the
+  occurrences that are this global or this member: not a local of the same name, a comment or a string. The
+  files change as one edit. Nothing is renamed, and a notification says why, when the name is written in more
+  places than the search lists (10,000), in more than 6 MB of files, or in a file the plugin does not read.
 - **Hover on magic values, hash literals, events and state bag keys**, as in the JetBrains plugin. A number a native
   takes as a control, a blip, a marker… shows what it stands for; a hash literal shows its signed, unsigned and
   hexadecimal values; an event name shows the page of the built-in event or, for an event of the project, who

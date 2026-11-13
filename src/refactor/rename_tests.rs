@@ -212,6 +212,10 @@ fn edits_replace_each_range_with_the_new_name_in_order() {
     assert_eq!(edits(&renamed, "bb"), [(6, 7, "bb".to_owned()), (18, 19, "bb".to_owned())]);
 }
 
+fn no_library(_: &str) -> bool {
+    false
+}
+
 /// What the fix offered at the caret asks, and the text once each answer of `answers` is given in turn.
 fn asked_at(text: &str, answers: &[Option<&str>]) -> (Vec<String>, Option<String>) {
     let offset = text.find(CARET).expect("a caret in the text");
@@ -225,7 +229,12 @@ fn asked_at(text: &str, answers: &[Option<&str>]) -> (Vec<String>, Option<String
         questions.push(format!("{question} [{value}]"));
         answers.next().copied().flatten().map(str::to_owned)
     };
-    let edits = asked(&src, offered.asked.as_deref().expect("what it is asked again with"), &mut ask);
+    let data = offered.asked.as_deref().expect("what it is asked again with");
+    let edits = match asked(&src, data, &no_library, &mut ask) {
+        Some(Chosen::Here(edits)) => Some(edits),
+        Some(other) => panic!("a name of the file alone, not {other:?}"),
+        None => None,
+    };
     let renamed = edits.map(|edits| {
         for (start, end, replacement) in edits.into_iter().rev() {
             text.replace_range(start..end, &replacement);
@@ -264,8 +273,60 @@ fn a_fix_offered_on_a_text_that_changed_renames_nothing() {
     assert_eq!(offered.title, "Rename");
     let data = offered.asked.expect("what it is asked again with");
     let mut never = |_: &str, _: &str| -> Option<String> { panic!("nothing is asked") };
-    assert_eq!(asked(&Source::new("local other = 0\nprint(other)"), &data, &mut never), None);
-    assert_eq!(asked(&Source::new("print(1)"), &data, &mut never), None);
-    assert_eq!(asked(&src, "something else", &mut never), None);
+    assert_eq!(asked(&Source::new("local other = 0\nprint(other)"), &data, &no_library, &mut never), None);
+    assert_eq!(asked(&Source::new("print(1)"), &data, &no_library, &mut never), None);
+    assert_eq!(asked(&src, "something else", &no_library, &mut never), None);
     assert!(fix(&Source::new("Config = 1"), 2, |_| String::new()).is_none(), "a global is not renamed here");
+}
+
+#[test]
+fn a_global_or_a_member_is_renamed_in_every_file_that_writes_it() {
+    let library = |name: &str| name == "print";
+    let text = "Config = { Debug = true }\nlocal function show(Config) return Config end\nprint(Config.Debug, show)\n";
+    let src = Source::new(text);
+    let title = |name: &str| format!("Rename '{name}' in the project…");
+    let global = shared_fix(&src, 2, &library, title).expect("a fix on the global");
+    assert_eq!(global.title, "Rename 'Config' in the project…");
+    assert!(global.edits.is_empty(), "its edits wait for the name");
+    let mut ask = |question: &str, value: &str| {
+        assert_eq!((question, value), ("Rename 'Config' to:", "Config"));
+        Some("Settings".to_owned())
+    };
+    let chosen = asked(&src, global.asked.as_deref().expect("its data"), &library, &mut ask);
+    let everywhere =
+        Chosen::Everywhere { key: "lua.global#Config".into(), name: "Config".into(), new: "Settings".into() };
+    assert_eq!(chosen, Some(everywhere));
+    let renamed = |text: &str, key: &str, new: &str| {
+        let mut text = text.to_owned();
+        for (start, end, replacement) in shared_edits(&Source::new(&text), key, new, &library).into_iter().rev() {
+            text.replace_range(start..end, &replacement);
+        }
+        text
+    };
+    assert_eq!(
+        renamed(text, "lua.global#Config", "Settings"),
+        "Settings = { Debug = true }\nlocal function show(Config) return Config end\nprint(Settings.Debug, show)\n",
+        "the parameter of the same name is left alone"
+    );
+    let other = "local Config = {}\nConfig.Debug = false\n";
+    assert_eq!(
+        renamed(other, "lua.global#Config", "Settings"),
+        other,
+        "a file where the name is a local changes nothing"
+    );
+    let member = shared_fix(&src, 12, &library, title).expect("a fix on the member");
+    assert_eq!(member.title, "Rename 'Debug' in the project…");
+    assert_eq!(member.asked.as_deref(), Some("rename-shared:12:lua.member:Config#Debug"));
+    assert_eq!(
+        renamed("print(Config.Debug, Config['Debug'], Other.Debug)\n", "lua.member:Config#Debug", "Verbose"),
+        "print(Config.Verbose, Config['Verbose'], Other.Debug)\n",
+        "written as a name or as a string, under the same table only"
+    );
+    let at = |name: &str| text.rfind(name).expect("the name in the text");
+    assert!(shared_fix(&src, at("show"), &library, title).is_none(), "a local is renamed in its file");
+    assert!(shared_fix(&src, at("print"), &library, title).is_none(), "a name of a library is not renamed");
+    assert!(shared_fix(&src, at("return"), &library, title).is_none(), "nor a keyword");
+    let changed = Source::new("Other = 1\nprint(Other)\n");
+    let mut never = |_: &str, _: &str| -> Option<String> { panic!("nothing is asked") };
+    assert_eq!(asked(&changed, global.asked.as_deref().expect("its data"), &library, &mut never), None);
 }

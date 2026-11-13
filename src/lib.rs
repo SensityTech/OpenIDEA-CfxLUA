@@ -74,6 +74,10 @@ const EDIT: Slice = Slice { reads: 8, bytes: 24 << 10, heavy: false };
 const MAX_INDEXED: usize = 1 << 20;
 /// The host keeps this many edits of what a formatter answers and drops the rest without a word.
 const MAX_EDITS: usize = 10_000;
+/// How many matches the text search of the IDE gives at most.
+const MAX_SEARCHED: u32 = 10_000;
+/// How much text of other files one rename parses: a call is paid in instructions, about 100 a byte here.
+const MAX_RENAMED: usize = 6 << 20;
 /// How much text is read before the indexing has to catch up.
 const READ_AHEAD: usize = 4 << 20;
 const DERIVE_EVERY: u32 = 6;
@@ -674,6 +678,70 @@ impl DevKit {
         problems
     }
 
+    /// The edits that give the global or the member `key` stands for its new name, in the document and in
+    /// every other Lua file of the project that writes `name`; or why nothing is renamed. The files come from
+    /// the text search of the IDE, and each one is parsed: the names of a file are told apart by its code.
+    fn renamed_everywhere(
+        &self,
+        ws: usize,
+        key: &str,
+        name: &str,
+        new: &str,
+    ) -> Result<Vec<(String, Vec<TextEdit>)>, String> {
+        let (doc, _) = self.last.as_ref().ok_or("the document is no longer read")?;
+        let library = |name: &str| refactor::is_library(&self.natives, name);
+        let root = self.workspaces[ws].root.clone();
+        let projects = host::projects().map_err(|e| e.to_string())?;
+        let is_root = |project: &openidea_plugin::Project| {
+            project.root().is_ok_and(|path| slash(&path).trim_end_matches('/') == root)
+        };
+        let project = projects.iter().find(|project| is_root(project)).ok_or("the project is not open")?;
+        let query = openidea_plugin::TextQuery {
+            pattern: name.to_owned(),
+            regex: false,
+            case_sensitive: true,
+            whole_word: true,
+            include: vec!["*.lua".to_owned()],
+            exclude: Vec::new(),
+        };
+        let written = project.search_text(&query, MAX_SEARCHED).map_err(|e| e.to_string())?;
+        if written.limit_hit {
+            return Err(format!("'{name}' is written in too many places to be renamed in one go: nothing is renamed"));
+        }
+        let mut paths: Vec<String> = written.matches.iter().map(|found| slash(&found.location.path)).collect();
+        paths.sort();
+        paths.dedup();
+        let own = refactor::rename::shared_edits(&doc.src, key, new, &library);
+        let own = own.into_iter().map(|(start, end, text)| doc.edit(start, end, text)).collect();
+        let mut out = vec![(self.native_path(ws, &doc.path), own)];
+        let mut read = 0;
+        for path in paths.iter().filter(|path| **path != doc.path && project::file_kind(path) == FileKind::Lua) {
+            let shown = path.strip_prefix(&root).map_or(path.as_str(), |rest| rest.trim_start_matches('/'));
+            let unread = || format!("'{name}' is written in {shown}, a file CfxLua does not read: nothing is renamed");
+            let text = read_text(path).filter(|text| text.len() <= MAX_INDEXED && !project::is_escrowed(text));
+            let text = text.ok_or_else(unread)?;
+            read += text.len();
+            if read > MAX_RENAMED {
+                return Err(format!(
+                    "'{name}' is written in too many files to be renamed in one go: nothing is renamed"
+                ));
+            }
+            let src = Source::new(&text);
+            if src.too_deep() {
+                return Err(unread());
+            }
+            let edits = refactor::rename::shared_edits(&src, key, new, &library);
+            if edits.is_empty() {
+                continue;
+            }
+            let lines = text::LineIndex::new(&text);
+            let mut cursor = lines.cursor(&text);
+            let edits = edits.into_iter().map(|(start, end, text)| TextEdit { range: cursor.range(start, end), text });
+            out.push((self.native_path(ws, path), edits.collect()));
+        }
+        Ok(out)
+    }
+
     /// The fixes of the problems a selection touches, with the workspace of the document and the bytes of
     /// the selection.
     fn quick_fixes(&mut self, d: &Document, selection: Range) -> Option<(usize, usize, usize, Vec<feature::Fix>)> {
@@ -1013,9 +1081,21 @@ impl Providers for DevKit {
         let ws = self.prepare(d).ok_or(Error::Cancelled)?;
         let (doc, _) = self.last.as_ref().ok_or(Error::Cancelled)?;
         let mut ask = |question: &str, value: &str| host::input(question, Some(value)).ok().flatten();
-        let edits = refactor::rename::asked(&doc.src, data, &mut ask).ok_or(Error::Cancelled)?;
-        let own = edits.into_iter().map(|(start, end, text)| doc.edit(start, end, text)).collect();
-        Ok(CodeAction { edits: vec![(self.native_path(ws, &doc.path), own)], ..action })
+        let library = |name: &str| refactor::is_library(&self.natives, name);
+        let chosen = refactor::rename::asked(&doc.src, data, &library, &mut ask).ok_or(Error::Cancelled)?;
+        let edits = match chosen {
+            refactor::rename::Chosen::Here(edits) => {
+                let own = edits.into_iter().map(|(start, end, text)| doc.edit(start, end, text)).collect();
+                vec![(self.native_path(ws, &doc.path), own)]
+            }
+            refactor::rename::Chosen::Everywhere { key, name, new } => {
+                self.renamed_everywhere(ws, &key, &name, &new).map_err(|why| {
+                    host::notify(openidea_plugin::NotificationLevel::Warning, "CfxLua", &why);
+                    Error::Cancelled
+                })?
+            }
+        };
+        Ok(CodeAction { edits, ..action })
     }
 }
 
@@ -2067,6 +2147,69 @@ mod tests {
                 "an action with its edits is left as it is"
             );
         }
+    }
+
+    #[test]
+    fn a_global_is_renamed_in_every_file_of_the_project_that_writes_it() {
+        let host = openidea_plugin::mock::MockHost::install();
+        let other = "local Config = {}\nConfig.Debug = false\n";
+        let server = "print(Config.Debug)\n-- Config in a comment\nlocal text = 'Config'\n";
+        host.add_file("res/server/shop.lua", server);
+        host.add_file("res/server/other.lua", other);
+        let mut kit = shop_resource(&host);
+        // What the text search of the IDE gives: the files that write the word, whatever it is there.
+        let written = |path: &str, line: u32| openidea_plugin::TextMatch {
+            location: Location {
+                path: path.to_owned(),
+                range: Range::new(Position::new(line, 0), Position::new(line, 6)),
+            },
+            line: String::new(),
+        };
+        let asked = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let seen = asked.clone();
+        host.on_search(move |query, _| {
+            seen.borrow_mut().push((
+                query.pattern.clone(),
+                query.whole_word,
+                query.case_sensitive,
+                query.include.clone(),
+            ));
+            let matches = vec![
+                written("/project/res/server/shop.lua", 0),
+                written("/project/res/server/shop.lua", 1),
+                written("/project/res/server/other.lua", 0),
+                written("/project/res/fxmanifest.lua", 0),
+            ];
+            Ok(openidea_plugin::TextSearch { matches, limit_hit: false })
+        });
+        let text = "Config = { Debug = true }\nprint(Config.Debug)\n";
+        let typed = lua(SHOP_CLIENT, 2, text);
+        let on_global = Range::new(Position::new(1, 8), Position::new(1, 8));
+        let actions = kit.code_actions(&typed, on_global);
+        let rename =
+            actions.iter().find(|action| action.title == "Rename 'Config' in the project…").expect("the rename");
+        assert!(rename.edits.is_empty() && rename.data.is_some(), "resolved once it is chosen");
+        host.answer_next_prompt(Some(&["Settings"]));
+        let resolved = kit.resolve_code_action(&typed, rename.clone()).expect("the edits");
+        assert_eq!(*asked.borrow(), [("Config".to_owned(), true, true, vec!["*.lua".to_owned()])]);
+        let files: Vec<&str> = resolved.edits.iter().map(|(path, _)| path.as_str()).collect();
+        assert_eq!(
+            files,
+            [SHOP_CLIENT, "/project/res/server/shop.lua"],
+            "the file where the name is a local is left out"
+        );
+        assert_eq!(applied(text, &resolved.edits[0].1), "Settings = { Debug = true }\nprint(Settings.Debug)\n");
+        assert_eq!(
+            applied(server, &resolved.edits[1].1),
+            "print(Settings.Debug)\n-- Config in a comment\nlocal text = 'Config'\n",
+            "the code only: not the comment, not the string"
+        );
+        // A search that could not list every place renames nothing, and says why.
+        host.on_search(|_, _| Ok(openidea_plugin::TextSearch { matches: Vec::new(), limit_hit: true }));
+        host.answer_next_prompt(Some(&["Settings"]));
+        assert!(matches!(kit.resolve_code_action(&typed, rename.clone()), Err(Error::Cancelled)));
+        let told: Vec<String> = host.notifications().into_iter().map(|told| told.body).collect();
+        assert!(told.iter().any(|told| told.contains("too many places")), "{told:?}");
     }
 
     #[test]

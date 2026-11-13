@@ -1,4 +1,4 @@
-use super::edges::{Family, anchors, of_comments};
+use super::edges::{Family, anchors, of_comments, shared_at};
 use super::is_library;
 use crate::lua::Source;
 use crate::natives::Natives;
@@ -218,6 +218,25 @@ fn the_names_of_the_libraries_are_told_from_those_of_a_project() {
         assert!(!is_library(&natives, name), "{name}");
     }
     assert!(!is_library(&Natives::bundled(), "GetPlayerPed"), "a catalog that is not loaded is not read");
+}
+
+#[test]
+fn the_name_at_a_place_is_read_as_the_whole_file_reads_it() {
+    let text = "Config = { Debug = true, ['Level'] = 2 }\nfunction Shop:open() return self.count + Config.Debug end\n_G.Other = Config['Level']\n---@class Stock\nlocal Stock = { name = 'x' }\nfunction Stock.clear() end\n";
+    let src = Source::new(text);
+    let shared: Vec<_> = anchors(&src, &library).into_iter().filter(|anchor| anchor.family != Family::Class).collect();
+    assert_eq!(shared.len(), 13, "{shared:?}");
+    for anchor in shared {
+        for at in [anchor.start, anchor.end] {
+            assert_eq!(shared_at(&src, at, &library).as_ref(), Some(&anchor), "{} at {at}", anchor.key);
+        }
+    }
+    let at = |word: &str| text.find(word).expect("the word in the text");
+    assert_eq!(shared_at(&src, at("true"), &library), None);
+    assert_eq!(shared_at(&src, at("return"), &library), None);
+    assert_eq!(shared_at(&src, at("name"), &library).map(|found| found.key).as_deref(), Some("lua.member:Stock#name"));
+    assert_eq!(shared_at(&src, at("Stock"), &library), None, "a class named in a comment is the IDE's to rename");
+    assert_eq!(shared_at(&src, at("local Stock") + 6, &library), None, "and a local its file's");
 }
 
 #[test]

@@ -273,7 +273,11 @@ impl Feature for EditorFeature {
         });
         found.extend(annotations.unwrap_or_default());
         found.extend(crate::intent::surrounds(src, start, end));
-        found.extend(crate::refactor::rename::fix(src, start, |name| format!("Rename '{name}'…")));
+        let rename = crate::refactor::rename::fix(src, start, |name| format!("Rename '{name}'…"));
+        let library = |name: &str| crate::refactor::is_library(cx.natives, name);
+        found.extend(rename.or_else(|| {
+            crate::refactor::rename::shared_fix(src, start, &library, |name| format!("Rename '{name}' in the project…"))
+        }));
         found.into_iter().map(|fix| Intention { fix, kind: "refactor" }).collect()
     }
 

@@ -2,7 +2,7 @@
 //! A key is read from the text of the file alone, the host indexing a file again only when that file changes.
 //! Every anchor is a reference: Go to Declaration stays with the type engine.
 
-use crate::editor::target::is_generic;
+use crate::editor::target::{is_generic, token_at};
 use crate::lua::Source;
 use crate::lua::doc::tags::{self, Comment};
 use crate::lua::scope::DeclKind;
@@ -233,15 +233,19 @@ impl Reading<'_> {
         }
     }
 
+    fn visit(&mut self, node: Node) {
+        match node.kind() {
+            N::NameExpr | N::FuncDef if !self.is_local(node) => self.global(node),
+            N::IndexExpr => self.member(node),
+            N::ClassMethodDef => self.method(node),
+            N::TableField => self.field(node),
+            _ => {}
+        }
+    }
+
     fn code(&mut self) {
         for node in self.src.root().descendants() {
-            match node.kind() {
-                N::NameExpr | N::FuncDef if !self.is_local(node) => self.global(node),
-                N::IndexExpr => self.member(node),
-                N::ClassMethodDef => self.method(node),
-                N::TableField => self.field(node),
-                _ => {}
-            }
+            self.visit(node);
         }
     }
 }
@@ -253,6 +257,20 @@ pub fn anchors(src: &Source, library: &dyn Fn(&str) -> bool) -> Vec<Anchor> {
     reading.code();
     comments(src.docs(), &mut reading.out);
     in_order(reading.out)
+}
+
+/// The global or the member named at `at`, as `anchors` gives it, read from what stands around `at` only.
+pub fn shared_at(src: &Source, at: usize, library: &dyn Fn(&str) -> bool) -> Option<Anchor> {
+    let root = src.root();
+    let tree = root.tree();
+    let index = token_at(tree.tokens(), at, |kind| matches!(kind, T::Id | T::String))?;
+    let named = tree.node(root.source(), tree.node_of_token(index));
+    let mut reading = Reading { src, module: module_of(src), library, out: Vec::new() };
+    // The name of a method stands two nodes under its statement, a string key two under its index.
+    for node in std::iter::once(named).chain(named.ancestors()).take(3) {
+        reading.visit(node);
+    }
+    reading.out.into_iter().find(|anchor| anchor.start <= at && at <= anchor.end)
 }
 
 /// The anchors the comments of a text give, without reading its code: what a project too big to give its
