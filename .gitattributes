@@ -4,3 +4,4 @@
 *.gz binary
 *.wasm binary
 *.png binary
+*.gif binary
