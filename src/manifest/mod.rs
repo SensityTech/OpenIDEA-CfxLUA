@@ -1,6 +1,7 @@
 pub mod catalog;
 mod checks;
 mod complete;
+pub mod convert;
 pub mod edits;
 pub mod files;
 mod snippets;

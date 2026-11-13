@@ -6,7 +6,8 @@ use crate::text::{file_name, parent};
 use glob::Glob;
 pub use manifest::{Entry, Value};
 
-pub const MANIFESTS: [&str; 2] = ["fxmanifest.lua", "__resource.lua"];
+pub const FX_MANIFEST: &str = "fxmanifest.lua";
+pub const MANIFESTS: [&str; 2] = [FX_MANIFEST, "__resource.lua"];
 
 pub fn is_manifest_name(name: &str) -> bool {
     MANIFESTS.iter().any(|m| m.eq_ignore_ascii_case(name))

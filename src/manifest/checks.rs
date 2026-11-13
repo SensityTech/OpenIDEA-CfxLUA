@@ -2,8 +2,9 @@ use super::catalog::{self, FX_VERSION_LINE, FX_VERSIONS, GAMES, RDR3_WARNING, Ro
 use super::edits::{self, Edit};
 use super::files::{Tree, checkable, is_glob, is_url, split_resource_path};
 use super::view::{Decl, View};
+use super::{convert, edits::minimal};
 use crate::feature::{Ctx, Fix, Problem};
-use crate::project::Value;
+use crate::project::{FX_MANIFEST, Value};
 use crate::text::{edit_distance, file_name, parent};
 use openidea_plugin::Severity;
 
@@ -35,7 +36,7 @@ fn at_value(code: &'static str, severity: Severity, v: &Value, message: impl Int
 pub fn problems(cx: &Ctx) -> Vec<Problem> {
     let src = &cx.doc.src;
     let view = View::new(src);
-    let fx = file_name(&cx.doc.path).eq_ignore_ascii_case("fxmanifest.lua");
+    let fx = file_name(&cx.doc.path).eq_ignore_ascii_case(FX_MANIFEST);
     let mut out = Vec::new();
     if fx {
         fx_version(src, &view, &mut out);
@@ -161,11 +162,17 @@ fn rdr3_warning(src: &crate::lua::Source, view: &View, rdr3: &Value, out: &mut V
     }
 }
 
+/// Renames the legacy manifest and rewrites its head, in one action.
+fn converted(text: &str) -> Fix {
+    let rewritten = minimal(text, &convert::convert(text));
+    let fix = rewritten.map_or_else(|| Fix::new(convert::TITLE), |edit| fix(convert::TITLE, edit));
+    fix.preferred().renaming(FX_MANIFEST)
+}
+
 fn deprecated(cx: &Ctx, view: &View, fx: bool, out: &mut Vec<Problem>) {
     let text = cx.doc.text();
     if !fx {
-        // Renaming the file (the original quick fix) is not possible: the problem stays without it.
-        let beside = cx.ws.exists(&format!("{}/fxmanifest.lua", parent(&cx.doc.path)));
+        let beside = cx.ws.exists(&format!("{}/{FX_MANIFEST}", parent(&cx.doc.path)));
         let (pref, message) = if beside {
             (None, "This __resource.lua is ignored: FXServer loads the fxmanifest.lua of the same folder")
         } else {
@@ -175,7 +182,8 @@ fn deprecated(cx: &Ctx, view: &View, fx: bool, out: &mut Vec<Problem>) {
             )
         };
         let (s, e) = anchor(view, text.len(), pref);
-        out.push(Problem::new(DEPRECATED, Severity::Warning, s, e, message));
+        let legacy = Problem::new(DEPRECATED, Severity::Warning, s, e, message);
+        out.push(if beside { legacy } else { legacy.fix(converted(text)) });
     }
     for d in &view.decls {
         match d.name() {

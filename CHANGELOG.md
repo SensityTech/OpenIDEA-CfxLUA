@@ -130,6 +130,10 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   a native shows its documentation: description, example, parameters, hash, side and game.
 - **The memory the plugin holds is written in the IDE log** when it has read a project
   (`resources indexed (N MiB)`): OpenIDEA gives a plugin 256 MiB.
+- **Convert to fxmanifest.lua**, the quick fix of the JetBrains plugin on a legacy `__resource.lua`: it renames the
+  file, replaces `resource_manifest_version` with `fx_version 'cerulean'` and declares `game 'gta5'` when no game is
+  declared, in one action that one undo reverts. It is not offered when a `fxmanifest.lua` already stands beside the
+  file.
 
 ### Fixed
 

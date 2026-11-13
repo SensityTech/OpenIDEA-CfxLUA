@@ -33,6 +33,7 @@ pub mod testing;
 use feature::{CommandCx, Ctx, Doc, Feature, Problem};
 use lua::Source;
 use natives::Natives;
+use openidea_plugin::file_actions::{FileAction, FileActions, FileOperation};
 use openidea_plugin::hover::{Hover, HoverProvider};
 use openidea_plugin::inlay_hints::{InlayHint, InlayHints, InlayKind};
 use openidea_plugin::language_features::{
@@ -660,6 +661,17 @@ impl DevKit {
         problems
     }
 
+    /// The fixes of the problems a selection touches, with the workspace of the document and the bytes of
+    /// the selection.
+    fn quick_fixes(&mut self, d: &Document, selection: Range) -> Option<(usize, usize, usize, Vec<feature::Fix>)> {
+        let ws = self.prepare_indexed(d)?;
+        let problems = self.problems(ws);
+        let (doc, _) = self.last.as_ref()?;
+        let (start, end) = (doc.offset(selection.start), doc.offset(selection.end));
+        let touched = problems.into_iter().filter(|p| p.start <= end && start <= p.end);
+        Some((ws, start, end, touched.flat_map(|p| p.fixes).collect()))
+    }
+
     fn publish(&self, ws: usize, path: &str, problems: &[Problem]) {
         let Some((doc, _)) = &self.last else { return };
         let items: Vec<Diagnostic> = problems
@@ -949,20 +961,16 @@ impl Providers for DevKit {
 
     fn code_actions(&mut self, d: &Document, selection: Range) -> Vec<CodeAction> {
         let _timed = Timed::start("code actions", d);
-        let Some(ws) = self.prepare_indexed(d) else { return Vec::new() };
-        let problems = self.problems(ws);
-        let Some((doc, _)) = &self.last else { return Vec::new() };
-        let (start, end) = (doc.offset(selection.start), doc.offset(selection.end));
-        let mut fixes: Vec<(feature::Fix, &'static str)> = problems
-            .iter()
-            .filter(|p| p.start <= end && start <= p.end)
-            .flat_map(|p| p.fixes.iter().cloned().map(|f| (f, "quickfix")))
-            .collect();
+        let Some((ws, start, end, fixes)) = self.quick_fixes(d, selection) else { return Vec::new() };
+        // A fix that renames the file is a file action.
+        let in_place = fixes.into_iter().filter(|fix| fix.rename.is_none());
+        let mut fixes: Vec<(feature::Fix, &'static str)> = in_place.map(|fix| (fix, "quickfix")).collect();
         if let Some(intentions) = self
             .with_ctx(ws, |cx, features| features.iter().flat_map(|f| f.intentions(cx, start, end)).collect::<Vec<_>>())
         {
             fixes.extend(intentions.into_iter().map(|i| (i.fix, i.kind)));
         }
+        let Some((doc, _)) = &self.last else { return Vec::new() };
         let path = self.native_path(ws, &doc.path);
         fixes
             .into_iter()
@@ -982,6 +990,31 @@ impl Providers for DevKit {
                     edits,
                     data: None,
                 }
+            })
+            .collect()
+    }
+}
+
+impl FileActions for DevKit {
+    fn file_actions(&mut self, d: &Document, selection: Range) -> Vec<FileAction> {
+        let _timed = Timed::start("file actions", d);
+        let Some((ws, _, _, fixes)) = self.quick_fixes(d, selection) else { return Vec::new() };
+        let Some((doc, _)) = &self.last else { return Vec::new() };
+        let from = self.native_path(ws, &doc.path);
+        fixes
+            .into_iter()
+            .filter_map(|fix| {
+                let to = self.native_path(ws, &format!("{}/{}", text::parent(&doc.path), fix.rename?));
+                let edits: Vec<TextEdit> = fix.edits.iter().map(|(s, e, t)| doc.edit(*s, *e, t.clone())).collect();
+                Some(FileAction {
+                    title: fix.title,
+                    kind: Some("quickfix".to_owned()),
+                    preferred: fix.preferred,
+                    operations: vec![FileOperation::Rename { from: from.clone(), to: to.clone() }],
+                    edits: if edits.is_empty() { Vec::new() } else { vec![(to.clone(), edits)] },
+                    open: Some(to),
+                    data: None,
+                })
             })
             .collect()
     }
@@ -1306,7 +1339,7 @@ impl InlayHints for DevKit {
     }
 }
 
-register_plugin!(DevKit, providers, views, language_features, hover, inlay_hints, injections);
+register_plugin!(DevKit, providers, views, language_features, hover, inlay_hints, injections, file_actions);
 
 // The semantic tokens are exported here rather than by `register_plugin!`, to send the names of
 // `TOKEN_NAMES` in place of the SDK's.
@@ -1599,6 +1632,28 @@ mod tests {
         Document { path: path.to_owned(), language: "lua".into(), version, text: text.to_owned() }
     }
 
+    /// The byte a position stands at, its column counted in UTF-16 units as the IDE counts it.
+    fn byte(text: &str, at: Position) -> usize {
+        let start: usize = text.split_inclusive('\n').take(at.line as usize).map(str::len).sum();
+        let mut units = 0;
+        let within = text[start..].char_indices().find(|(_, character)| {
+            let here = units;
+            units += character.len_utf16() as u32;
+            here >= at.character
+        });
+        start + within.map_or(text.len() - start, |(at, _)| at)
+    }
+
+    /// The text once the edits of an answer are made.
+    fn applied(text: &str, edits: &[TextEdit]) -> String {
+        let mut text = text.to_owned();
+        for edit in edits.iter().rev() {
+            let (start, end) = (byte(&text, edit.range.start), byte(&text, edit.range.end));
+            text.replace_range(start..end, &edit.text);
+        }
+        text
+    }
+
     /// What a completion offers, the words of the file and the postfix templates left out.
     fn offered(kit: &mut DevKit, doc: &Document, at: Position) -> Vec<String> {
         let items = kit.completion(doc, at, None).into_iter();
@@ -1758,6 +1813,39 @@ mod tests {
     }
 
     #[test]
+    fn a_legacy_manifest_is_renamed_and_rewritten_in_one_action() {
+        let legacy = "-- legacy resource\nresource_manifest_version '44febabe-d386-4d18-afbe-5e627f4af937'\nclient_script 'client.lua'\n";
+        let host = openidea_plugin::mock::MockHost::install();
+        host.add_file("old/__resource.lua", legacy);
+        host.add_file("both/__resource.lua", legacy);
+        host.add_file("both/fxmanifest.lua", "fx_version 'cerulean'\ngame 'gta5'\n");
+        let mut kit = shop_resource(&host);
+        let on_version = Range::new(Position::new(1, 0), Position::new(1, 0));
+        let old = lua("/project/old/__resource.lua", 1, legacy);
+        let actions = kit.file_actions(&old, on_version);
+        let [action] = actions.as_slice() else { panic!("one action, not {}", actions.len()) };
+        assert_eq!(
+            (action.title.as_str(), action.kind.as_deref(), action.preferred),
+            ("Convert to fxmanifest.lua", Some("quickfix"), true)
+        );
+        let renamed = "/project/old/fxmanifest.lua";
+        assert_eq!(action.operations, [FileOperation::Rename { from: old.path.clone(), to: renamed.to_owned() }]);
+        assert_eq!(action.open.as_deref(), Some(renamed), "shown under its new name");
+        let [(path, edits)] = action.edits.as_slice() else { panic!("the edits of one file") };
+        assert_eq!(path, renamed, "made in the file once it is renamed");
+        assert_eq!(
+            applied(legacy, edits),
+            "-- legacy resource\nfx_version 'cerulean'\ngame 'gta5'\nclient_script 'client.lua'\n"
+        );
+        let in_place = kit.code_actions(&old, on_version);
+        assert!(in_place.iter().all(|found| found.title != action.title), "not offered a second time, in place");
+        let ignored = lua("/project/both/__resource.lua", 1, legacy);
+        assert!(kit.file_actions(&ignored, on_version).is_empty(), "FXServer loads the fxmanifest.lua beside it");
+        let typed = lua(SHOP_CLIENT, 2, "local unused = 1\n");
+        assert!(kit.file_actions(&typed, Range::new(Position::new(0, 6), Position::new(0, 6))).is_empty());
+    }
+
+    #[test]
     fn an_intention_is_offered_where_the_caret_stands() {
         let host = openidea_plugin::mock::MockHost::install();
         let mut kit = shop_resource(&host);
@@ -1790,25 +1878,6 @@ mod tests {
     fn reformat_code_rewrites_the_white_space_of_the_document() {
         let host = openidea_plugin::mock::MockHost::install();
         let mut kit = shop_resource(&host);
-        // The byte a position stands at, its column counted in UTF-16 units as the IDE counts it.
-        fn byte(text: &str, at: Position) -> usize {
-            let start: usize = text.split_inclusive('\n').take(at.line as usize).map(str::len).sum();
-            let mut units = 0;
-            let within = text[start..].char_indices().find(|(_, character)| {
-                let here = units;
-                units += character.len_utf16() as u32;
-                here >= at.character
-            });
-            start + within.map_or(text.len() - start, |(at, _)| at)
-        }
-        fn applied(text: &str, edits: &[TextEdit]) -> String {
-            let mut text = text.to_owned();
-            for edit in edits.iter().rev() {
-                let (start, end) = (byte(&text, edit.range.start), byte(&text, edit.range.end));
-                text.replace_range(start..end, &edit.text);
-            }
-            text
-        }
         let spaces = FormatOptions { tab_size: 2, insert_spaces: true };
         let typed = lua(SHOP_CLIENT, 2, "local a=1;\nif a then print( a ) end\n");
         let edits = kit.format(&typed, None, spaces.clone()).expect("the edits");

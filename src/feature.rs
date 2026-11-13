@@ -101,11 +101,13 @@ pub struct Fix {
     pub preferred: bool,
     pub edits: Vec<(usize, usize, String)>,
     pub other: Vec<(String, Vec<TextEdit>)>,
+    /// The name the file of the document takes first, in its folder: the edits are then made in that file.
+    pub rename: Option<String>,
 }
 
 impl Fix {
     pub fn new(title: impl Into<String>) -> Self {
-        Self { title: title.into(), preferred: false, edits: Vec::new(), other: Vec::new() }
+        Self { title: title.into(), preferred: false, edits: Vec::new(), other: Vec::new(), rename: None }
     }
 
     pub fn replace(mut self, start: usize, end: usize, text: impl Into<String>) -> Self {
@@ -119,6 +121,11 @@ impl Fix {
 
     pub fn preferred(mut self) -> Self {
         self.preferred = true;
+        self
+    }
+
+    pub fn renaming(mut self, name: impl Into<String>) -> Self {
+        self.rename = Some(name.into());
         self
     }
 }
