@@ -25,9 +25,14 @@ jobs:
       - name: Build and package
         run: scripts/build.sh --pack
       - name: Write the release notes
-        run: scripts/release-notes.sh "${GITHUB_REF_NAME#v}" >dist/release-notes.md
+        id: notes
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          scripts/release-notes.sh "$version" >dist/release-notes.md
+          echo "version=$version" >>"$GITHUB_OUTPUT"
       - uses: softprops/action-gh-release@v2
         with:
+          name: OpenIDEA-CfxLUA ${{ steps.notes.outputs.version }}
           files: dist/*.oiplugin
           body_path: dist/release-notes.md
           generate_release_notes: true
