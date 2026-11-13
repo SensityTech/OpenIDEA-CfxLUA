@@ -5,7 +5,6 @@ use super::{Index, declare};
 use crate::lua::Source;
 use crate::project::FileKind;
 use crate::runtime::stubs::Part;
-use crate::text::parent;
 use crate::ty::context::{Cx, Files, Options};
 use crate::ty::{FileId, Ty};
 use crate::workspace::{Stamp, Workspace};
@@ -192,19 +191,7 @@ impl Files for Reading<'_> {
     /// `require('a.b')` loads `a/b.lua` or `a/b/init.lua`: of the resource of the asking file, then of the
     /// project, then the first file of that name anywhere.
     fn required(&self, path: &str) -> Option<FileId> {
-        let name = path.replace('.', "/");
-        let resource = self.ws.resource_of(self.from).map(|resource| resource.dir.clone());
-        let roots = [resource, Some(parent(self.from).to_owned()), Some(self.ws.root.clone())];
-        for root in roots.into_iter().flatten() {
-            for file in [format!("{root}/{name}.lua"), format!("{root}/{name}/init.lua")] {
-                if let Some(found) = self.lua(&file) {
-                    return Some(found);
-                }
-            }
-        }
-        let (plain, init) = (format!("/{name}.lua"), format!("/{name}/init.lua"));
-        let named = self.ws.files().find(|file| file.path.ends_with(&plain) || file.path.ends_with(&init))?;
-        self.lua(&named.path)
+        crate::refactor::files::required(self.ws, self.from, path).and_then(|found| self.lua(&found))
     }
 }
 

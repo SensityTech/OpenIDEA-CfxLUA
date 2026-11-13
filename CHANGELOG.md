@@ -158,6 +158,12 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   occurrences that are this global or this member: not a local of the same name, a comment or a string. The
   files change as one edit. Nothing is renamed, and a notification says why, when the name is written in more
   places than the search lists (10,000), in more than 6 MB of files, or in a file the plugin does not read.
+- **Rename or move a Lua file with its `require`s.** On the first line of a Lua file, Alt+Enter offers **Rename
+  file and its requires…** and **Move file and its requires…**. The file is renamed, or moved to a folder of
+  the project, and each `require` of another file that loaded it is rewritten in the same change: the last part
+  of its path for a rename, the path from the root it was written from (the resource, the folder of the file
+  that asks, or the project) for a move, its quotes kept. A file renamed from the project tree is not followed:
+  OpenIDEA does not tell a plugin of it.
 - **Hover on magic values, hash literals, events and state bag keys**, as in the JetBrains plugin. A number a native
   takes as a control, a blip, a marker… shows what it stands for; a hash literal shows its signed, unsigned and
   hexadecimal values; an event name shows the page of the built-in event or, for an event of the project, who

@@ -6,7 +6,7 @@ mod members;
 mod names;
 mod overrides;
 mod postfix;
-mod requires;
+pub(crate) mod requires;
 mod tables;
 
 use crate::feature::Doc;

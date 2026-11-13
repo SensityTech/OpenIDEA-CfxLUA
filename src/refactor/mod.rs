@@ -1,4 +1,5 @@
 pub mod edges;
+pub mod files;
 pub mod rename;
 
 use crate::natives::{NativeSet, Natives};

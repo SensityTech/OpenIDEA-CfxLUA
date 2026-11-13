@@ -22,7 +22,7 @@ fn loads(listing: &Listing, literal: Node) -> bool {
 
 /// The name a file is required by, from the folder its path is read from: `a/b.lua` is `a.b`, and
 /// `a/b/init.lua` is `a.b` too.
-fn module(rel: &str) -> Option<String> {
+pub(crate) fn module(rel: &str) -> Option<String> {
     let path = rel.strip_suffix(".lua")?;
     let path = path.strip_suffix("/init").unwrap_or(path);
     (!path.is_empty() && path != "init").then(|| path.replace('/', "."))

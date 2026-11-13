@@ -74,6 +74,12 @@ const EDIT: Slice = Slice { reads: 8, bytes: 24 << 10, heavy: false };
 const MAX_INDEXED: usize = 1 << 20;
 /// The host keeps this many edits of what a formatter answers and drops the rest without a word.
 const MAX_EDITS: usize = 10_000;
+/// The edits of several files, each under the path the IDE knows it by.
+type FileEdits = Vec<(String, Vec<TextEdit>)>;
+
+/// What a file action that renames or moves the file of the document is asked again with.
+const RENAME_FILE: &str = "rename-file";
+const MOVE_FILE: &str = "move-file";
 /// How many matches the text search of the IDE gives at most.
 const MAX_SEARCHED: u32 = 10_000;
 /// How much text of other files one rename parses: a call is paid in instructions, about 100 a byte here.
@@ -678,18 +684,16 @@ impl DevKit {
         problems
     }
 
-    /// The edits that give the global or the member `key` stands for its new name, in the document and in
-    /// every other Lua file of the project that writes `name`; or why nothing is renamed. The files come from
-    /// the text search of the IDE, and each one is parsed: the names of a file are told apart by its code.
-    fn renamed_everywhere(
+    /// What `per_file` rewrites in each Lua file of the project that writes `word`, the file `skipped` left
+    /// out; or why nothing is to be rewritten. The files come from the text search of the IDE, and each one is
+    /// parsed: one call is paid in instructions, so the text read is bounded.
+    fn in_files_writing(
         &self,
         ws: usize,
-        key: &str,
-        name: &str,
-        new: &str,
-    ) -> Result<Vec<(String, Vec<TextEdit>)>, String> {
-        let (doc, _) = self.last.as_ref().ok_or("the document is no longer read")?;
-        let library = |name: &str| refactor::is_library(&self.natives, name);
+        word: &str,
+        skipped: &str,
+        per_file: impl Fn(&str, &Source) -> Vec<(usize, usize, String)>,
+    ) -> Result<FileEdits, String> {
         let root = self.workspaces[ws].root.clone();
         let projects = host::projects().map_err(|e| e.to_string())?;
         let is_root = |project: &openidea_plugin::Project| {
@@ -697,7 +701,7 @@ impl DevKit {
         };
         let project = projects.iter().find(|project| is_root(project)).ok_or("the project is not open")?;
         let query = openidea_plugin::TextQuery {
-            pattern: name.to_owned(),
+            pattern: word.to_owned(),
             regex: false,
             case_sensitive: true,
             whole_word: true,
@@ -706,31 +710,31 @@ impl DevKit {
         };
         let written = project.search_text(&query, MAX_SEARCHED).map_err(|e| e.to_string())?;
         if written.limit_hit {
-            return Err(format!("'{name}' is written in too many places to be renamed in one go: nothing is renamed"));
+            return Err(format!(
+                "'{word}' is written in too many places to go through them in one go: nothing is changed"
+            ));
         }
         let mut paths: Vec<String> = written.matches.iter().map(|found| slash(&found.location.path)).collect();
         paths.sort();
         paths.dedup();
-        let own = refactor::rename::shared_edits(&doc.src, key, new, &library);
-        let own = own.into_iter().map(|(start, end, text)| doc.edit(start, end, text)).collect();
-        let mut out = vec![(self.native_path(ws, &doc.path), own)];
+        let mut out = Vec::new();
         let mut read = 0;
-        for path in paths.iter().filter(|path| **path != doc.path && project::file_kind(path) == FileKind::Lua) {
+        for path in paths.iter().filter(|path| *path != skipped && project::file_kind(path) == FileKind::Lua) {
             let shown = path.strip_prefix(&root).map_or(path.as_str(), |rest| rest.trim_start_matches('/'));
-            let unread = || format!("'{name}' is written in {shown}, a file CfxLua does not read: nothing is renamed");
+            let unread = || format!("'{word}' is written in {shown}, a file CfxLua does not read: nothing is changed");
             let text = read_text(path).filter(|text| text.len() <= MAX_INDEXED && !project::is_escrowed(text));
             let text = text.ok_or_else(unread)?;
             read += text.len();
             if read > MAX_RENAMED {
                 return Err(format!(
-                    "'{name}' is written in too many files to be renamed in one go: nothing is renamed"
+                    "'{word}' is written in too many files to go through them in one go: nothing is changed"
                 ));
             }
             let src = Source::new(&text);
             if src.too_deep() {
                 return Err(unread());
             }
-            let edits = refactor::rename::shared_edits(&src, key, new, &library);
+            let edits = per_file(path, &src);
             if edits.is_empty() {
                 continue;
             }
@@ -740,6 +744,61 @@ impl DevKit {
             out.push((self.native_path(ws, path), edits.collect()));
         }
         Ok(out)
+    }
+
+    /// The edits that give the global or the member `key` stands for its new name, in the document and in
+    /// every other Lua file of the project that writes `name`; or why nothing is renamed.
+    fn renamed_everywhere(&self, ws: usize, key: &str, name: &str, new: &str) -> Result<FileEdits, String> {
+        let (doc, _) = self.last.as_ref().ok_or("the document is no longer read")?;
+        let library = |name: &str| refactor::is_library(&self.natives, name);
+        let own = refactor::rename::shared_edits(&doc.src, key, new, &library);
+        let own = own.into_iter().map(|(start, end, text)| doc.edit(start, end, text)).collect();
+        let mut out = vec![(self.native_path(ws, &doc.path), own)];
+        out.extend(
+            self.in_files_writing(ws, name, &doc.path, |_, src| {
+                refactor::rename::shared_edits(src, key, new, &library)
+            })?,
+        );
+        Ok(out)
+    }
+
+    /// The Lua file `path` renamed in its folder or moved to another one of its project, with the `require`
+    /// calls of the other files that load it: what is asked for, then the operation and the edits.
+    fn file_moved(&mut self, path: &str, to_folder: bool) -> Result<(String, FileEdits), String> {
+        let i = self.workspace_for(path);
+        let ws = &self.workspaces[i];
+        let name = text::file_name(path);
+        let to = if to_folder {
+            let folder = ws.relative(text::parent(path)).to_owned();
+            let entered = host::input(&format!("Move '{name}' to the folder:"), Some(&folder)).ok().flatten();
+            let entered = slash(entered.ok_or(String::new())?.trim()).trim_matches('/').to_owned();
+            let folder = nui::build::join(&ws.root, &entered).filter(|dir| ws.contains(dir));
+            let folder = folder.ok_or_else(|| format!("'{entered}' is not a folder of the project"))?;
+            format!("{folder}/{name}")
+        } else {
+            let mut question = format!("Rename '{name}' to:");
+            let mut entered = name.to_owned();
+            loop {
+                entered = host::input(&question, Some(&entered)).ok().flatten().ok_or(String::new())?;
+                match refactor::files::lua_file_name(&entered) {
+                    Ok(named) => break format!("{}/{named}", text::parent(path)),
+                    Err(why) => question = format!("{why}. Rename '{name}' to:"),
+                }
+            }
+        };
+        if to == path {
+            return Err(String::new());
+        }
+        if ws.exists(&to) {
+            return Err(format!("'{}' already exists", ws.relative(&to)));
+        }
+        let loaders = ty::context::Options::default().require_like;
+        let rewrite = |from: &str, src: &Source| match to_folder {
+            true => refactor::files::moved(ws, (from, src), &loaders, path, &to),
+            false => refactor::files::renamed(ws, (from, src), &loaders, path, text::file_name(&to)),
+        };
+        let edits = self.in_files_writing(i, refactor::files::searched_word(path), path, rewrite)?;
+        Ok((to, edits))
     }
 
     /// The fixes of the problems a selection touches, with the workspace of the document and the bytes of
@@ -1056,7 +1115,7 @@ impl Providers for DevKit {
         fixes
             .into_iter()
             .map(|(fix, kind)| {
-                let mut edits: Vec<(String, Vec<TextEdit>)> = Vec::new();
+                let mut edits: FileEdits = Vec::new();
                 if !fix.edits.is_empty() {
                     let own = fix.edits.iter().map(|(s, e, t)| doc.edit(*s, *e, t.clone())).collect();
                     edits.push((path.clone(), own));
@@ -1105,22 +1164,51 @@ impl FileActions for DevKit {
         let Some((ws, _, _, fixes)) = self.quick_fixes(d, selection) else { return Vec::new() };
         let Some((doc, _)) = &self.last else { return Vec::new() };
         let from = self.native_path(ws, &doc.path);
-        fixes
-            .into_iter()
-            .filter_map(|fix| {
-                let to = self.native_path(ws, &format!("{}/{}", text::parent(&doc.path), fix.rename?));
-                let edits: Vec<TextEdit> = fix.edits.iter().map(|(s, e, t)| doc.edit(*s, *e, t.clone())).collect();
-                Some(FileAction {
-                    title: fix.title,
-                    kind: Some("quickfix".to_owned()),
-                    preferred: fix.preferred,
-                    operations: vec![FileOperation::Rename { from: from.clone(), to: to.clone() }],
-                    edits: if edits.is_empty() { Vec::new() } else { vec![(to.clone(), edits)] },
-                    open: Some(to),
-                    data: None,
-                })
+        let fixed = fixes.into_iter().filter_map(|fix| {
+            let to = self.native_path(ws, &format!("{}/{}", text::parent(&doc.path), fix.rename?));
+            let edits: Vec<TextEdit> = fix.edits.iter().map(|(s, e, t)| doc.edit(*s, *e, t.clone())).collect();
+            Some(FileAction {
+                title: fix.title,
+                kind: Some("quickfix".to_owned()),
+                preferred: fix.preferred,
+                operations: vec![FileOperation::Rename { from: from.clone(), to: to.clone() }],
+                edits: if edits.is_empty() { Vec::new() } else { vec![(to.clone(), edits)] },
+                open: Some(to),
+                data: None,
             })
-            .collect()
+        });
+        // The file itself is renamed or moved from its first line: an action of every line would be in the way.
+        let whole = doc.kind == FileKind::Lua && selection.start.line == 0 && self.workspaces[ws].exists(&doc.path);
+        let asked = |title: &str, data: &str| FileAction {
+            title: title.to_owned(),
+            kind: Some("refactor".to_owned()),
+            data: Some(data.to_owned()),
+            ..FileAction::default()
+        };
+        let moves =
+            [asked("Rename file and its requires…", RENAME_FILE), asked("Move file and its requires…", MOVE_FILE)];
+        fixed.chain(moves.into_iter().filter(|_| whole)).collect()
+    }
+
+    /// Asked once an action without operations is chosen, under the budget of a command.
+    fn resolve_file_action(&mut self, d: &Document, action: FileAction) -> Result<FileAction, Error> {
+        let to_folder = match action.data.as_deref() {
+            Some(RENAME_FILE) => false,
+            Some(MOVE_FILE) => true,
+            _ => return Ok(action),
+        };
+        self.natives.freeze(true);
+        let path = slash(&d.path);
+        let (to, edits) = self.file_moved(&path, to_folder).map_err(|why| {
+            if !why.is_empty() {
+                host::notify(openidea_plugin::NotificationLevel::Warning, "CfxLua", &why);
+            }
+            Error::Cancelled
+        })?;
+        let ws = self.workspace_for(&path);
+        let (from, to) = (self.native_path(ws, &path), self.native_path(ws, &to));
+        let operations = vec![FileOperation::Rename { from, to: to.clone() }];
+        Ok(FileAction { operations, edits, open: Some(to), ..action })
     }
 }
 
@@ -2032,8 +2120,80 @@ mod tests {
         assert!(in_place.iter().all(|found| found.title != action.title), "not offered a second time, in place");
         let ignored = lua("/project/both/__resource.lua", 1, legacy);
         assert!(kit.file_actions(&ignored, on_version).is_empty(), "FXServer loads the fxmanifest.lua beside it");
-        let typed = lua(SHOP_CLIENT, 2, "local unused = 1\n");
-        assert!(kit.file_actions(&typed, Range::new(Position::new(0, 6), Position::new(0, 6))).is_empty());
+        let typed = lua(SHOP_CLIENT, 2, "local unused = 1\nprint(1)\n");
+        let below = Range::new(Position::new(1, 2), Position::new(1, 2));
+        assert!(kit.file_actions(&typed, below).is_empty(), "a script has no problem that renames its file");
+    }
+
+    #[test]
+    fn a_file_is_renamed_or_moved_with_the_requires_that_load_it() {
+        let host = openidea_plugin::mock::MockHost::install();
+        host.add_file("res/server/utils.lua", "return {}\n");
+        host.add_file(
+            "res/server/loader.lua",
+            "local utils = require('server.utils')\nlocal same = require \"utils\"\n",
+        );
+        host.add_file("res/server/other.lua", "-- utils are loaded elsewhere\nlocal utils = {}\n");
+        host.add_file("res/server/lib/init.lua", "return {}\n");
+        let mut kit = shop_resource(&host);
+        let written = |path: &str| openidea_plugin::TextMatch {
+            location: Location { path: path.to_owned(), range: Range::new(Position::new(0, 0), Position::new(0, 5)) },
+            line: String::new(),
+        };
+        let searched = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let seen = searched.clone();
+        host.on_search(move |query, _| {
+            seen.borrow_mut().push(query.pattern.clone());
+            let files =
+                ["/project/res/server/loader.lua", "/project/res/server/other.lua", "/project/res/server/utils.lua"];
+            Ok(openidea_plugin::TextSearch { matches: files.into_iter().map(written).collect(), limit_hit: false })
+        });
+        let utils = lua("/project/res/server/utils.lua", 1, "return {}\n");
+        let top = Range::new(Position::new(0, 0), Position::new(0, 0));
+        let actions = kit.file_actions(&utils, top);
+        let titles: Vec<&str> = actions.iter().map(|action| action.title.as_str()).collect();
+        assert_eq!(titles, ["Rename file and its requires…", "Move file and its requires…"]);
+        assert!(
+            actions.iter().all(|action| action.operations.is_empty() && action.kind.as_deref() == Some("refactor"))
+        );
+        let below = Range::new(Position::new(1, 0), Position::new(1, 0));
+        assert!(kit.file_actions(&utils, below).is_empty(), "offered from the first line only");
+
+        host.answer_next_prompt(Some(&["a/b"]));
+        host.answer_next_prompt(Some(&["helpers"]));
+        let renamed = kit.resolve_file_action(&utils, actions[0].clone()).expect("the rename");
+        let to = "/project/res/server/helpers.lua";
+        assert_eq!(renamed.operations, [FileOperation::Rename { from: utils.path.clone(), to: to.to_owned() }]);
+        assert_eq!(renamed.open.as_deref(), Some(to));
+        let [(path, edits)] = renamed.edits.as_slice() else {
+            panic!("the edits of one file, not {:?}", renamed.edits)
+        };
+        assert_eq!(path, "/project/res/server/loader.lua");
+        let main = "local utils = require('server.utils')\nlocal same = require \"utils\"\n";
+        assert_eq!(
+            applied(main, edits),
+            "local utils = require('server.helpers')\nlocal same = require \"helpers\"\n",
+            "the last segment of each path, its quotes kept"
+        );
+        assert_eq!(*searched.borrow(), ["utils"], "asked once the name is one a file may take");
+
+        host.answer_next_prompt(Some(&["res/server/lib"]));
+        let moved = kit.resolve_file_action(&utils, actions[1].clone()).expect("the move");
+        let to = "/project/res/server/lib/utils.lua";
+        assert_eq!(moved.operations, [FileOperation::Rename { from: utils.path.clone(), to: to.to_owned() }]);
+        assert_eq!(
+            applied(main, &moved.edits[0].1),
+            "local utils = require('server.lib.utils')\nlocal same = require \"lib.utils\"\n",
+            "the shortest path that loads it again from the file that asks"
+        );
+
+        host.answer_next_prompt(Some(&["loader.lua"]));
+        assert!(matches!(kit.resolve_file_action(&utils, actions[0].clone()), Err(Error::Cancelled)));
+        let told: Vec<String> = host.notifications().into_iter().map(|told| told.body).collect();
+        assert_eq!(told, ["'res/server/loader.lua' already exists"]);
+        host.answer_next_prompt(Some(&["../outside"]));
+        assert!(matches!(kit.resolve_file_action(&utils, actions[1].clone()), Err(Error::Cancelled)));
+        assert!(matches!(kit.resolve_file_action(&utils, actions[0].clone()), Err(Error::Cancelled)), "dismissed");
     }
 
     #[test]
