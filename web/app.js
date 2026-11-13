@@ -6,6 +6,7 @@
 //   {op:"detail", tab, id}    (runtime type links: id "type:<Class>")  -> detail
 //   {op:"insert", tab, id, variant}   (call | handler | netHandler | directive | example) -> notice
 //   {op:"prefs", prefs}       (stored as is, no answer)
+//   {op:"openUrl", tab, url}  (a web page, opened in the browser) -> url when the IDE does not open it
 //   {op:"updateNatives"}     (runs CfxLua: Update Natives) -> refresh
 // Plugin -> page:
 //   {op:"init", prefs, open?}
@@ -14,6 +15,7 @@
 //   {op:"detail", tab, id, html, copy, url?, insert}
 //   {op:"open", tab, id?, focusSearch?}
 //   {op:"notice", text, error}
+//   {op:"url", tab, url}     (an address to show in the tab, to be copied)
 //   {op:"refresh", tab}      (search the tab again)
 // A row: {id, label, icon?, bold?, strike?, parts?: [[text, class]], tip?, kind?, depth?, children?, expanded?}.
 'use strict';
@@ -45,7 +47,7 @@
   const SIDES = [['', 'All sides'], ['client', 'Client'], ['server', 'Server'], ['shared', 'Shared']];
   const zoom = [{ zoom: -1 }, { zoom: 1 }, { zoom: 0 }];
   const sep = { sep: true };
-  const online = { icon: 'web', title: 'Open Online Documentation', run: (t) => showUrl(t), enabled: (d) => !!(d && d.url) };
+  const online = { icon: 'web', title: 'Open Online Documentation', run: (t) => openUrl(t), enabled: (d) => !!(d && d.url) };
   const insertButton = (variant, icon, title) => ({ icon, title, run: (t) => insert(t, variant), enabled: (d) => !!(d && d.insert.includes(variant)) });
   const copyButton = (key, title) => ({ icon: 'copy', title, run: (t) => copyDetail(t, key), enabled: (d) => !!(d && d.copy[key]) });
 
@@ -828,10 +830,17 @@
     if (d && d.copy[key]) copy(d.copy[key]);
   }
 
-  function showUrl(t, href) {
-    const u = ui[t.id];
+  /** Opens a web page in the browser, through the plugin: this frame opens nothing by itself. */
+  function openUrl(t, href) {
     const url = href || (state[t.id].detail && state[t.id].detail.url);
     if (!url) return;
+    if (/^https?:/i.test(url)) send({ op: 'openUrl', tab: t.id, url });
+    else showUrl(t, url);
+  }
+
+  /** Shows an address the browser was not given, to be copied. */
+  function showUrl(t, url) {
+    const u = ui[t.id];
     u.url.textContent = url;
     u.url.title = url;
     u.urlbar.hidden = false;
@@ -855,7 +864,7 @@
       st.typeRequest = `type:${href.slice(8)}`;
       send({ op: 'detail', tab: t.id, id: st.typeRequest });
     } else if (/^(https?:|mailto:)/i.test(href)) {
-      showUrl(t, href);
+      openUrl(t, href);
     }
   }
 
@@ -896,6 +905,11 @@
       case 'detail': onDetail(m); break;
       case 'open': open(m.tab, m.id, m.focusSearch); break;
       case 'notice': notice(m.text, { error: !!m.error }); break;
+      case 'url': {
+        const t = TABS.find((x) => x.id === m.tab);
+        if (t && m.url) showUrl(t, m.url);
+        break;
+      }
       case 'refresh': onRefresh(m.tab); break;
       default: break;
     }

@@ -264,6 +264,9 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
 - Project events in completion have the event icon, as built-in events do.
 - **CfxLua: Show Documentation** separates the signature from the description with a dash: the notification shows
   line breaks as spaces.
+- **Open Online Documentation opens the browser.** In the CfxLua tool window, the button of a native and the web
+  links of a page open in the default browser. They used to show the address with a **Copy** button, which is still
+  what an address the IDE does not open gets (`mailto:`).
 - The tool window tabs go onto a second line when the window is narrow, instead of being cut off; the Asset Escrow
   badge is blue instead of red, which read as an error.
 

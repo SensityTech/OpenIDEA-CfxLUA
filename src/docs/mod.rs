@@ -70,6 +70,11 @@ enum Request {
     Prefs {
         prefs: Value,
     },
+    /// The page is a sandboxed frame: it opens nothing by itself.
+    OpenUrl {
+        tab: String,
+        url: String,
+    },
     UpdateNatives,
 }
 
@@ -181,6 +186,13 @@ impl Docs {
                     host::log(LogLevel::Debug, &format!("docs preferences: {e}"));
                 }
                 None
+            }
+            Request::OpenUrl { tab, url } => {
+                let tab = Tab::parse(&tab)?;
+                // An address the IDE does not open is given back to the page, which shows it to be copied.
+                let refused = host::open_url(&url).err()?;
+                host::log(LogLevel::Debug, &format!("docs page link: {refused}"));
+                Some(json!({ "op": "url", "tab": tab.id(), "url": url }))
             }
             Request::UpdateNatives => None,
         }
@@ -595,6 +607,21 @@ mod tests {
         docs.command(&cx, SHOW_DOCS, None).unwrap().unwrap();
         assert!(elsewhere.notifications()[0].body.starts_with("The documentation is in the CfxLua tool window"));
         assert_eq!(project_sets(&cx), Vec::<NativeSet>::new());
+    }
+
+    #[test]
+    fn a_web_page_is_opened_in_the_browser_and_any_other_address_is_given_back() {
+        let env = Env::new();
+        let docs = Docs::default();
+        let detail = env.one(&docs, json!({ "op": "detail", "tab": "natives", "id": "GTA5:GetGroundZFor_3dCoord" }));
+        let online = detail["url"].as_str().unwrap();
+        assert!(env.send(&docs, None, json!({ "op": "openUrl", "tab": "natives", "url": online })).is_empty());
+        assert_eq!(env.mock.opened_urls(), [online]);
+        let mail = json!({ "op": "openUrl", "tab": "guides", "url": "mailto:someone@example.com" });
+        let shown = json!({ "op": "url", "tab": "guides", "url": "mailto:someone@example.com" });
+        assert_eq!(env.one(&docs, mail), shown, "the page shows it to be copied");
+        assert!(env.send(&docs, None, json!({ "op": "openUrl", "tab": "nope", "url": online })).is_empty());
+        assert_eq!(env.mock.opened_urls(), [online]);
     }
 
     #[test]
