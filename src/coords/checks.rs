@@ -1,5 +1,4 @@
 use super::expr::{Coord, Form, analyze, name_context, parse_number};
-use super::zones::ZoneMap;
 use crate::feature::{Ctx, Problem};
 use crate::lua::Source;
 use crate::perf::ast::{Ast, ExprKind, Node, StatKind};
@@ -10,7 +9,6 @@ use std::collections::HashMap;
 pub const ZERO_Z: &str = "CfxCoordsZeroZ";
 pub const OUT_OF_BOUNDS: &str = "CfxCoordsOutOfBounds";
 pub const DUPLICATE: &str = "CfxCoordsDuplicate";
-pub const ZONE: &str = "CfxCoordsZone";
 
 const WEAK: Severity = Severity::Info;
 
@@ -70,11 +68,10 @@ fn bounds(game: Game) -> [(f64, f64); 3] {
     }
 }
 
-pub fn problems(cx: &Ctx, ast: &Ast, config_roots: &[String], zones: Option<&ZoneMap>) -> Vec<Problem> {
+pub fn problems(cx: &Ctx, ast: &Ast, config_roots: &[String]) -> Vec<Problem> {
     let src = &cx.doc.src;
     let games = games_of(cx);
     let names = describe_games(&games);
-    let zones = zones.filter(|_| games.contains(&Game::Gta5));
     let mut out = Vec::new();
     for e in 0..ast.exprs.len() {
         if !matches!(ast.exprs[e].kind, ExprKind::Call { .. } | ExprKind::Table { .. }) {
@@ -109,17 +106,6 @@ pub fn problems(cx: &Ctx, ast: &Ast, config_roots: &[String], zones: Option<&Zon
                 out.push(Problem::new(OUT_OF_BOUNDS, WEAK, s, t, message));
                 break;
             }
-        }
-        if let Some(zones) = zones
-            && let (Some(x), Some(y)) = (values[0], values[1])
-            && let Some(zone) = zones.find(x, y, values[2])
-        {
-            let (s, t) = ast.span(Node::Expr(e));
-            let message = format!(
-                "≈ {} — Approximate GTA V zone: {} ({}), from bounding boxes",
-                zone.display, zone.display, zone.name
-            );
-            out.push(Problem::new(ZONE, Severity::Hint, s, t, message));
         }
     }
     if !config_roots.is_empty() {

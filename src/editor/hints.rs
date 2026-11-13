@@ -19,6 +19,8 @@ pub enum HintKind {
     Parameter,
     /// `: type`, after a name or the parameters of a function.
     Type,
+    /// What a value stands for, after it.
+    Value,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -26,6 +28,19 @@ pub struct Hint {
     pub at: usize,
     pub label: String,
     pub kind: HintKind,
+    /// What the editor shows when the hint is hovered.
+    pub tooltip: Option<String>,
+}
+
+impl Hint {
+    pub fn new(at: usize, label: impl Into<String>, kind: HintKind) -> Self {
+        Self { at, label: label.into(), kind, tooltip: None }
+    }
+
+    pub fn tooltip(mut self, tooltip: impl Into<String>) -> Self {
+        self.tooltip = Some(tooltip.into());
+        self
+    }
 }
 
 /// Which hints are asked for.
@@ -71,7 +86,7 @@ fn arguments(cx: &Cx, call: Psi, out: &mut Vec<Hint>) {
     let signature = function.perfect_signature(counted);
     for (rank, (param, expr)) in signature.args(None, colon).iter().zip(&given).enumerate() {
         if rank == 0 && object_given || is_silent(expr) {
-            out.push(Hint { at: expr.code_range().0, label: format!("{}:", param.name), kind: HintKind::Parameter });
+            out.push(Hint::new(expr.code_range().0, format!("{}:", param.name), HintKind::Parameter));
         }
     }
 }
@@ -80,7 +95,7 @@ fn arguments(cx: &Cx, call: Psi, out: &mut Vec<Hint>) {
 fn typed(cx: &Cx, def: Psi, out: &mut Vec<Hint>) {
     let ty = plain(&cx.infer(def));
     if !ty.is_invalid() {
-        out.push(Hint { at: def.node.code_range().1, label: format!(": {}", display(&ty)), kind: HintKind::Type });
+        out.push(Hint::new(def.node.code_range().1, format!(": {}", display(&ty)), HintKind::Type));
     }
 }
 
@@ -90,7 +105,7 @@ fn returned(cx: &Cx, owner: Psi, out: &mut Vec<Hint>) {
     let (Some(close), Some(function)) = (close, cx.infer(owner).as_function().cloned()) else { return };
     let ty = plain(&cx.ret(&function.main.ret));
     if !ty.is_invalid() {
-        out.push(Hint { at: close.end(), label: format!(": {}", display(&ty)), kind: HintKind::Type });
+        out.push(Hint::new(close.end(), format!(": {}", display(&ty)), HintKind::Type));
     }
 }
 

@@ -199,6 +199,10 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
 
 ### Changed
 
+- **Magic values and zones are inlay hints**, as in the JetBrains plugin: the name of a control, a hash, a blip or a
+  marker is written after its number, and the zone after its coordinates, where a hint-level problem used to
+  underline the value. Hovering the hint says what the value is. They follow the `values.*` settings and the zones
+  file as before, and the editor's own **Inlay Hints** settings, as hints of the kind *Other*.
 - **OpenIDEA 0.1.40 or newer is required.** The plugin is built against plugin API 1.4 (it was 1.0); its features are
   unchanged.
 - **One CfxLua parser reads every file**, the one of the JetBrains plugin ported to Rust: events, state bags, NUI,

@@ -1,10 +1,11 @@
 pub mod colours;
 pub mod decode;
+mod hints;
 mod hover;
 pub mod sites;
 pub mod tables;
 
-use crate::feature::{Ctx, Feature, Fix, Intention, Problem};
+use crate::feature::{Ctx, Feature, Fix, Intention};
 use crate::lua::Source;
 use crate::lua::joaat::joaat;
 use crate::lua::lexer::Tok;
@@ -12,7 +13,6 @@ use crate::perf::ast::{self, ExprKind, Node};
 use crate::project::{FileKind, Game};
 use crate::workspace::Workspace;
 use decode::{Decoded, HashName, Origin};
-use openidea_plugin::Severity;
 use openidea_plugin::providers::{CompletionItem, CompletionKind};
 use sites::{Kind, Scope, Site};
 use std::cell::RefCell;
@@ -31,8 +31,6 @@ pub mod keys {
     pub const EXPLOSIONS: &str = "values.explosions";
     pub const ANIM_FLAGS: &str = "values.animFlags";
 }
-
-pub const CODE: &str = "CfxMagicValue";
 
 /// The spellings of one hash, sorted, each with how many files write it: one spelling, most often.
 type Spellings = Vec<(Rc<str>, u32)>;
@@ -312,31 +310,8 @@ impl Feature for ValuesFeature {
         Self::applies(cx).then(|| colours::presentation(cx, start, end, rgba)).flatten()
     }
 
-    fn problems(&self, cx: &Ctx) -> Vec<Problem> {
-        if !Self::applies(cx) || !cx.settings.bool(keys::HINTS, true) {
-            return Vec::new();
-        }
-        let tree = ast::parse(&cx.doc.src);
-        let scope = Scope::new(cx, &tree);
-        let mut out = Vec::new();
-        let mut enabled: HashMap<&str, bool> = HashMap::new();
-        for (e, expr) in tree.exprs.iter().enumerate() {
-            if !matches!(expr.kind, ExprKind::Number) {
-                continue;
-            }
-            let Some(site) = scope.site_at(e) else { continue };
-            let key = site.kind.setting();
-            if !*enabled.entry(key).or_insert_with(|| cx.settings.bool(key, true)) {
-                continue;
-            }
-            let Some(decoded) = self.decode(&site) else { continue };
-            let (start, end) = tree.span(Node::Expr(site.expr));
-            if is_annotated(&cx.doc.src, end, &decoded.name) {
-                continue;
-            }
-            out.push(Problem::new(CODE, Severity::Hint, start, end, decoded.message()));
-        }
-        out
+    fn inlay_hints(&self, cx: &Ctx, from: usize, to: usize) -> Vec<crate::editor::hints::Hint> {
+        hints::hints(self, cx, from, to)
     }
 
     fn completion(&self, cx: &Ctx, at: usize, _trigger: Option<&str>) -> Vec<CompletionItem> {

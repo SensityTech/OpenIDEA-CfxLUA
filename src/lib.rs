@@ -1365,9 +1365,14 @@ impl InlayHints for DevKit {
             let hints = features.iter().flat_map(|f| f.inlay_hints(cx, from, to));
             let shown = hints.map(|hint| {
                 let shown = InlayHint::new(cx.doc.position(hint.at), hint.label);
+                let shown = match hint.tooltip {
+                    Some(tooltip) => shown.tooltip(tooltip),
+                    None => shown,
+                };
                 match hint.kind {
                     editor::hints::HintKind::Parameter => shown.kind(InlayKind::Parameter).padding_right(),
                     editor::hints::HintKind::Type => shown.kind(InlayKind::Type),
+                    editor::hints::HintKind::Value => shown.kind(InlayKind::Other).padding_left(),
                 }
             });
             shown.collect::<Vec<_>>()

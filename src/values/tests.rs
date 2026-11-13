@@ -28,24 +28,24 @@ fn run(text: &str) -> Run {
 }
 
 impl Run {
-    fn hints(&self) -> Vec<String> {
+    fn found(&self) -> Vec<crate::editor::hints::Hint> {
         let doc = self.fx.doc(CLIENT);
-        self.feature
-            .problems(&self.fx.cx(&doc))
-            .into_iter()
-            .map(|p| format!("{}: {}", &doc.text()[p.start..p.end], p.message))
-            .collect()
+        self.feature.inlay_hints(&self.fx.cx(&doc), 0, doc.text().len())
+    }
+
+    /// What each hint says when it is hovered.
+    fn hints(&self) -> Vec<String> {
+        self.found().into_iter().filter_map(|hint| hint.tooltip).collect()
     }
 
     fn labels(&self) -> Vec<String> {
-        self.hints()
-            .into_iter()
-            .map(|h| {
-                let message = h.split_once(": ").map_or("", |m| m.1).to_owned();
-                let label = message.split_once(": ").map_or("", |m| m.1);
-                label.split(" — ").next().unwrap_or("").to_owned()
-            })
-            .collect()
+        self.found().into_iter().map(|hint| hint.label).collect()
+    }
+
+    /// The page shown when the value at the caret is hovered.
+    fn page(&self) -> String {
+        let (doc, at) = self.fx.caret(CLIENT);
+        self.feature.hover(&self.fx.cx(&doc), at).map(|hover| hover.markdown).unwrap_or_default()
     }
 
     fn intentions(&self) -> Vec<Fix> {
@@ -94,11 +94,10 @@ fn hints_of_the_curated_natives() {
             "STICKYBOMB",
         ]
     );
-    assert_eq!(r.hints()[0], "38: Control 38: INPUT_PICKUP (E / LB) — Keyboard: E, Pad: LB");
-    assert!(
-        r.hints()[1].starts_with("-1216765807: Hash -1216765807: `adder` — Name from: the bundled names (vehicle)")
+    assert_eq!(
+        r.hints()[..3],
+        ["Control 38: INPUT_PICKUP (E / LB)", "Hash -1216765807: `adder`", "Hash 3078201489: `adder`"]
     );
-    assert!(r.hints()[2].starts_with("0xB779A091: Hash 3078201489: `adder`"));
 }
 
 #[test]
@@ -113,7 +112,7 @@ fn redm_controls_and_explosions() {
         &[],
     );
     assert_eq!(r.labels(), ["INPUT_ENTER", "DYNAMITE"]);
-    assert!(r.hints()[0].starts_with("0xCEFD9220: Control (hash) 3472724512: INPUT_ENTER — Signed: "));
+    assert_eq!(r.hints()[0], "Control (hash) 3472724512: INPUT_ENTER");
 }
 
 #[test]
@@ -158,7 +157,7 @@ fn project_strings_name_hashes() {
         &[("res/client/props.lua", "local p = 'my_custom_prop'")],
     );
     assert_eq!(r.labels(), ["`my_custom_prop`"]);
-    assert!(r.hints()[0].contains("Name from: a string of the project"));
+    assert!(r.page().contains("Name from: `a string of the project`"), "{}", r.page());
     assert_eq!(r.apply("Replace with `my_custom_prop`"), "local h = `my_custom_prop`");
 }
 

@@ -1,5 +1,6 @@
 pub mod checks;
 pub mod expr;
+mod hints;
 pub mod paste;
 pub mod text;
 pub mod zones;
@@ -334,8 +335,13 @@ impl Feature for CoordsFeature {
         let tree = ast::parse(&cx.doc.src);
         let roots: Vec<String> =
             cx.settings.list(keys::CONFIG_TABLES, "Config, Cfg").into_iter().map(|r| r.to_ascii_lowercase()).collect();
-        let zones = self.zone_map(cx);
-        checks::problems(cx, &tree, &roots, zones.as_deref())
+        checks::problems(cx, &tree, &roots)
+    }
+
+    fn inlay_hints(&self, cx: &Ctx, from: usize, to: usize) -> Vec<crate::editor::hints::Hint> {
+        // Without a zones file nothing is read: the question comes at each edit.
+        let Some(zones) = self.zone_map(cx).filter(|_| Self::applies(cx)) else { return Vec::new() };
+        hints::hints(cx, &ast::parse(&cx.doc.src), Some(&zones), from, to)
     }
 
     fn intentions(&self, cx: &Ctx, start: usize, _end: usize) -> Vec<Intention> {

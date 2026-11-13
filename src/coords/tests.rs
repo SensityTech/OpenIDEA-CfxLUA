@@ -249,26 +249,6 @@ fn duplicates_in_config_tables() {
 }
 
 #[test]
-fn zone_hints() {
-    let text = "local davis = vector3(100.0, -1600.0, 30.0)\nConfig.Spots = {\n    { coords = vec4(100.0, -1300.0, 30.0, 90.0) },\n    {x = 900.0, y = -900.0, z = 30.0},\n}\n\
-                local outside = vector3(5000.0, 5000.0, 30.0)\nlocal computed = vector3(x, -1600.0, 30.0)\nlocal list = {100.0, -1600.0, 30.0}\nlocal offset = vector3(100.0, -1600.0, 30.0)";
-    let settings = Settings::defaults().with(keys::ZONES_FILE, Value::from("data/zones.json"));
-    let r = run_with(FIVEM, text, settings, &[("data/zones.json", zones::tests::ZONES)]);
-    let names: Vec<String> = r
-        .problems(checks::ZONE)
-        .iter()
-        .map(|p| p.split(": ").nth(1).unwrap_or("").split(" — ").next().unwrap_or("").to_owned())
-        .collect();
-    assert_eq!(names, ["≈ Davis", "≈ Strawberry", "≈ Los Santos"]);
-    assert!(r.problems(checks::ZONE)[0].ends_with("Approximate GTA V zone: Davis (DAVIS), from bounding boxes"));
-    assert!(run(text).problems(checks::ZONE).is_empty(), "no zones file");
-    let redm = "fx_version 'cerulean'\ngame 'rdr3'\nclient_script 'client/*.lua'\n";
-    let settings = Settings::defaults().with(keys::ZONES_FILE, Value::from("/p/data/zones.json"));
-    let r = run_with(redm, text, settings, &[("data/zones.json", zones::tests::ZONES)]);
-    assert!(r.problems(checks::ZONE).is_empty(), "GTA V zones only");
-}
-
-#[test]
 fn manifests_are_not_checked() {
     let r = run_with("local a = vector3(-1037.74, -2738.03, 0.0)", "", Settings::defaults(), &[]);
     let doc = r.fx.doc("res/fxmanifest.lua");

@@ -192,14 +192,9 @@ pub fn argument(index: usize, param: Option<&str>, native: &str) -> String {
 }
 
 impl Decoded {
-    pub fn message(&self) -> String {
-        let mut out = format!("{} {}: {}", self.title, self.value, self.label);
-        if !self.details.is_empty() {
-            let rows: Vec<String> = self.details.iter().map(|(k, v)| format!("{k}: {v}")).collect();
-            out.push_str(" — ");
-            out.push_str(&rows.join(", "));
-        }
-        out
+    /// What the hint of the value says when it is hovered.
+    pub fn tooltip(&self) -> String {
+        format!("{} {}: {}", self.title, self.value, self.label)
     }
 
     pub fn markdown(&self, expr: &str, argument: Option<&str>) -> String {
@@ -270,15 +265,22 @@ mod tests {
     #[test]
     fn details_messages_and_docs() {
         let d = decode(Kind::Control, 38, Game::Gta5, &bundled).unwrap();
-        assert_eq!(d.message(), "Control 38: INPUT_PICKUP (E / LB) — Keyboard: E, Pad: LB");
+        assert_eq!(d.tooltip(), "Control 38: INPUT_PICKUP (E / LB)");
         assert_eq!(
             d.markdown("38", Some(&argument(1, Some("control"), "IsControlJustPressed"))),
             "**Control** `38` = **INPUT_PICKUP**\n\nArgument 2 (control) of IsControlJustPressed\n\n- Keyboard: `E`\n- Pad: `LB`\n\n[Reference table](https://docs.fivem.net/docs/game-references/controls/)\n"
         );
         let h = decode(Kind::Hash, -1216765807, Game::Gta5, &bundled).unwrap();
+        assert_eq!(h.tooltip(), "Hash -1216765807: `adder`");
+        let details: Vec<String> = h.details.iter().map(|(name, value)| format!("{name}: {value}")).collect();
         assert_eq!(
-            h.message(),
-            "Hash -1216765807: `adder` — Name from: the bundled names (vehicle), Signed: -1216765807, Unsigned: 3078201489, Hexadecimal: 0xB779A091"
+            details,
+            [
+                "Name from: the bundled names (vehicle)",
+                "Signed: -1216765807",
+                "Unsigned: 3078201489",
+                "Hexadecimal: 0xB779A091"
+            ]
         );
         assert_eq!(h.comment(), "--[[ adder ]]");
         let a = decode(Kind::AnimFlags, 49, Game::Gta5, &bundled).unwrap();

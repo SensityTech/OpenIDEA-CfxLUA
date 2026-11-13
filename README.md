@@ -327,7 +327,6 @@ does, it keeps these equivalents:
 | Not done yet | Instead |
 |---|---|
 | Hover on the directives of a manifest | Documentation in completion, **CfxLua: Show Documentation**, the tool window |
-| Inlay hints | Hint-level problems carrying the decoded value |
 | Rename and Find Usages | Go to Definition lists every match |
 | Creating files (New Resource) | One **New** template per file |
 | Opening links from the tool window | URLs are shown with a copy button |
