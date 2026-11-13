@@ -4,6 +4,7 @@ mod complete;
 pub mod convert;
 pub mod edits;
 pub mod files;
+pub mod generate;
 mod snippets;
 pub mod view;
 
