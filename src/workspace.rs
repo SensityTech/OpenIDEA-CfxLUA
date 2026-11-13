@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 
 static LISTINGS: AtomicU64 = AtomicU64::new(1);
 
@@ -51,6 +52,18 @@ pub struct WsFile {
     pub edited: bool,
 }
 
+/// Tells the sizes of files of the project `root`, in the order they are given. Past `until` it stops: it
+/// answers for the first files only.
+pub type Sizer = fn(root: &str, paths: &[&str], until: Instant) -> Vec<Option<u64>>;
+
+/// What files weigh together.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Weight {
+    pub bytes: u64,
+    /// The files that are only listed and whose size was not told in time.
+    pub unweighed: usize,
+}
+
 #[derive(Default)]
 pub struct Workspace {
     pub root: String,
@@ -68,6 +81,8 @@ pub struct Workspace {
     pub luals: Contents,
     /// Reads a file of the project where it is stored, for a text that is no longer kept.
     loader: Option<fn(&str) -> Option<String>>,
+    /// Tells the sizes of files of the project `root` where they are stored, for files that are only listed.
+    sizer: Option<Sizer>,
 }
 
 impl Workspace {
@@ -82,6 +97,12 @@ impl Workspace {
     /// The same workspace, reading with `loader` the texts it no longer keeps.
     pub fn reading(mut self, loader: fn(&str) -> Option<String>) -> Self {
         self.loader = Some(loader);
+        self
+    }
+
+    /// The same workspace, asking `sizer` the size of the files it only lists.
+    pub fn sizing(mut self, sizer: Sizer) -> Self {
+        self.sizer = Some(sizer);
         self
     }
 
@@ -208,6 +229,27 @@ impl Workspace {
 
     pub fn stamp(&self, path: &str) -> Option<Stamp> {
         self.files.get(&slash(path)).and_then(|f| f.stamp)
+    }
+
+    /// What files weigh together: the length of the text that was read of a file, and what its storage tells
+    /// of a file that is only listed. The storage is asked once for all of them, until `until`: each file
+    /// costs it a call.
+    pub fn weight<'a>(&self, paths: impl Iterator<Item = &'a str>, until: Instant) -> Weight {
+        let (mut bytes, mut listed) = (0, Vec::new());
+        for path in paths {
+            match self.files.get(path).map(|file| file.stamp) {
+                Some(Some(stamp)) => bytes += stamp.size() as u64,
+                Some(None) => listed.push(path),
+                None => {}
+            }
+        }
+        let mut stored = match self.sizer {
+            Some(sizer) if !listed.is_empty() => sizer(&self.root, &listed, until),
+            _ => Vec::new(),
+        };
+        stored.truncate(listed.len());
+        let unweighed = listed.len() - stored.len();
+        Weight { bytes: bytes + stored.into_iter().flatten().sum::<u64>(), unweighed }
     }
 
     /// Lets go of the text of a script read from the disk, once what it declares is indexed: its stamp

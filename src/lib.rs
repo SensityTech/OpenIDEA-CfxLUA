@@ -229,7 +229,7 @@ impl DevKit {
                 if let Ok(root) = p.root()
                     && !self.workspaces.iter().any(|w| w.root == slash(&root).trim_end_matches('/'))
                 {
-                    self.workspaces.push(Workspace::new(&root).reading(read_text));
+                    self.workspaces.push(Workspace::new(&root).reading(read_text).sizing(disk_sizes));
                 }
             }
         }
@@ -241,7 +241,7 @@ impl DevKit {
         if let Some(i) = self.workspaces.iter().position(|w| !w.scanned && w.root == dir) {
             return i;
         }
-        self.workspaces.push(Workspace::new(&dir).reading(read_text));
+        self.workspaces.push(Workspace::new(&dir).reading(read_text).sizing(disk_sizes));
         self.workspaces.len() - 1
     }
 
@@ -907,6 +907,24 @@ fn read_text(path: &str) -> Option<String> {
         Disk::Text(text) => Some(text),
         Disk::Missing | Disk::Unreadable => None,
     }
+}
+
+/// The sizes of files of the project `root` as the IDE tells them, for files a workspace only lists: one call
+/// to the IDE per file, until `until`.
+fn disk_sizes(root: &str, paths: &[&str], until: std::time::Instant) -> Vec<Option<u64>> {
+    let rooted =
+        |project: &openidea_plugin::Project| project.root().is_ok_and(|at| slash(&at).trim_end_matches('/') == root);
+    let Some(project) = host::projects().ok().and_then(|projects| projects.into_iter().find(rooted)) else {
+        return Vec::new();
+    };
+    let mut sizes = Vec::with_capacity(paths.len());
+    for (asked, path) in paths.iter().enumerate() {
+        if asked % 64 == 0 && std::time::Instant::now() >= until {
+            break;
+        }
+        sizes.push(project.stat(path).ok().map(|stat| stat.size));
+    }
+    sizes
 }
 
 fn read_disk(path: &str) -> Disk {
@@ -2089,6 +2107,26 @@ mod tests {
         kit.line_markers(&quiet);
         let published = host.diagnostics().remove(SHOP_CLIENT).unwrap_or_default();
         assert!(published.iter().all(|found| found.code.as_deref() != Some("RemoveUnusedLocal")));
+    }
+
+    #[test]
+    fn the_escrow_report_weighs_the_files_the_plugin_never_reads() {
+        let host = openidea_plugin::mock::MockHost::install();
+        host.add_file("res/stream/car.ytd", "0123456789");
+        let kit = shop_resource(&host);
+        let ws = &kit.workspaces[0];
+        let now = std::time::Instant::now();
+        let later = now + std::time::Duration::from_secs(60);
+        let weight = |path: &'static str, until| ws.weight([path].into_iter(), until);
+        let known = |bytes| workspace::Weight { bytes, unweighed: 0 };
+        assert_eq!(weight("/project/res/stream/car.ytd", later), known(10), "asked to the IDE");
+        assert_eq!(weight(SHOP_CLIENT, later), known(35), "the length of the text that was read");
+        assert_eq!(weight("/project/res/stream/missing.ytd", later), known(0));
+        let late = workspace::Weight { bytes: 0, unweighed: 1 };
+        assert_eq!(weight("/project/res/stream/car.ytd", now), late, "no time left to ask");
+        assert_eq!(weight(SHOP_CLIENT, now), known(35), "a text that was read costs no call");
+        let report = escrow::report(ws, "/project/res").expect("the report of the resource");
+        assert!(report.contains("\n- Size: 183 B uncompressed"), "{report}");
     }
 
     #[test]

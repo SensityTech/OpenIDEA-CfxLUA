@@ -178,6 +178,11 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   rewrites the components, as integers or as floats like the call writes them, and keeps what stands between them.
   A colour with a component that is not a number has no swatch. OpenIDEA's picker has no alpha: the alpha shows in
   the swatch and stays as it is written.
+- **The Escrow check weighs the resource**, as in the JetBrains plugin: the report of **CfxLua: Check Resource
+  Before Escrow Upload** and of the **Escrow** tab gives the size of the files of the resource, and a resource of
+  more than 1 GB is a blocker. Files that Git ignores are not counted: OpenIDEA does not list them for a plugin.
+  A check weighs files for two seconds at most and says how many it had no time for; the **Escrow** tab weighs
+  one resource at a time.
 
 ### Fixed
 

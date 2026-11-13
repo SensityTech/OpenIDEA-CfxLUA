@@ -8,17 +8,23 @@ use crate::manifest::files::{Tree, checkable, is_glob, normalize};
 use crate::manifest::view::View;
 use crate::project::glob::Glob;
 use crate::project::{CASE_SENSITIVE, Resource};
-use crate::workspace::Workspace;
+use crate::workspace::{Weight, Workspace};
 use openidea_plugin::{NotificationLevel, host};
 use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 pub const COMMAND: &str = "escrow.check";
 const MAX_LISTED_FILES: usize = 40;
 const NOTIFIED: usize = 5;
 const NOTIFIED_RESOURCES: usize = 20;
+/// What an uploaded asset may weigh once zipped.
+const MAX_UPLOAD: u64 = 1 << 30;
+/// How long a call weighs files for. The IDE stops a command after five seconds, and telling the size of a file
+/// takes it a tenth of a millisecond.
+const WEIGHING: Duration = Duration::from_secs(2);
 const SCRIPT_DIRECTIVES: [&str; 6] =
     ["client_script", "client_scripts", "server_script", "server_scripts", "shared_script", "shared_scripts"];
 
@@ -71,6 +77,8 @@ pub struct Report {
     pub folder: String,
     pub findings: Vec<Finding>,
     pub files: Rc<Vec<EscrowFile>>,
+    /// What its files weigh together.
+    pub weight: Weight,
     pub unchecked: usize,
 }
 
@@ -106,6 +114,17 @@ fn grouped(n: usize) -> String {
     out
 }
 
+/// A size as the JetBrains plugin writes it: in units of 1024, a half rounded up.
+fn format_size(bytes: u64) -> String {
+    const UNITS: [(u64, u32, &str); 3] = [(1 << 30, 2, "GB"), (1 << 20, 1, "MB"), (1 << 10, 1, "KB")];
+    let Some((unit, decimals, name)) = UNITS.into_iter().find(|(unit, ..)| bytes >= *unit) else {
+        return format!("{bytes} B");
+    };
+    let steps = 10u128.pow(decimals);
+    let rounded = (u128::from(bytes) * steps * 2 + u128::from(unit)) / (u128::from(unit) * 2);
+    format!("{}.{:0width$} {name}", rounded / steps, rounded % steps, width = decimals as usize)
+}
+
 fn count(n: usize, one: &str, many: &str) -> String {
     format!("{} {}", grouped(n), if n == 1 { one } else { many })
 }
@@ -120,7 +139,8 @@ pub fn run(cx: &CommandCx) -> Vec<String> {
         host::notify(NotificationLevel::Info, "Escrow check: no resource (folder with an fxmanifest.lua) found", "");
         return Vec::new();
     };
-    let reports: Vec<Rc<Report>> = resources.iter().map(|r| cached(ws, r)).collect();
+    let until = Instant::now() + WEIGHING;
+    let reports: Vec<Rc<Report>> = resources.iter().map(|r| cached_until(ws, r, until)).collect();
     let (level, title, body) = notification(&reports);
     host::notify(level, &title, &format!("{body}\nThe full report is in the Escrow tab of the CfxLua tool window."));
     resources.iter().map(|r| r.dir.clone()).collect()
@@ -189,7 +209,8 @@ fn line_of(src: &Source, at: usize) -> usize {
     src.lines.line_of(at) + 1
 }
 
-pub fn check(ws: &Workspace, res: &Resource) -> Report {
+/// The files are weighed until `until`: the checks of one call share the time they weigh for.
+pub fn check(ws: &Workspace, res: &Resource, until: Instant) -> Report {
     let manifest = ws.text(&res.manifest_path()).unwrap_or("");
     let msrc = Source::new(manifest);
     let view = View::new(&msrc);
@@ -228,6 +249,12 @@ pub fn check(ws: &Workspace, res: &Resource) -> Report {
         let message =
             "RedM resource without the exact rdr3_warning acknowledgement: FXServer does not start it on RedM";
         out.push(Finding::new(Level::Blocker, message.into(), m(), 0, None));
+    }
+    let weight = ws.weight(files.iter().map(|f| f.path.as_str()), until);
+    if weight.bytes > MAX_UPLOAD {
+        let weighed = format_size(weight.bytes);
+        let message = format!("The resource weighs {weighed}: an escrowed asset is limited to 1 GB (zipped)");
+        out.push(Finding::new(Level::Blocker, message, None, 0, None));
     }
 
     // Warnings: the protected build does not work as expected.
@@ -321,7 +348,7 @@ pub fn check(ws: &Workspace, res: &Resource) -> Report {
         "" => res.name.clone(),
         rel => rel.to_owned(),
     };
-    Report { name: res.name.clone(), folder, findings: out, files: layout.files.clone(), unchecked }
+    Report { name: res.name.clone(), folder, findings: out, files: layout.files.clone(), weight, unchecked }
 }
 
 // What follows from the manifest and the file names alone, kept while both stay the same.
@@ -428,6 +455,10 @@ thread_local! {
 
 /// The report of the workspace as it is, computed once per generation.
 pub fn cached(ws: &Workspace, res: &Resource) -> Rc<Report> {
+    cached_until(ws, res, Instant::now() + WEIGHING)
+}
+
+fn cached_until(ws: &Workspace, res: &Resource, until: Instant) -> Rc<Report> {
     let manifest_path = res.manifest_path();
     let hit = REPORTS.with_borrow(|reports| {
         reports.iter().find(|c| c.manifest_path == manifest_path && c.fresh(ws)).map(|c| c.report.clone())
@@ -435,9 +466,11 @@ pub fn cached(ws: &Workspace, res: &Resource) -> Rc<Report> {
     if let Some(report) = hit {
         return report;
     }
-    let report = Rc::new(check(ws, res));
+    let report = Rc::new(check(ws, res, until));
+    // What is not complete is asked again: a later call has the time this one lacked.
     if let Some(manifest) = ws.file(&manifest_path).and_then(|f| f.text.clone())
         && report.unchecked == 0
+        && report.weight.unweighed == 0
     {
         REPORTS.with_borrow_mut(|reports| {
             reports.retain(|c| c.fresh(ws) && c.manifest_path != manifest_path);
@@ -452,6 +485,25 @@ fn unchecked_note(n: usize) -> String {
         "Not checked yet: {} (CfxLua is still reading the project). Run CfxLua: Check Resource Before Escrow Upload again in a moment.",
         count(n, "Lua file", "Lua files")
     )
+}
+
+fn unweighed_note(files: usize, resources: usize) -> String {
+    let files = count(files, "file", "files");
+    match resources {
+        1 => format!("Not weighed in time: {files}. The size of the resource is not known in full."),
+        _ => format!("Not weighed in time: {files}. The Escrow tab weighs one resource at a time."),
+    }
+}
+
+fn size_line(weight: Weight) -> String {
+    let (size, limit) = (format_size(weight.bytes), "an escrowed asset is limited to 1 GB zipped");
+    match weight.unweighed {
+        0 => format!("- Size: {size} uncompressed ({limit})"),
+        left => {
+            let left = count(left, "file", "files");
+            format!("- Size: at least {size} uncompressed, {left} not weighed in time ({limit})")
+        }
+    }
 }
 
 pub fn markdown<R: Borrow<Report>>(reports: &[R]) -> String {
@@ -494,12 +546,13 @@ pub fn markdown<R: Borrow<Report>>(reports: &[R]) -> String {
                     open(ignored.len()),
                     open(unprotected)
                 ),
+                size_line(r.weight),
             ]
             .join("\n"),
         );
         if r.unchecked > 0 {
             block(&unchecked_note(r.unchecked));
-        } else if b + w == 0 {
+        } else if b + w + r.weight.unweighed == 0 {
             block("No blocker and no warning: the resource is ready for the upload.");
         }
         for level in Level::ALL {
@@ -541,6 +594,7 @@ pub fn notification<R: Borrow<Report>>(reports: &[R]) -> (NotificationLevel, Str
     let b: usize = reports.iter().map(|r| r.count(Level::Blocker)).sum();
     let w: usize = reports.iter().map(|r| r.count(Level::Warning)).sum();
     let unchecked: usize = reports.iter().map(|r| r.unchecked).sum();
+    let unweighed: usize = reports.iter().map(|r| r.weight.unweighed).sum();
     let level = if b > 0 {
         NotificationLevel::Error
     } else if w > 0 {
@@ -556,9 +610,12 @@ pub fn notification<R: Borrow<Report>>(reports: &[R]) -> (NotificationLevel, Str
     if unchecked > 0 {
         lines.push(unchecked_note(unchecked));
     }
+    if unweighed > 0 {
+        lines.push(unweighed_note(unweighed, reports.len()));
+    }
     match reports.as_slice() {
         [r] => {
-            if b + w + unchecked == 0 {
+            if b + w + unchecked + unweighed == 0 {
                 lines.push("No blocker and no warning: the resource is ready for the upload.".into());
             }
             for level in Level::ALL {
@@ -599,6 +656,10 @@ mod tests {
     use crate::manifest::edits::apply;
     use crate::testing::Fixture;
 
+    fn check(ws: &Workspace, res: &Resource) -> Report {
+        super::check(ws, res, Instant::now() + WEIGHING)
+    }
+
     fn report(files: &[(&str, &str)]) -> Report {
         let ws = Workspace::from_files("/p", files);
         let res = ws.resource("/p/res").expect("res");
@@ -630,9 +691,101 @@ mod tests {
         let md = markdown(&[r]);
         assert!(md.contains("No blocker and no warning: the resource is ready for the upload."));
         assert!(md.starts_with("# Escrow pre-publish check: res\n\nCfx Asset Escrow encrypts"), "{md}");
-        assert!(md.contains("## Summary\n\n- Folder: `res`\n- 0 blockers, 0 warnings, 1 note\n- Encrypted: 2 files\n- Open: 2 files in escrow_ignore, 1 file of types escrow never encrypts\n\n"), "{md}");
+        assert!(md.contains("## Summary\n\n- Folder: `res`\n- 0 blockers, 0 warnings, 1 note\n- Encrypted: 2 files\n- Open: 2 files in escrow_ignore, 1 file of types escrow never encrypts\n- Size: 212 B uncompressed (an escrowed asset is limited to 1 GB zipped)\n\n"), "{md}");
         assert!(md.contains("## Files kept open by escrow_ignore\n\n- `config.lua`\n- `locales/en.lua`\n\n"));
         assert!(md.ends_with("## Files that will be encrypted\n\n- `client/main.lua`\n- `server/main.lua`\n\n"));
+    }
+
+    #[test]
+    fn a_size_is_written_in_units_of_1024_with_a_half_rounded_up() {
+        // `CfxEscrowChecker.formatSize`
+        let written = |bytes: u64| format_size(bytes);
+        assert_eq!([written(0), written(1), written(1023)], ["0 B", "1 B", "1023 B"]);
+        assert_eq!(
+            [written(1024), written(1536), written(1280), written(1228)],
+            ["1.0 KB", "1.5 KB", "1.3 KB", "1.2 KB"]
+        );
+        assert_eq!([written((1 << 20) - 1), written(1 << 20), written(5 << 20)], ["1024.0 KB", "1.0 MB", "5.0 MB"]);
+        assert_eq!(
+            [written((1 << 30) - 1), written(1 << 30), written(1200 << 20)],
+            ["1024.0 MB", "1.00 GB", "1.17 GB"]
+        );
+        assert_eq!([written(9 << 27), written(u64::MAX)], ["1.13 GB", "17179869184.00 GB"]);
+    }
+
+    #[test]
+    fn the_files_of_a_resource_are_weighed_and_more_than_a_gigabyte_blocks_the_upload() {
+        const MANIFEST: &str = "fx_version 'cerulean'\ngame 'gta5'\nlua54 'yes'\nclient_script 'client.lua'\n";
+        const CLIENT: &str = "print(1)";
+        const TEXTS: u64 = (MANIFEST.len() + CLIENT.len()) as u64;
+        // The `.ytd` fills the resource up to the limit, to the byte.
+        fn stored(_root: &str, paths: &[&str], _until: Instant) -> Vec<Option<u64>> {
+            let size = |path: &&str| match path.rsplit('.').next() {
+                Some("ytd") => Some(MAX_UPLOAD - TEXTS),
+                Some("ydr") => Some(1),
+                _ => None,
+            };
+            paths.iter().map(size).collect()
+        }
+        let files = [("res/fxmanifest.lua", MANIFEST), ("res/client.lua", CLIENT), ("other/readme.md", "x")];
+        let blockers = |r: &Report| -> Vec<String> {
+            r.findings.iter().filter(|f| f.level == Level::Blocker).map(Finding::markdown).collect()
+        };
+        let mut ws = Workspace::from_files("/p", &files);
+        ws.set("/p/res/stream/car.ytd", None);
+        ws.set("/p/res/stream/notes.bin", None);
+        let nobody_asked = check(&ws, ws.resource("/p/res").expect("res"));
+        assert_eq!(nobody_asked.weight, Weight { bytes: TEXTS, unweighed: 2 });
+
+        let mut ws = ws.sizing(stored);
+        let full = check(&ws, ws.resource("/p/res").expect("res"));
+        let known = |bytes| Weight { bytes, unweighed: 0 };
+        assert_eq!((full.weight, blockers(&full)), (known(MAX_UPLOAD), Vec::new()), "a file without a size weighs 0");
+        let size = "\n- Size: 1.00 GB uncompressed (an escrowed asset is limited to 1 GB zipped)\n\n";
+        assert!(markdown(&[full]).contains(size));
+
+        ws.set("/p/res/stream/prop.ydr", None);
+        let over = check(&ws, ws.resource("/p/res").expect("res"));
+        assert_eq!(over.weight, known(MAX_UPLOAD + 1));
+        assert_eq!(blockers(&over), ["- The resource weighs 1.00 GB: an escrowed asset is limited to 1 GB (zipped)"]);
+    }
+
+    #[test]
+    fn files_that_are_not_weighed_in_time_are_counted_and_asked_about_again() {
+        // The first file it is asked about takes all the time there is.
+        fn slow(_root: &str, paths: &[&str], _until: Instant) -> Vec<Option<u64>> {
+            paths.iter().take(1).map(|_| Some(3 << 20)).collect()
+        }
+        fn fast(_root: &str, paths: &[&str], _until: Instant) -> Vec<Option<u64>> {
+            paths.iter().map(|_| Some(3 << 20)).collect()
+        }
+        let manifest = "fx_version 'cerulean'\ngame 'gta5'\nlua54 'yes'\nescrow_ignore 'stream/*'\n";
+        let mut ws = Workspace::from_files("/p", &[("res/fxmanifest.lua", manifest)]).sizing(slow);
+        for name in ["a", "b", "c"] {
+            ws.set(&format!("/p/res/stream/{name}.ytd"), None);
+        }
+        let res = |ws: &Workspace| ws.resource("/p/res").expect("res").clone();
+        let partial = cached(&ws, &res(&ws));
+        assert_eq!(partial.weight, Weight { bytes: (3 << 20) + manifest.len() as u64, unweighed: 2 });
+        assert_eq!(partial.count(Level::Blocker) + partial.count(Level::Warning), 0);
+        let md = markdown(&[&*partial]);
+        let size = "\n- Size: at least 3.0 MB uncompressed, 2 files not weighed in time (an escrowed asset is limited to 1 GB zipped)\n\n";
+        assert!(md.contains(size), "{md}");
+        assert!(!md.contains("ready for the upload"), "{md}");
+        let (_, _, body) = notification(&[&*partial]);
+        let note = "Not weighed in time: 2 files. The size of the resource is not known in full.";
+        assert_eq!(body, format!("0 blockers, 0 warnings\n{note}"));
+        let (_, _, body) = notification(&[&*partial, &*partial]);
+        assert!(
+            body.contains("\nNot weighed in time: 4 files. The Escrow tab weighs one resource at a time.\n"),
+            "{body}"
+        );
+
+        let ws = ws.sizing(fast);
+        let whole = cached(&ws, &res(&ws));
+        assert_eq!(whole.weight, Weight { bytes: (9 << 20) + manifest.len() as u64, unweighed: 0 }, "asked again");
+        assert!(markdown(&[&*whole]).contains("ready for the upload"));
+        assert!(Rc::ptr_eq(&whole, &cached(&ws, &res(&ws))), "complete, it is kept");
     }
 
     const BAD_MANIFEST: &str = "game 'rdr3'\nclient_scripts {\n    'client/*.lua',\n    'client/ui.js',\n}\nserver_script 'server/main.lua'\nui_page 'html/index.html'\nescrow_ignore {\n    'missing/*.lua',\n}\n";
@@ -796,7 +949,7 @@ mod tests {
         assert_eq!(r.unchecked, 5, "{:?}", kinds(&r));
         let note = "Not checked yet: 5 Lua files (CfxLua is still reading the project). Run CfxLua: Check Resource Before Escrow Upload again in a moment.";
         let md = markdown(&[&r]);
-        assert!(md.contains(&format!("files of types escrow never encrypts\n\n{note}\n\n")), "{md}");
+        assert!(md.contains(&format!("(an escrowed asset is limited to 1 GB zipped)\n\n{note}\n\n")), "{md}");
         let (_, _, body) = notification(&[&r]);
         assert!(body.starts_with(&format!("2 blockers, 3 warnings\n{note}\nBlockers\n")), "{body}");
         fx.index(&EscrowFeature);
