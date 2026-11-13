@@ -2092,6 +2092,37 @@ mod tests {
     }
 
     #[test]
+    fn a_global_only_its_file_uses_is_reported_once_its_inspection_is_turned_on() {
+        let code = inspect::GLOBAL_LOCAL.code;
+        let host = openidea_plugin::mock::MockHost::install();
+        host.add_file("res/client/other.lua", "print(shared)\n");
+        let mut kit = shop_resource(&host);
+        let typed = lua(SHOP_CLIENT, 2, "shared = 1\ncount = 0\nprint(count)\n");
+        kit.line_markers(&typed);
+        let published = host.diagnostics().remove(SHOP_CLIENT).unwrap_or_default();
+        assert!(published.iter().all(|found| found.code.as_deref() != Some(code)), "off until it is asked for");
+
+        host.set_setting(inspect::GLOBAL_LOCAL.setting, "true");
+        kit.line_markers(&lua(SHOP_CLIENT, 3, &typed.text));
+        let published = host.diagnostics().remove(SHOP_CLIENT).expect("the problems of the document");
+        let found: Vec<_> = published.iter().filter(|found| found.code.as_deref() == Some(code)).collect();
+        assert_eq!(found.len(), 1, "`shared` is read by another file");
+        assert_eq!(found[0].message, "Global name \"count\" can be local");
+        assert_eq!(found[0].range, Range { start: Position::new(1, 0), end: Position::new(1, 5) });
+        let start = Position::new(1, 0);
+        let actions = kit.code_actions(&lua(SHOP_CLIENT, 3, &typed.text), Range::new(start, start));
+        let fix = actions.iter().find(|action| action.title == "Append \"local\"").expect("the quick fix");
+        let local = TextEdit { range: Range { start, end: start }, text: "local ".into() };
+        assert_eq!(fix.edits, [(SHOP_CLIENT.to_owned(), vec![local])]);
+
+        for (version, quiet) in [(4, "---@meta\ncount = 0\n"), (5, "---@suppress GlobalNameCanbeLocal\ncount = 0\n")] {
+            kit.line_markers(&lua(SHOP_CLIENT, version, quiet));
+            let published = host.diagnostics().remove(SHOP_CLIENT).unwrap_or_default();
+            assert!(published.iter().all(|found| found.code.as_deref() != Some(code)), "{quiet}");
+        }
+    }
+
+    #[test]
     fn a_legacy_manifest_is_renamed_and_rewritten_in_one_action() {
         let legacy = "-- legacy resource\nresource_manifest_version '44febabe-d386-4d18-afbe-5e627f4af937'\nclient_script 'client.lua'\n";
         let host = openidea_plugin::mock::MockHost::install();

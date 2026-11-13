@@ -203,6 +203,39 @@ fn source(text: &str) -> crate::lua::Source {
     crate::lua::Source::new(text)
 }
 
+#[test]
+fn the_global_names_of_a_file_are_its_free_names_and_what_it_reads_through_the_globals_table() {
+    let src = source(
+        "local kept, t = 1, {}\nfunction Start() end\nfunction t.method() end\nlocal function helper() end\n\
+         count = kept + other\nprint(_G.viaTable, _G['viaKey'], _G[computed], t.field, helper())\n\
+         later = 1\nfunction later() end",
+    );
+    let (functions, used) = super::global_names(&src);
+    assert_eq!(functions, ["Start"], "a name assigned before its function statement stays a variable");
+    assert_eq!(used, ["Start", "_G", "computed", "count", "later", "other", "print", "viaKey", "viaTable"]);
+    let src = source("local _G = {}\nprint(_G.name)");
+    assert_eq!(super::global_names(&src).1, ["print"], "a local named _G is a table like another");
+}
+
+#[test]
+fn a_name_is_elsewhere_when_a_file_other_than_the_asking_one_holds_it() {
+    let mut names = super::NamesByFile::default();
+    names.set("a.lua", &["count", "total"]);
+    names.set("b.lua", &["total"]);
+    assert!(names.holds("count") && names.holds("total") && !names.holds("other"));
+    assert!(!names.elsewhere("a.lua", "count"), "only the file that asks holds it");
+    assert!(names.elsewhere("b.lua", "count") && names.elsewhere("c.lua", "count"));
+    assert!(names.elsewhere("a.lua", "total") && names.elsewhere("b.lua", "total"));
+    assert!(!names.elsewhere("a.lua", "other"));
+    names.set("b.lua", &["count"]);
+    assert!(!names.elsewhere("a.lua", "total"), "the other file was read again without it");
+    assert!(names.elsewhere("a.lua", "count"));
+    names.remove("b.lua");
+    assert!(!names.elsewhere("a.lua", "count"));
+    names.remove("a.lua");
+    assert!(!names.holds("count") && !names.holds("total"));
+}
+
 /// Each fold as `first line..last line` (1-based) and its kind.
 fn folded(text: &str) -> Vec<String> {
     let src = source(text);

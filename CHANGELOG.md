@@ -94,6 +94,10 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   extra argument, a method its class does not declare), `return` values that do not match `---@return`, a value
   assigned to a variable or a field of another type, and a name that nothing declares. On code that is not
   annotated they report a lot, which is why they wait for a setting.
+- **Global name can be local, off by default.** The inspection of the JetBrains plugin, turned on in the settings:
+  the first assignment of a global that no other file of the project reads, assigns or defines (`_G.name`
+  included) is reported, with the fix **Append "local"**. A name of a library (a native, the Cfx runtime, the Lua
+  standard library) and the globals of a `---@module` file are left alone. It waits for the project to be read.
 - **Lua intentions.** Where the caret stands, the plugin offers the rewrites of the JetBrains plugin: add or
   remove the parentheses of a call that takes a single string or table; invert a boolean; replace an operation
   between constants by its value (with the caret on its operator); add `---@param` for a parameter, `---@type`

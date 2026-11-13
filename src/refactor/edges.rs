@@ -9,12 +9,11 @@ use crate::lua::scope::DeclKind;
 use crate::lua::token::{T, lex};
 use crate::lua::tree::{N, Node, Tree};
 use crate::ty::members::module_of;
-use crate::ty::{SELF, Ty, psi, resolve};
+use crate::ty::{G, SELF, Ty, psi, resolve};
 use std::rc::Rc;
 
 /// The host refuses a key longer than this.
 pub const KEY_LIMIT: usize = 1024;
-const GLOBALS: &str = "_G";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Family {
@@ -97,6 +96,16 @@ pub fn in_order(mut out: Vec<Anchor>) -> Vec<Anchor> {
     out
 }
 
+/// Whether a name, or the name of a `function name()` statement, is a local of its file.
+pub fn is_local(src: &Source, name: Node) -> bool {
+    src.scopes().resolve(name).is_some_and(|decl| decl.kind != DeclKind::Global)
+}
+
+/// Whether an expression is the table of the globals: `_G`, unless the file has a local of that name.
+pub fn is_globals_table(src: &Source, expr: Node) -> bool {
+    expr.is(N::NameExpr) && expr.code() == G && !is_local(src, expr)
+}
+
 /// The inside of the string literal written at `start`, when it spells its text as it is: no escape, not empty.
 pub fn literal_name(src: &Source, start: usize) -> Option<(usize, usize)> {
     let tok = src.toks.get(src.toks.binary_search_by_key(&start, |tok| tok.start).ok()?)?;
@@ -111,12 +120,12 @@ impl Reading<'_> {
     }
 
     fn is_local(&self, name: Node) -> bool {
-        self.src.scopes().resolve(name).is_some_and(|decl| decl.kind != DeclKind::Global)
+        is_local(self.src, name)
     }
 
     /// Whether a global name is one of the project: `self`, `_G` and what a library declares are not.
     fn of_project(&self, name: &str) -> bool {
-        name != SELF && name != GLOBALS && !(self.library)(name)
+        name != SELF && name != G && !(self.library)(name)
     }
 
     /// The name the members of a global are kept under: its own, after the module a `---@module` file declares.
@@ -148,7 +157,7 @@ impl Reading<'_> {
     }
 
     fn is_globals_table(&self, expr: Node) -> bool {
-        expr.is(N::NameExpr) && expr.code() == GLOBALS && !self.is_local(expr)
+        is_globals_table(self.src, expr)
     }
 
     /// The name the members of what an expression stands for are kept under, when the file alone tells it: a

@@ -29,46 +29,67 @@ use crate::lua::Source;
 use crate::lua::token::T;
 use crate::lua::tree::N;
 use crate::project::FileKind;
-use crate::ty::FileId;
+use crate::refactor::edges::{is_globals_table, is_local};
+use crate::refactor::is_library;
 use crate::ty::context::Cx;
+use crate::ty::{FileId, psi};
 use crate::workspace::Workspace;
 use openidea_plugin::Location;
 use openidea_plugin::providers::{CompletionItem, LineMarker};
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::time::Duration;
 
 /// What the inspections that ask the type engine may spend on one file: they are published by an editor
 /// call, which the IDE drops after 50 ms.
 const INSPECTION_TIME: Duration = Duration::from_millis(20);
 
-/// The names `function name()` statements give to globals, per file and counted over the project.
+/// Global names kept per file and counted over the files of the project: a name is kept once.
 #[derive(Default)]
-struct GlobalFunctions {
-    by_file: HashMap<String, Vec<Box<str>>>,
-    defined: HashMap<Box<str>, u32>,
+struct NamesByFile {
+    by_file: HashMap<String, Vec<Rc<str>>>,
+    files: HashMap<Rc<str>, u32>,
 }
 
-impl GlobalFunctions {
-    fn set(&mut self, path: &str, names: Vec<Box<str>>) {
+impl NamesByFile {
+    /// `names` is sorted, each name once.
+    fn set(&mut self, path: &str, names: &[impl AsRef<str>]) {
         self.remove(path);
-        for name in &names {
-            *self.defined.entry(name.clone()).or_default() += 1;
+        let mut kept = Vec::with_capacity(names.len());
+        for name in names.iter().map(AsRef::as_ref) {
+            let (name, count) = match self.files.remove_entry(name) {
+                Some((name, count)) => (name, count + 1),
+                None => (Rc::from(name), 1),
+            };
+            self.files.insert(name.clone(), count);
+            kept.push(name);
         }
-        if !names.is_empty() {
-            self.by_file.insert(path.to_owned(), names);
+        if !kept.is_empty() {
+            self.by_file.insert(path.to_owned(), kept);
         }
     }
 
     fn remove(&mut self, path: &str) {
         for name in self.by_file.remove(path).unwrap_or_default() {
-            if let Some(count) = self.defined.get_mut(&name) {
+            if let Some(count) = self.files.get_mut(&name) {
                 *count -= 1;
                 if *count == 0 {
-                    self.defined.remove(&name);
+                    self.files.remove(&name);
                 }
             }
         }
+    }
+
+    fn holds(&self, name: &str) -> bool {
+        self.files.contains_key(name)
+    }
+
+    /// Whether a file other than `path` holds `name`.
+    fn elsewhere(&self, path: &str, name: &str) -> bool {
+        let own = self.by_file.get(path).is_some_and(|names| names.binary_search_by(|kept| (**kept).cmp(name)).is_ok());
+        self.files.get(name).is_some_and(|count| *count > u32::from(own))
     }
 }
 
@@ -76,7 +97,10 @@ impl GlobalFunctions {
 /// type engine tells of it.
 #[derive(Default)]
 pub struct EditorFeature {
-    functions: RefCell<GlobalFunctions>,
+    /// The names `function name()` statements give to globals.
+    functions: RefCell<NamesByFile>,
+    /// The global names each file reads, assigns or defines.
+    used: RefCell<NamesByFile>,
     projects: Projects,
 }
 
@@ -117,34 +141,49 @@ impl EditorFeature {
     }
 }
 
-fn global_functions(src: &Source) -> Vec<Box<str>> {
+/// The global functions a file defines, then every global name it uses, `_G.name` included: sorted, each
+/// name once.
+fn global_names(src: &Source) -> (Vec<&str>, Vec<Cow<'_, str>>) {
     let scopes = src.scopes();
-    let mut names: Vec<Box<str>> = src
-        .root()
-        .descendants()
-        .filter(|node| node.is(N::FuncDef) && scopes.id_of(*node).is_none())
-        .filter_map(|node| node.token(T::Id))
-        .map(|name| name.text().into())
-        .collect();
-    names.sort();
-    names.dedup();
-    names
+    let (mut functions, mut used) = (Vec::new(), Vec::new());
+    for node in src.root().descendants() {
+        match node.kind() {
+            N::FuncDef | N::NameExpr if !is_local(src, node) => {
+                let Some(name) = node.token(T::Id) else { continue };
+                used.push(Cow::Borrowed(name.text()));
+                // A name that was assigned before its function statement stays a variable.
+                if node.is(N::FuncDef) && scopes.id_of(node).is_none() {
+                    functions.push(name.text());
+                }
+            }
+            N::IndexExpr if psi::prefix(node).is_some_and(|table| is_globals_table(src, table)) => {
+                used.extend(psi::member_name(src, node));
+            }
+            _ => {}
+        }
+    }
+    functions.sort_unstable();
+    functions.dedup();
+    used.sort_unstable();
+    used.dedup();
+    (functions, used)
 }
 
 impl Feature for EditorFeature {
     fn index_file(&self, ws: &Workspace, path: &str, kind: FileKind, src: &Source) {
-        let mut functions = self.functions.borrow_mut();
         if kind == FileKind::Lua {
-            functions.set(path, global_functions(src));
+            let (functions, used) = global_names(src);
+            self.functions.borrow_mut().set(path, &functions);
+            self.used.borrow_mut().set(path, &used);
             self.projects.declare(ws, path, src);
         } else {
-            functions.remove(path);
-            self.projects.forget(path);
+            self.forget_file(path);
         }
     }
 
     fn forget_file(&self, path: &str) {
         self.functions.borrow_mut().remove(path);
+        self.used.borrow_mut().remove(path);
         self.projects.forget(path);
     }
 
@@ -259,6 +298,13 @@ impl Feature for EditorFeature {
             found.extend(indexed.unwrap_or_default());
             found.sort_by_key(|problem| problem.start);
         }
+        // What another file uses is known once the project is read.
+        if cx.doc.kind == FileKind::Lua && !cx.ws.indexing && wanted(inspect::GLOBAL_LOCAL) {
+            let used = self.used.borrow();
+            let elsewhere = |name: &str| is_library(cx.natives, name) || used.elsewhere(&cx.doc.path, name);
+            found.extend(inspect::global_local::problems(src, &elsewhere));
+            found.sort_by_key(|problem| problem.start);
+        }
         found
     }
 
@@ -286,7 +332,7 @@ impl Feature for EditorFeature {
             return Vec::new();
         }
         let functions = self.functions.borrow();
-        semantic::tokens(cx, &|name| functions.defined.contains_key(name))
+        semantic::tokens(cx, &|name| functions.holds(name))
     }
 
     fn folding(&self, cx: &Ctx) -> Vec<folding::Fold> {

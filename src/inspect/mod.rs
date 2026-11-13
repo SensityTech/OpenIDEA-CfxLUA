@@ -2,6 +2,7 @@
 //! the scopes of one file: what is declared and never used, what hides a local, what does nothing. Those of
 //! `indexed` read what the project declares.
 
+pub mod global_local;
 pub mod indexed;
 pub mod suppress;
 pub mod typed;
@@ -49,6 +50,9 @@ pub const UNDECLARED: Inspection = Inspection { code: "UndeclaredVariable", sett
 pub const RETURN_TYPE: Inspection = Inspection { code: "ReturnType", setting: "inspections.returnType" };
 pub const ASSIGN_TYPE: Inspection = Inspection { code: "AssignType", setting: "inspections.assignType" };
 
+/// Reads which globals the other files of the project use; the JetBrains plugin leaves it off.
+pub const GLOBAL_LOCAL: Inspection = Inspection { code: "GlobalNameCanbeLocal", setting: "inspections.globalLocal" };
+
 /// The inspections that read one file.
 pub const ALL: [Inspection; 6] = [UNUSED, SHADOWED, SIMPLIFY, EMPTY_BODY, UNREACHABLE, ZERO_INDEX];
 /// The type safety inspections: the JetBrains plugin leaves them off until they are asked for.
@@ -57,9 +61,10 @@ pub const TYPED: [Inspection; 4] = [MATCH_SIGNATURE, UNDECLARED, RETURN_TYPE, AS
 impl Inspection {
     /// Whether it runs when no setting says so.
     pub fn on_by_default(self) -> bool {
-        !TYPED.contains(&self)
+        !TYPED.contains(&self) && self != GLOBAL_LOCAL
     }
 }
+
 /// The inspections that read what the project declares.
 pub const INDEXED: [Inspection; 4] = [DUPLICATE_CLASS, DEPRECATED, UNRESOLVED_TYPE, UNRESOLVED_PARAM];
 

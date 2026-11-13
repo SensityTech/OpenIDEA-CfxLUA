@@ -132,6 +132,12 @@
       "title": "Inspection: ---@param that names no parameter",
       "default": true
     },
+    "inspections.globalLocal": {
+      "type": "boolean",
+      "title": "Inspection: global that nothing outside its file uses",
+      "description": "The first assignment of a global that no other file of the project reads, assigns or defines, with a fix that makes it local. Off by default, as in the JetBrains plugin.",
+      "default": false
+    },
     "inspections.matchSignature": {
       "type": "boolean",
       "title": "Type safety: arguments that do not match the function they are given to",
