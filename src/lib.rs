@@ -735,15 +735,25 @@ impl DevKit {
                 return Err(unread());
             }
             let edits = per_file(path, &src);
-            if edits.is_empty() {
-                continue;
+            if !edits.is_empty() {
+                out.push((self.native_path(ws, path), placed(&text, edits)));
             }
-            let lines = text::LineIndex::new(&text);
-            let mut cursor = lines.cursor(&text);
-            let edits = edits.into_iter().map(|(start, end, text)| TextEdit { range: cursor.range(start, end), text });
-            out.push((self.native_path(ws, path), edits.collect()));
         }
         Ok(out)
+    }
+
+    /// What the manifests of the workspace write again once the file `path` is `to`: the paths that name it.
+    fn manifests_naming(&self, ws: usize, path: &str, to: &str) -> FileEdits {
+        let workspace = &self.workspaces[ws];
+        let mut out = Vec::new();
+        for manifest in workspace.resources().map(project::Resource::manifest_path) {
+            let Some(text) = workspace.text(&manifest) else { continue };
+            let edits = manifest::paths::followed(workspace, &manifest, &Source::new(text), path, to);
+            if !edits.is_empty() {
+                out.push((self.native_path(ws, &manifest), placed(text, edits)));
+            }
+        }
+        out
     }
 
     /// The edits that give the global or the member `key` stands for its new name, in the document and in
@@ -763,7 +773,8 @@ impl DevKit {
     }
 
     /// The Lua file `path` renamed in its folder or moved to another one of its project, with the `require`
-    /// calls of the other files that load it: what is asked for, then the operation and the edits.
+    /// calls of the other files that load it and the manifests that name it: what is asked for, then the
+    /// operation and the edits.
     fn file_moved(&mut self, path: &str, to_folder: bool) -> Result<(String, FileEdits), String> {
         let i = self.workspace_for(path);
         let ws = &self.workspaces[i];
@@ -797,7 +808,8 @@ impl DevKit {
             true => refactor::files::moved(ws, (from, src), &loaders, path, &to),
             false => refactor::files::renamed(ws, (from, src), &loaders, path, text::file_name(&to)),
         };
-        let edits = self.in_files_writing(i, refactor::files::searched_word(path), path, rewrite)?;
+        let mut edits = self.in_files_writing(i, refactor::files::searched_word(path), path, rewrite)?;
+        edits.extend(self.manifests_naming(i, path, &to));
         Ok((to, edits))
     }
 
@@ -907,6 +919,13 @@ fn read_text(path: &str) -> Option<String> {
         Disk::Text(text) => Some(text),
         Disk::Missing | Disk::Unreadable => None,
     }
+}
+
+/// The edits of a text, sorted, as the IDE takes them: by line and column.
+fn placed(text: &str, edits: Vec<(usize, usize, String)>) -> Vec<TextEdit> {
+    let lines = text::LineIndex::new(text);
+    let mut cursor = lines.cursor(text);
+    edits.into_iter().map(|(start, end, text)| TextEdit { range: cursor.range(start, end), text }).collect()
 }
 
 /// The sizes of files of the project `root` as the IDE tells them, for files a workspace only lists: one call
@@ -2263,6 +2282,49 @@ mod tests {
         host.answer_next_prompt(Some(&["../outside"]));
         assert!(matches!(kit.resolve_file_action(&utils, actions[1].clone()), Err(Error::Cancelled)));
         assert!(matches!(kit.resolve_file_action(&utils, actions[0].clone()), Err(Error::Cancelled)), "dismissed");
+    }
+
+    #[test]
+    fn a_file_renamed_or_moved_is_followed_by_the_manifests_that_name_it() {
+        let own =
+            "fx_version 'cerulean'\ngame 'gta5'\nclient_script 'client/utils.lua'\nclient_script 'client/*.lua'\n";
+        let user = "fx_version 'cerulean'\ngame 'gta5'\nshared_script '@pack/client/utils.lua'\n";
+        let host = openidea_plugin::mock::MockHost::install();
+        host.add_file("pack/fxmanifest.lua", own);
+        host.add_file("pack/client/utils.lua", "return {}\n");
+        host.add_file("user/fxmanifest.lua", user);
+        let mut kit = shop_resource(&host);
+        host.on_search(|_, _| Ok(openidea_plugin::TextSearch { matches: Vec::new(), limit_hit: false }));
+        let utils = lua("/project/pack/client/utils.lua", 1, "return {}\n");
+        let actions = kit.file_actions(&utils, Range::new(Position::new(0, 0), Position::new(0, 0)));
+        let written = |action: &FileAction| -> Vec<(String, String)> {
+            let after = |(path, edits): &(String, Vec<TextEdit>)| {
+                let before = if path.starts_with("/project/pack/") { own } else { user };
+                (path.clone(), applied(before, edits))
+            };
+            action.edits.iter().map(after).collect()
+        };
+
+        host.answer_next_prompt(Some(&["helpers"]));
+        let renamed = kit.resolve_file_action(&utils, actions[0].clone()).expect("the rename");
+        assert_eq!(
+            written(&renamed),
+            [
+                ("/project/pack/fxmanifest.lua".to_owned(), own.replace("client/utils.lua", "client/helpers.lua")),
+                ("/project/user/fxmanifest.lua".to_owned(), user.replace("utils.lua", "helpers.lua")),
+            ],
+            "the glob is left as it is"
+        );
+
+        host.answer_next_prompt(Some(&["pack/shared"]));
+        let moved = kit.resolve_file_action(&utils, actions[1].clone()).expect("the move");
+        assert_eq!(
+            written(&moved),
+            [
+                ("/project/pack/fxmanifest.lua".to_owned(), own.replace("client/utils.lua", "shared/utils.lua")),
+                ("/project/user/fxmanifest.lua".to_owned(), user.replace("client/utils.lua", "shared/utils.lua")),
+            ]
+        );
     }
 
     #[test]

@@ -5,6 +5,7 @@ pub mod convert;
 pub mod edits;
 pub mod files;
 pub mod generate;
+pub mod paths;
 mod snippets;
 pub mod view;
 

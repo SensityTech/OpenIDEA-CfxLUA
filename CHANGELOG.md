@@ -166,7 +166,9 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   file and its requires…** and **Move file and its requires…**. The file is renamed, or moved to a folder of
   the project, and each `require` of another file that loaded it is rewritten in the same change: the last part
   of its path for a rename, the path from the root it was written from (the resource, the folder of the file
-  that asks, or the project) for a move, its quotes kept. A file renamed from the project tree is not followed:
+  that asks, or the project) for a move, its quotes kept. A manifest that names the file follows too, as in the
+  JetBrains plugin: `client_script 'client/utils.lua'` takes the new name or the new path, `@resource/` kept,
+  and a glob such as `client/*.lua` stays as it is. A file renamed from the project tree is not followed:
   OpenIDEA does not tell a plugin of it.
 - **Hover on magic values, hash literals, events and state bag keys**, as in the JetBrains plugin. A number a native
   takes as a control, a blip, a marker… shows what it stands for; a hash literal shows its signed, unsigned and
