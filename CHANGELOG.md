@@ -7,25 +7,59 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
 
 ### Added
 
+#### Colours, structure and syntax
+
 - **Semantic colours without lua-language-server.** The plugin colours the names of a Lua file itself, the way the
   JetBrains plugin does: parameters, locals read from a nested function (underlined), globals, functions and methods
   (in italics when called through a dot), fields, `self`, hash literals, and natives, the Cfx runtime API and the Lua
   standard library as library names. Where lua-language-server colours the same name, the plugin's colour is shown.
+
+  ![A client script whose parameters, fields, methods, natives and hash literal each have their colour](assets/screenshots/semantic-colours.png)
+
 - **Documentation comments are coloured**, the way the JetBrains plugin colours them: the tag names (`@param`,
   `@class`, `@return`…), the types, the names of classes, aliases, fields and parameters, `fun` and `vararg`. EmmyDoc
   and the LuaCATS annotations of lua-language-server are both read.
+
+  ![Documentation comments with their tags, names and types coloured](assets/screenshots/doc-comment-colours.png)
+
 - **Syntax errors of CfxLua itself.** A missing `end`, an unexpected symbol, a missing expression, a statement that
   is only an expression or a method name without its arguments are reported by the plugin's own parser, which knows
   the CfxLua syntax (compound assignments, safe navigation, hash literals, set constructors, `in` unpacking, C
   comments).
+
+  ![The syntax of CfxLua read without a complaint, and three statements the parser refuses, each with its message](assets/screenshots/syntax-errors.gif)
+
 - **Folding, structure and occurrences from the plugin**, for a project without lua-language-server: blocks, tables,
   long comments, long strings and `--region` fold; the structure view lists functions, methods, variables and table
   fields, each under what is written around it (a method declared after its table is listed as `Table:method()`);
   the caret on a name highlights its uses in the file (written or read), on `return` the exits of the function, on
   `break` the ends of its loop.
-- **A slow editor call is named in the IDE log.** OpenIDEA restarts a plugin whose editor call runs for 500 ms and
-  does not say which call it was: the plugin now writes `<call> took <n> ms on <size> KB` when one of its own takes
-  more than 250 ms.
+
+  ![The Structure view of a file next to its code, with a function and a long comment folded](assets/screenshots/structure-folding.png)
+
+  ![The uses of a variable highlighted, then the exits of a function](assets/screenshots/occurrences.gif)
+
+- **Extend Selection knows CfxLua.** The selection grows from the word at the caret to what a string holds,
+  then to each expression, statement (with its documentation comment) and block around it; inside a
+  documentation comment it grows through the type, the tag and the comment.
+
+  ![The selection growing from a field to the call, the statement and the block around it](assets/screenshots/extend-selection.gif)
+
+- **Strings of another language.** A `---@language JSON` comment above a statement, or above a field of a
+  table, tells OpenIDEA that the strings of that statement are JSON (or SQL, HTML, JavaScript…). OpenIDEA 0.1.40
+  reads them as such, and offers the language server of that language for them, but still draws them in the
+  colour of a Lua string.
+
+- **Gutter markers of classes and calls.** A method that overrides one of a parent class, or that a subclass
+  overrides, has a marker that leads there; a `---@class` shows whether it has subclasses; a recursive call and
+  a call that is returned (a tail call) are marked. Each kind has a setting.
+
+  ![Gutter markers on a recursive call, a class, a method that overrides another and a tail call](assets/screenshots/gutter-markers.png)
+
+- Side icons for `client_*.lua`, `*_client.lua`, `*_cl.lua` and their server and shared equivalents.
+
+#### Completion
+
 - **Completion of the members of a table, a class or an object, without lua-language-server.** After a `.` or a
   `:` the plugin lists what the expression holds, from its own type engine (a port of the JetBrains plugin's): the
   fields of a table and what is assigned to it in any file of the project, the fields and methods of an annotated
@@ -33,25 +67,57 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   read from its body), `self`, the values of a generic function, the file a `require` loads. A function shows its
   parameters and what it returns, a field its type. After a colon only what can take the object is listed; a
   `private` member is listed inside its class only.
+
+  ![The fields and methods of a class listed after a dot, then a method completed after a colon](assets/screenshots/completion-members.gif)
+
 - **Completion of names, without lua-language-server.** While a name is typed the plugin lists the locals,
   parameters and loop variables in sight with their type, the globals the project declares (by their start or by
-  the starts of their words: `gsc` finds `GetShopCount`), the keywords, and in a method the methods of its object
-  as `self:name`. `function` typed where a value is expected inserts `function() end`. Locals come first, then
+  the starts of their words: `GSC` finds `GetShopCount`; OpenIDEA keeps the case of the first letter typed, as
+  its **Match case** setting says), the keywords, and in a method the methods of its object as `self:name`. `function` typed where a value is expected inserts `function() end`. Locals come first, then
   the globals of the project, the natives and the runtime API, the keywords, and last the words of the file. A
   name whose first letters read as a keyword is still completed: `in` lists `index`, `do` lists `door`.
+
+  ![The locals in sight listed with their types, then a global found by the starts of its words](assets/screenshots/completion-names.gif)
+
 - **Completion of what a place asks for.** Where a typed annotation expects it, the plugin offers the strings of
   a literal type (`'top'|'bottom'`, an alias, `---|` value lines), inside a string or with their quotes; the
   members of an expected `---@enum` (`Mode.PRESS`) and the keys of an `---@enum (key)`; and in a table, the
   fields of the class it is expected to be (`lib.notify({ ti` offers `title = `), without those already set.
+
+  ![The fields of the expected class offered in a table, then the strings its field accepts](assets/screenshots/completion-expected.gif)
+
 - **Completion of the methods to define again.** After `function Shop:` the methods of the classes `Shop`
   inherits from, which it does not define yet, are offered with their parameters and their `end`.
+
+  ![The methods of the parent classes offered after function Van:, one written with its parameter and its end](assets/screenshots/completion-override.gif)
+
 - **Completion inside documentation comments**: the tags after `---@`, the parameters of the documented function
   after `@param`, the classes, aliases and built-in types where a type is written, `public` / `protected` and
   the fields of the class after `@field`, the members after `@see Class#`.
+
+  ![The tags offered after ---@, then the parameters of the function, then the types](assets/screenshots/completion-doc.gif)
+
 - **Completion of `require` paths and of string arguments.** Inside `require('...')` the Lua files of the
   resource are offered as the names they are required by (`modules.cart.items`). Inside any other string
   argument, the strings the project gives to a function of the same name at the same position are offered,
   marked "History".
+
+  ![The Lua files of the resource offered inside a require](assets/screenshots/completion-require.png)
+
+- **Postfix templates.** After an expression and a dot, completion offers the templates of the JetBrains plugin:
+  `count.if` becomes `if count then ... end`, and likewise `if_not`, `if_nil`, `if_not_nil`, `for`, `for_i`,
+  `for_p`, `return`, `print`, `increase`, `decrease` and `var` for an expression alone on its line; `par`,
+  `tostring` and `tonumber` wrap an expression wherever it stands.
+
+  ![The postfix templates listed after an expression and a dot, if_not turned into its statement](assets/screenshots/postfix-templates.gif)
+
+- **Lua live templates.** `func`, `lfunc`, `for`, `fori`, `forp`, `if`, `elseif`, `ifelse` and `closure` expand
+  into their statement, with tab stops; they are listed under Settings › Editor › Live Templates.
+
+  ![The live template fori expanded into its loop](assets/screenshots/live-templates.gif)
+
+#### Documentation and navigation
+
 - **Documentation on hover, without lua-language-server.** Hovering a name shows how it is declared and what its
   comment says, from the plugin's own type engine: a local with its type, a parameter with its `@param`, a
   function or a method with its parameters and what it returns (`@return`, or read from its body), a field with
@@ -59,9 +125,15 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   comment is shown as Markdown, then what its tags tell: parameters and their values, returned values, overloads,
   `@see`, `@deprecated`, `@since`. A class or an alias named in an annotation, and a parameter named by a
   `@param`, show the same. Where lua-language-server answers too, the plugin's text comes below its own.
+
+  ![The hover of a method: its signature, its comment, its parameters and what it returns](assets/screenshots/hover.png)
+
 - **Parameter info, without lua-language-server.** Inside the parentheses of a call (after `(` or `,`, or with
   Parameter Info) the parameters of the called function are shown, the one being typed in bold: each signature of
   the function, its `---@overload`s included, with the object first when a method is called with a dot.
+
+  ![The parameters of a call, the one the caret is in in bold, and the overload of the function below](assets/screenshots/parameter-info.png)
+
 - **Go to declaration from the type engine.** Go to Declaration on a name leads to the local, the parameter or the
   global it stands for, in any file of the project; on a field, to the member of its class (the `---@field`, the
   method or the assignment); on `self`, to what the method is declared on; on a class or an alias named in an
@@ -72,72 +144,31 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   function the plugin knows, the name of the parameter is written: `open(door: 2, fast: true)`. Three more hints
   can be turned on in the settings: the types of local variables, the types of parameters, and what functions
   return.
+
+  ![The names of parameters written before arguments, and the types of parameters, of locals and of what a function returns](assets/screenshots/inlay-hints.png)
+
 - **The Lua standard library and the Cfx runtime are known to the type engine.** `print`, `string.format`,
   `Citizen.Wait` or `vector3` have a hover (their documentation), parameter info and parameter hints, and what
   they return is typed. After `string.` or `('x'):` the string functions are listed, and the names of Lua itself
   (`print`, `pairs`, `math`…) are completed. A script only sees the runtime API of its side: a server script is
   not offered `SendNUIMessage`, a client script is not offered `GetPlayers`.
-- **Lua inspections, without lua-language-server.** The plugin reports, the way the JetBrains plugin does: a
-  local, a parameter, a loop variable or a local function that is never used (faded, with a fix that removes it
-  or renames it to `_`); a local that hides another local of the same name; `local a = nil`; a `for`, a `while`
-  or a `do` with an empty body; the statements written after a `return`; a table indexed at `0`. Each has a
-  setting and a quick fix where one makes sense. A `---@suppress <id>` comment above a statement turns an
-  inspection off in it (`---@suppress RemoveUnusedLocal`), for the plugin's CfxLua checks too, and a `---@meta`
-  file is not told about its unused names.
-- **Inspections that read the whole project.** Once a project has been read, the plugin also reports a
-  `---@class` that is declared twice, with the file of the other declaration; the use of a function, a field or
-  a class that a `---@deprecated` comment marks, struck through; a type written in a comment that no class, no
-  alias and no generic parameter declares; and a `---@param` that names no parameter of the function it
-  documents, with a fix that removes it. Each has a setting.
-- **Type safety inspections, off by default.** Four inspections of the JetBrains plugin can be turned on in the
-  settings: arguments that do not match the `---@param` of the function they are given to (type, missing or
-  extra argument, a method its class does not declare), `return` values that do not match `---@return`, a value
-  assigned to a variable or a field of another type, and a name that nothing declares. On code that is not
-  annotated they report a lot, which is why they wait for a setting.
-- **Global name can be local, off by default.** The inspection of the JetBrains plugin, turned on in the settings:
-  the first assignment of a global that no other file of the project reads, assigns or defines (`_G.name`
-  included) is reported, with the fix **Append "local"**. A name of a library (a native, the Cfx runtime, the Lua
-  standard library) and the globals of a `---@module` file are left alone. It waits for the project to be read.
-- **Lua intentions.** Where the caret stands, the plugin offers the rewrites of the JetBrains plugin: add or
-  remove the parentheses of a call that takes a single string or table; invert a boolean; replace an operation
-  between constants by its value (with the caret on its operator); add `---@param` for a parameter, `---@type`
-  for a local, `---@return` or a whole documentation comment for a function, each written with the type the
-  plugin infers; set the visibility of a method; keep a parameter of a method in a field (`self.name = name`).
-  On a selection, the statements it covers can be surrounded by a `--region` or a `--{{{` pair.
-- **Postfix templates.** After an expression and a dot, completion offers the templates of the JetBrains plugin:
-  `count.if` becomes `if count then ... end`, and likewise `if_not`, `if_nil`, `if_not_nil`, `for`, `for_i`,
-  `for_p`, `return`, `print`, `increase`, `decrease` and `var` for an expression alone on its line; `par`,
-  `tostring` and `tonumber` wrap an expression wherever it stands.
-- **Lua live templates.** `func`, `lfunc`, `for`, `fori`, `forp`, `if`, `elseif`, `ifelse` and `closure` expand
-  into their statement, with tab stops; they are listed under Settings › Editor › Live Templates.
-- **Extend Selection knows CfxLua.** The selection grows from the word at the caret to what a string holds,
-  then to each expression, statement (with its documentation comment) and block around it; inside a
-  documentation comment it grows through the type, the tag and the comment.
-- **Strings of another language.** A `---@language JSON` comment above a statement, or above a field of a
-  table, makes the strings of that statement JSON (or SQL, HTML, JavaScript…): OpenIDEA colours them as such.
-- **Gutter markers of classes and calls.** A method that overrides one of a parent class, or that a subclass
-  overrides, has a marker that leads there; a `---@class` shows whether it has subclasses; a recursive call and
-  a call that is returned (a tail call) are marked. Each kind has a setting.
-- **A Lua formatter, the one of the JetBrains plugin.** Once the plugin is chosen for `lua` in **Settings ›
-  Languages & Frameworks › Plugin Formatters**, Reformat Code (a file or a selection) and Format on save indent
-  blocks, tables and what continues a line, put statements and the bodies of blocks on their own lines, write the
-  spaces around operators, `=` and commas and inside the braces of a table, line up the parameters written on
-  several lines and the dots of a chained call, keep one blank line at most between two statements, and take out
-  the semicolons no statement needs. Only white space changes. The indent is the editor's; a line that continues another is
-  indented twice, as IntelliJ does, unless a setting gives its width. The other options of the JetBrains plugin
-  are settings with IntelliJ's defaults: keeping a block of one statement on one line, aligning arguments, the
-  `=` of consecutive assignments and of table fields, and each of the spaces. A semicolon that separates table
-  fields, or that keeps a statement starting with a parenthesis from being read as a call, stays. A file over
-  1 MiB is not formatted, and Reformat Code says so.
+
+  ![The functions of string listed after string., with the documentation of the selected one](assets/screenshots/standard-library.png)
+
 - **Natives have parameter info, hints, a hover, and type what they return.** A native shows its parameters while
   its arguments are typed and names them before literals; `GetEntityCoords(ped).` lists `x`, `y` and `z`; hovering
   a native shows its documentation: description, example, parameters, hash, side and game.
-- **The memory the plugin holds is written in the IDE log** when it has read a project
-  (`resources indexed (N MiB)`): OpenIDEA gives a plugin 256 MiB.
-- **Convert to fxmanifest.lua**, the quick fix of the JetBrains plugin on a legacy `__resource.lua`: it renames the
-  file, replaces `resource_manifest_version` with `fx_version 'cerulean'` and declares `game 'gta5'` when no game is
-  declared, in one action that one undo reverts. It is not offered when a `fxmanifest.lua` already stands beside the
-  file.
+
+  ![The hover of a native: its signature, description, example, parameters, side, game and hash](assets/screenshots/native-hover.png)
+
+- **Hover on magic values, hash literals, events and state bag keys**, as in the JetBrains plugin. A number a native
+  takes as a control, a blip, a marker… shows what it stands for; a hash literal shows its signed, unsigned and
+  hexadecimal values; an event name shows the page of the built-in event or, for an event of the project, who
+  triggers and who handles it; a state bag key shows its types and where it is set, watched and read. Such a page
+  is shown alone: the type engine does not add its own hover of the same name under it.
+
+  ![The hovers of a control, a hash literal, an event of the project and a state bag key](assets/screenshots/cfx-hovers.gif)
+
 - **Find Usages of classes, globals and table members, without lua-language-server.** OpenIDEA's Find Usages
   gathers across the project the uses of a class or an alias named in annotations, of a global variable or
   function, and of a member reached through names (`Config.Debug`, `Shop:open()`, a field of a table assigned to
@@ -146,16 +177,69 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   search. OpenIDEA keeps 200,000 names for a project: a project of more than 600 Lua files gives its classes and
   its globals, one of more than 1,200 its classes only, and Find Usages lists the occurrences of the word for the
   rest. Go to Declaration is unchanged.
+
+  ![Find Usages of a class, then of an event: the files and the lines that name them](assets/screenshots/find-usages.gif)
+
 - **Find Usages and Rename of events and state bag keys.** An event name written in a string to one of the
   runtime's event functions (`TriggerEvent`, `RegisterNetEvent`, `AddEventHandler`…) and a state bag key
   (`LocalPlayer.state.fuel`, `state:set('fuel', …)`, `AddStateBagChangeHandler('fuel', …)`) are found across the
   project by Find Usages, whatever the size of the project, and OpenIDEA's Rename renames them from a string,
   with its preview. A name that is computed, concatenated or given to a helper of the project is not listed.
+
+#### Inspections and intentions
+
+- **Lua inspections, without lua-language-server.** The plugin reports, the way the JetBrains plugin does: a
+  local, a parameter, a loop variable or a local function that is never used (faded, with a fix that removes it
+  or renames it to `_`); a local that hides another local of the same name; `local a = nil`; a `for`, a `while`
+  or a `do` with an empty body; the statements written after a `return`; a table indexed at `0`. Each has a
+  setting and a quick fix where one makes sense. A `---@suppress <id>` comment above a statement turns an
+  inspection off in it (`---@suppress RemoveUnusedLocal`), for the plugin's CfxLua checks too, and a `---@meta`
+  file is not told about its unused names.
+
+  ![An unused local faded and warnings underlined, with the messages of a shadowed local, an empty loop and an index 0](assets/screenshots/inspections.gif)
+
+- **Inspections that read the whole project.** Once a project has been read, the plugin also reports a
+  `---@class` that is declared twice, with the file of the other declaration; the use of a function, a field or
+  a class that a `---@deprecated` comment marks, struck through; a type written in a comment that no class, no
+  alias and no generic parameter declares; and a `---@param` that names no parameter of the function it
+  documents, with a fix that removes it. Each has a setting.
+
+  ![A class declared twice, a type nothing declares and a deprecated function, each with its message](assets/screenshots/inspections-project.gif)
+
+- **Type safety inspections, off by default.** Four inspections of the JetBrains plugin can be turned on in the
+  settings: arguments that do not match the `---@param` of the function they are given to (type, missing or
+  extra argument, a method its class does not declare), `return` values that do not match `---@return`, a value
+  assigned to a variable or a field of another type, and a name that nothing declares. On code that is not
+  annotated they report a lot, which is why they wait for a setting.
+
+  ![An argument of the wrong type, an undeclared name and a return value of the wrong type, each with its message](assets/screenshots/type-safety.gif)
+
+- **Global name can be local, off by default.** The inspection of the JetBrains plugin, turned on in the settings:
+  the first assignment of a global that no other file of the project reads, assigns or defines (`_G.name`
+  included) is reported, with the fix **Append "local"**. A name of a library (a native, the Cfx runtime, the Lua
+  standard library) and the globals of a `---@module` file are left alone. It waits for the project to be read.
+
+  ![A global only its file uses is reported, and its fix makes it local](assets/screenshots/global-can-be-local.gif)
+
+- **Lua intentions.** Where the caret stands, the plugin offers the rewrites of the JetBrains plugin: add or
+  remove the parentheses of a call that takes a single string or table; invert a boolean; replace an operation
+  between constants by its value (with the caret on its operator); add `---@param` for a parameter, `---@type`
+  for a local, `---@return` or a whole documentation comment for a function, each written with the type the
+  plugin infers; set the visibility of a method; keep a parameter of a method in a field (`self.name = name`).
+  On a selection, the statements it covers can be surrounded by a `--region` or a `--{{{` pair.
+
+  ![Alt+Enter on a function offers to write what it returns: the annotation comes with the type the plugin infers](assets/screenshots/intentions.gif)
+
+#### Refactoring and formatting
+
 - **Rename a local.** Alt+Enter on a local, a parameter, a loop variable, a local function or a label offers
   **Rename '…'**: it asks the new name and rewrites the declaration, every use, the `---@param` that documents a
   parameter and the `goto`s of a label. A keyword or a name that is not an identifier is asked again, with the
   reason. The warning on a local that hides another offers it as its **Rename** fix, as in the JetBrains plugin.
   (Without a language server, OpenIDEA's own Rename does not rename an identifier a plugin indexes.)
+
+  ![Alt+Enter on a local offers Rename, which asks the new name and rewrites every use](assets/screenshots/rename-local.gif)
+
 - **Rename a global or a member across the project.** Alt+Enter on a global variable or function, or on a member
   (`Config.Debug`, `Shop:open()`, `shop:open()` on a value of the class, a field of a table, a `---@field`),
   offers **Rename '…' in the project**. It asks the new name, finds the Lua files that write it with the IDE's
@@ -167,6 +251,9 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   (10,000), in more than 4 MB of files or in a file the plugin does not read, and when what a member stands for
   cannot be told in full: a value of unknown type, or more to read and infer than one rename may. A rename never
   leaves a part of the uses behind.
+
+  ![A method renamed from one of its calls: the call, the method of its class and the one that overrides it change together](assets/screenshots/rename-member.gif)
+
 - **Rename or move a Lua file with its `require`s.** On the first line of a Lua file, Alt+Enter offers **Rename
   file and its requires…** and **Move file and its requires…**. The file is renamed, or moved to a folder of
   the project, and each `require` of another file that loaded it is rewritten in the same change: the last part
@@ -175,21 +262,105 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   JetBrains plugin: `client_script 'client/utils.lua'` takes the new name or the new path, `@resource/` kept,
   and a glob such as `client/*.lua` stays as it is. A file renamed from the project tree is not followed:
   OpenIDEA does not tell a plugin of it.
-- **Hover on magic values, hash literals, events and state bag keys**, as in the JetBrains plugin. A number a native
-  takes as a control, a blip, a marker… shows what it stands for; a hash literal shows its signed, unsigned and
-  hexadecimal values; an event name shows the page of the built-in event or, for an event of the project, who
-  triggers and who handles it; a state bag key shows its types and where it is set, watched and read. Such a page
-  is shown alone: the type engine does not add its own hover of the same name under it.
+
+  ![A Lua file renamed from its first line: the require that loads it and the manifest that names it follow](assets/screenshots/rename-file.gif)
+
+- **Convert to fxmanifest.lua**, the quick fix of the JetBrains plugin on a legacy `__resource.lua`: it renames the
+  file, replaces `resource_manifest_version` with `fx_version 'cerulean'` and declares `game 'gta5'` when no game is
+  declared, in one action that one undo reverts. It is not offered when a `fxmanifest.lua` already stands beside the
+  file.
+
+  ![A legacy __resource.lua converted to fxmanifest.lua from its quick fix](assets/screenshots/convert-fxmanifest.gif)
+
+- **A Lua formatter, the one of the JetBrains plugin.** Once the plugin is chosen for `lua` in **Settings ›
+  Languages & Frameworks › Plugin Formatters**, Reformat Code (a file or a selection) and Format on save indent
+  blocks, tables and what continues a line, put statements and the bodies of blocks on their own lines, write the
+  spaces around operators, `=` and commas and inside the braces of a table, line up the parameters written on
+  several lines and the dots of a chained call, keep one blank line at most between two statements, and take out
+  the semicolons no statement needs. Only white space changes. The indent is the editor's; a line that continues another is
+  indented twice, as IntelliJ does, unless a setting gives its width. The other options of the JetBrains plugin
+  are settings with IntelliJ's defaults: keeping a block of one statement on one line, aligning arguments, the
+  `=` of consecutive assignments and of table fields, and each of the spaces. A semicolon that separates table
+  fields, or that keeps a statement starting with a parenthesis from being read as a call, stays. A file over
+  1 MiB is not formatted, and Reformat Code says so.
+
+  ![A file written without care, then the same file after Reformat Code](assets/screenshots/formatter.gif)
+
+#### Cfx.re
+
 - **Colour swatches.** A colour written as red, green and blue components in a call (`DrawRect`, `DrawMarker`,
   `SetParticleFxLoopedColour`…) has a swatch in the gutter, as in the JetBrains plugin. Picking another colour
   rewrites the components, as integers or as floats like the call writes them, and keeps what stands between them.
   A colour with a component that is not a number has no swatch. OpenIDEA's picker has no alpha: the alpha shows in
   the swatch and stays as it is written.
+
+  ![The colours written in SetTextColour and DrawRect, each with its swatch in the gutter](assets/screenshots/colour-swatches.png)
+
 - **The Escrow check weighs the resource**, as in the JetBrains plugin: the report of **CfxLua: Check Resource
   Before Escrow Upload** and of the **Escrow** tab gives the size of the files of the resource, and a resource of
   more than 1 GB is a blocker. Files that Git ignores are not counted: OpenIDEA does not list them for a plugin.
   A check weighs files for two seconds at most and says how many it had no time for; the **Escrow** tab weighs
   one resource at a time.
+
+  ![The Escrow report of a resource, with the size of its files](assets/screenshots/escrow-size.png)
+
+- Messages chosen by `and` / `or` (`action = bOpen and 'open' or 'close'`) link Lua and the NUI page both ways.
+
+#### In the IDE log
+
+- **A slow editor call is named in the IDE log.** OpenIDEA restarts a plugin whose editor call runs for 500 ms and
+  does not say which call it was: the plugin now writes `<call> took <n> ms on <size> KB` when one of its own takes
+  more than 250 ms.
+- **The memory the plugin holds is written in the IDE log** when it has read a project
+  (`resources indexed (N MiB)`): OpenIDEA gives a plugin 256 MiB.
+
+### Changed
+
+- **lua-language-server is no longer required.** The plugin answers by itself. Without a language server for Lua,
+  OpenIDEA 0.1.40 reports with its own parser what it cannot read, and that parser does not know CfxLua (`+=`, a
+  set constructor, a C comment): turn **Syntax errors** off in **Settings › Editor › Inspections**, the plugin
+  reports the syntax errors of CfxLua itself. With lua-language-server installed, OpenIDEA lists its completion
+  entries and its problems next to the plugin's without merging them; the [README](README.md#installation) says
+  how to keep one or both.
+- **Magic values and zones are inlay hints**, as in the JetBrains plugin: the name of a control, a hash, a blip or a
+  marker is written after its number, and the zone after its coordinates, where a hint-level problem used to
+  underline the value. Hovering the hint says what the value is. They follow the `values.*` settings and the zones
+  file as before, and the editor's own **Inlay Hints** settings, as hints of the kind *Other*.
+
+  ![The name of a blip sprite, a blip colour, a hash and a control written after their numbers](assets/screenshots/value-hints.png)
+
+- **OpenIDEA 0.1.40 or newer is required.** The plugin is built against plugin API 1.4 (it was 1.0); its features are
+  unchanged.
+- **One CfxLua parser reads every file**, the one of the JetBrains plugin ported to Rust: events, state bags, NUI,
+  performance, coordinates, magic values and syntax checks used to read Lua through three partial parsers that could
+  disagree. What they report is unchanged; code being typed is read the same way by all of them.
+- **Indexing a project takes about a tenth less time** (measured on 5,000 files): what the features read from a Lua
+  file is built once and released with the file, instead of being looked up again by each of them.
+- **The component is compiled for speed** instead of size: through OpenIDEA it answers about 30% faster and reads a
+  5,000-file project in 9 s instead of 11.5 s, for a package a tenth bigger (2.6 MB).
+- **The plugin holds less than half the memory on big projects.** OpenIDEA gives a plugin 256 MiB, and a 5,500-file
+  project took 209 of them once it was read: it now takes about 90. The text of a file is released once it is
+  indexed and read again when something needs it, and what the events, performance, magic values, coordinates and
+  NUI features and the type engine keep of each file is packed, each name kept once instead of once per use. What
+  they report is unchanged.
+- The **lua-language-server config (.luarc.json)** template ignores `.cfxlua` as project code (it stays a library)
+  and lets completion list up to 1,000 items: lua-language-server stops at 100, which could hide the native you type.
+  In an existing `.luarc.json`, add `".cfxlua"` to `workspace.ignoreDir` and `"completion.maxSuggestCount": 1000`.
+- **CfxLua: Generate lua-language-server Definitions** warns when no `.luarc.json` at the root of the project loads
+  the file's folder: lua-language-server would then see the natives only while the file is open. The `.luarc.json`
+  is read in every form lua-language-server accepts: `Lua.`-prefixed or nested keys, comments and trailing commas,
+  `.luarc.jsonc`, `${workspaceFolder}`, a nested folder or the file itself.
+- The **Escrow** tab checks the resource you pick, not the first one listed. While the project is still being read,
+  a report says which files are not checked yet.
+- A loop that runs every frame gets the regular gutter icon: the green Run triangle read as a button that runs it.
+- Project events in completion have the event icon, as built-in events do.
+- **CfxLua: Show Documentation** separates the signature from the description with a dash: the notification shows
+  line breaks as spaces.
+- **Open Online Documentation opens the browser.** In the CfxLua tool window, the button of a native and the web
+  links of a page open in the default browser. They used to show the address with a **Copy** button, which is still
+  what an address the IDE does not open gets (`mailto:`).
+- The tool window tabs go onto a second line when the window is narrow, instead of being cut off; the Asset Escrow
+  badge is blue instead of red, which read as an error.
 
 ### Fixed
 
@@ -242,50 +413,6 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   stack walking it. A file with a statement chained or nested more than 500 levels deep is now left unanalysed: one
   warning on its first line says so, and **Reformat Code** answers that it does not format the file. Code written
   by hand stays far below: the deepest statement of a 3,500-file project has 130 levels.
-
-### Changed
-
-- **Magic values and zones are inlay hints**, as in the JetBrains plugin: the name of a control, a hash, a blip or a
-  marker is written after its number, and the zone after its coordinates, where a hint-level problem used to
-  underline the value. Hovering the hint says what the value is. They follow the `values.*` settings and the zones
-  file as before, and the editor's own **Inlay Hints** settings, as hints of the kind *Other*.
-- **OpenIDEA 0.1.40 or newer is required.** The plugin is built against plugin API 1.4 (it was 1.0); its features are
-  unchanged.
-- **One CfxLua parser reads every file**, the one of the JetBrains plugin ported to Rust: events, state bags, NUI,
-  performance, coordinates, magic values and syntax checks used to read Lua through three partial parsers that could
-  disagree. What they report is unchanged; code being typed is read the same way by all of them.
-- **Indexing a project takes about a tenth less time** (measured on 5,000 files): what the features read from a Lua
-  file is built once and released with the file, instead of being looked up again by each of them.
-- **The component is compiled for speed** instead of size: through OpenIDEA it answers about 30% faster and reads a
-  5,000-file project in 9 s instead of 11.5 s, for a package a tenth bigger (2.6 MB).
-- **The plugin holds less than half the memory on big projects.** OpenIDEA gives a plugin 256 MiB, and a 5,500-file
-  project took 209 of them once it was read: it now takes about 90. The text of a file is released once it is
-  indexed and read again when something needs it, and what the events, performance, magic values, coordinates and
-  NUI features and the type engine keep of each file is packed, each name kept once instead of once per use. What
-  they report is unchanged.
-- The **lua-language-server config (.luarc.json)** template ignores `.cfxlua` as project code (it stays a library)
-  and lets completion list up to 1,000 items: lua-language-server stops at 100, which could hide the native you type.
-  In an existing `.luarc.json`, add `".cfxlua"` to `workspace.ignoreDir` and `"completion.maxSuggestCount": 1000`.
-- **CfxLua: Generate lua-language-server Definitions** warns when no `.luarc.json` at the root of the project loads
-  the file's folder: lua-language-server would then see the natives only while the file is open. The `.luarc.json`
-  is read in every form lua-language-server accepts: `Lua.`-prefixed or nested keys, comments and trailing commas,
-  `.luarc.jsonc`, `${workspaceFolder}`, a nested folder or the file itself.
-- The **Escrow** tab checks the resource you pick, not the first one listed. While the project is still being read,
-  a report says which files are not checked yet.
-- A loop that runs every frame gets the regular gutter icon: the green Run triangle read as a button that runs it.
-- Project events in completion have the event icon, as built-in events do.
-- **CfxLua: Show Documentation** separates the signature from the description with a dash: the notification shows
-  line breaks as spaces.
-- **Open Online Documentation opens the browser.** In the CfxLua tool window, the button of a native and the web
-  links of a page open in the default browser. They used to show the address with a **Copy** button, which is still
-  what an address the IDE does not open gets (`mailto:`).
-- The tool window tabs go onto a second line when the window is narrow, instead of being cut off; the Asset Escrow
-  badge is blue instead of red, which read as an error.
-
-### Added
-
-- Messages chosen by `and` / `or` (`action = bOpen and 'open' or 'close'`) link Lua and the NUI page both ways.
-- Side icons for `client_*.lua`, `*_client.lua`, `*_cl.lua` and their server and shared equivalents.
 
 ## [0.1.3] - 2026-11-04
 
