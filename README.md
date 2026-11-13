@@ -132,7 +132,8 @@ What the Cfx.re runtime accepts but reads differently, and what people type from
 
 The numbers FiveM code is full of are named: `IsControlJustPressed(0, 38)` → `INPUT_PICKUP (E / LB)`,
 `-1216765807` → `` `adder` ``, blip sprites and colours, marker types, HUD colours, explosion types, animation flags.
-Values are completed with their names where a native expects them.
+Values are completed with their names where a native expects them. A colour written as red, green and blue components
+in a drawing call has a swatch in the gutter: picking another colour rewrites the components.
 
 ### Coordinates and performance
 

@@ -37,7 +37,8 @@ use openidea_plugin::file_actions::{FileAction, FileActions, FileOperation};
 use openidea_plugin::hover::{Hover, HoverProvider};
 use openidea_plugin::inlay_hints::{InlayHint, InlayHints, InlayKind};
 use openidea_plugin::language_features::{
-    DocumentSymbol, FoldRange, FormatOptions, LanguageFeatures, Parameter, ParameterLabel, Signature, SignatureHelp,
+    ColorInfo, DocumentSymbol, FoldRange, FormatOptions, LanguageFeatures, Parameter, ParameterLabel, Signature,
+    SignatureHelp,
 };
 use openidea_plugin::providers::{CodeAction, CompletionItem, CompletionKind, Document, LineMarker, Providers};
 use openidea_plugin::semantic_tokens::{SemanticToken, SemanticTokens, TokenKind, TokenModifier};
@@ -1216,6 +1217,35 @@ impl LanguageFeatures for DevKit {
         folds.unwrap_or_default()
     }
 
+    // Asked after each edit, with the injections: the document is not indexed for it.
+    fn colors(&mut self, d: &Document) -> Vec<ColorInfo> {
+        let _timed = Timed::start("colours", d);
+        let found = self.prepare(d).and_then(|ws| {
+            self.with_ctx(ws, |cx, features| {
+                let colours = features.iter().flat_map(|f| f.colours(cx));
+                colours
+                    .map(|colour| {
+                        let [red, green, blue, alpha] = colour.rgba;
+                        ColorInfo { range: cx.doc.range(colour.start, colour.end), red, green, blue, alpha }
+                    })
+                    .collect::<Vec<_>>()
+            })
+        });
+        found.unwrap_or_default()
+    }
+
+    fn color_presentations(&mut self, d: &Document, color: ColorInfo) -> Vec<String> {
+        let _timed = Timed::start("colour text", d);
+        let written = self.prepare(d).and_then(|ws| {
+            self.with_ctx(ws, |cx, features| {
+                let (start, end) = (cx.doc.offset(color.range.start), cx.doc.offset(color.range.end));
+                let rgba = [color.red, color.green, color.blue, color.alpha];
+                features.iter().find_map(|f| f.colour_text(cx, start, end, rgba))
+            })
+        });
+        written.flatten().into_iter().collect()
+    }
+
     fn document_symbols(&mut self, d: &Document) -> Vec<DocumentSymbol> {
         let _timed = Timed::start("structure", d);
         let symbols = self.prepare_indexed(d).and_then(|ws| {
@@ -1846,6 +1876,27 @@ mod tests {
     }
 
     #[test]
+    fn a_colour_written_in_a_call_has_a_swatch_and_is_rewritten_when_another_is_picked() {
+        let host = openidea_plugin::mock::MockHost::install();
+        let mut kit = shop_resource(&host);
+        let typed = lua(SHOP_CLIENT, 2, "DrawRect(0.5, 0.5, 0.1, 0.1,\n    255, 128, 0, 200)\n");
+        let found = kit.colors(&typed);
+        let [colour] = found.as_slice() else { panic!("one colour, not {}", found.len()) };
+        assert_eq!(colour.range, Range::new(Position::new(1, 4), Position::new(1, 20)), "from the red to the alpha");
+        let channel = |value: u8| f32::from(value) / 255.0;
+        assert_eq!(
+            (colour.red, colour.green, colour.blue, colour.alpha),
+            (channel(255), channel(128), channel(0), channel(200))
+        );
+        let picked = ColorInfo { red: channel(10), green: channel(20), blue: channel(30), ..colour.clone() };
+        assert_eq!(kit.color_presentations(&typed, picked), ["10, 20, 30, 200"]);
+        let elsewhere = ColorInfo { range: Range::new(Position::new(0, 0), Position::new(0, 8)), ..colour.clone() };
+        assert!(kit.color_presentations(&typed, elsewhere).is_empty(), "only a range the plugin gave is rewritten");
+        let script = "---@meta\nDrawRect(0.5, 0.5, 0.1, 0.1, 255, 128, 0, 200)\n";
+        assert!(kit.colors(&lua(SHOP_CLIENT, 3, script)).is_empty(), "a declaration file is not read");
+    }
+
+    #[test]
     fn an_intention_is_offered_where_the_caret_stands() {
         let host = openidea_plugin::mock::MockHost::install();
         let mut kit = shop_resource(&host);
@@ -2089,6 +2140,7 @@ mod tests {
             timed("semantic tokens", &mut |kit| kit.semantic_tokens(&doc).len());
             timed("folding", &mut |kit| kit.folding(&doc).len());
             timed("structure", &mut |kit| kit.document_symbols(&doc).len());
+            timed("colours", &mut |kit| kit.colors(&doc).len());
         }
     }
 

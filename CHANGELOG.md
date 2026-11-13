@@ -134,6 +134,11 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   file, replaces `resource_manifest_version` with `fx_version 'cerulean'` and declares `game 'gta5'` when no game is
   declared, in one action that one undo reverts. It is not offered when a `fxmanifest.lua` already stands beside the
   file.
+- **Colour swatches.** A colour written as red, green and blue components in a call (`DrawRect`, `DrawMarker`,
+  `SetParticleFxLoopedColour`…) has a swatch in the gutter, as in the JetBrains plugin. Picking another colour
+  rewrites the components, as integers or as floats like the call writes them, and keeps what stands between them.
+  A colour with a component that is not a number has no swatch. OpenIDEA's picker has no alpha: the alpha shows in
+  the swatch and stays as it is written.
 
 ### Fixed
 

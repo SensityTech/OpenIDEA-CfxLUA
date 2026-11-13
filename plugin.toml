@@ -36,6 +36,7 @@ kinds = [
     "document-highlights",
     "selection-ranges",
     "injections",
+    "colors",
 ]
 languages = ["lua"]
 

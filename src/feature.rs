@@ -232,6 +232,16 @@ pub trait Feature {
         Vec::new()
     }
 
+    /// The colours written in the document, each from its first component to the last one that is rewritten.
+    fn colours(&self, _cx: &Ctx) -> Vec<crate::values::colours::Colour> {
+        Vec::new()
+    }
+
+    /// What is written in place of the colour of `_start.._end` once `_rgba` is chosen for it.
+    fn colour_text(&self, _cx: &Ctx, _start: usize, _end: usize, _rgba: [f32; 4]) -> Option<String> {
+        None
+    }
+
     /// The parts of the document that are text of another language.
     fn injections(&self, _cx: &Ctx) -> Vec<crate::editor::injection::Injected> {
         Vec::new()

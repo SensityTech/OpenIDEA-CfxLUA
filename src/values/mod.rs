@@ -1,3 +1,4 @@
+pub mod colours;
 pub mod decode;
 pub mod sites;
 pub mod tables;
@@ -216,7 +217,7 @@ pub struct ValuesFeature {
 }
 
 impl ValuesFeature {
-    fn applies(cx: &Ctx) -> bool {
+    pub(crate) fn applies(cx: &Ctx) -> bool {
         cx.settings.enabled() && cx.doc.is_lua()
     }
 
@@ -258,11 +259,11 @@ impl ValuesFeature {
             .map(|(n, c)| HashName { name: n.to_owned(), origin: Origin::Bundled(c.to_owned()) })
     }
 
-    fn decode(&self, site: &Site) -> Option<Decoded> {
+    pub(crate) fn decode(&self, site: &Site) -> Option<Decoded> {
         decode::decode(site.kind, site.value, site.game, &|h| self.hash_name(h))
     }
 
-    fn site_near<'a>(scope: &Scope<'a>, at: usize) -> Option<Site<'a>> {
+    pub(crate) fn site_near<'a>(scope: &Scope<'a>, at: usize) -> Option<Site<'a>> {
         let src = scope.src();
         [Some(at), at.checked_sub(1)].into_iter().flatten().filter_map(|a| src.tok_at(a)).find_map(|tok| {
             match scope.ast.owner_of(tok) {
@@ -296,6 +297,14 @@ impl Feature for ValuesFeature {
 
     fn forget_file(&self, path: &str) {
         self.hashes.borrow_mut().remove(path);
+    }
+
+    fn colours(&self, cx: &Ctx) -> Vec<colours::Colour> {
+        if Self::applies(cx) { colours::colours(cx) } else { Vec::new() }
+    }
+
+    fn colour_text(&self, cx: &Ctx, start: usize, end: usize, rgba: [f32; 4]) -> Option<String> {
+        Self::applies(cx).then(|| colours::presentation(cx, start, end, rgba)).flatten()
     }
 
     fn problems(&self, cx: &Ctx) -> Vec<Problem> {
