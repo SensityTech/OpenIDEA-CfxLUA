@@ -1,9 +1,16 @@
 # Changelog
 
 All notable changes are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
-and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenIDEA's plugin API is a preview).
+and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+
+## [1.0.0] - 2026-11-13
+
+First stable release. The Lua support of the JetBrains plugin this project comes from is now in the plugin itself:
+one CfxLua parser and a type engine give completion, documentation, navigation, inspections, intentions,
+refactorings and a formatter **without lua-language-server**, next to what the plugin already knew of Cfx.re.
+lua-language-server is no longer a requirement.
 
 ### Added
 
@@ -512,7 +519,8 @@ First preview release.
 - **Asset Escrow**: per-file encryption status, checks and a pre-upload checklist.
 - **The CfxLua tool window**: natives browser, runtime API, events, manifest directives, syntax features and guides.
 
-[Unreleased]: https://github.com/SensityTech/OpenIDEA-CfxLUA/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/SensityTech/OpenIDEA-CfxLUA/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/SensityTech/OpenIDEA-CfxLUA/releases/tag/v1.0.0
 [0.1.3]: https://github.com/SensityTech/OpenIDEA-CfxLUA/releases/tag/v0.1.3
 [0.1.2]: https://github.com/SensityTech/OpenIDEA-CfxLUA/releases/tag/v0.1.2
 [0.1.1]: https://github.com/SensityTech/OpenIDEA-CfxLUA/releases/tag/v0.1.1

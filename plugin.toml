@@ -1,11 +1,24 @@
 id = "sensity.cfxlua"
 name = "OpenIDEA-CfxLUA"
-version = "0.1.3"
-description = "FiveM and RedM (CfxLua) support: natives of the right game and side, client/server awareness, the Cfx runtime API, state bags, events, fxmanifest, NUI, magic values, CfxLua syntax checks, Asset Escrow and built-in documentation."
+version = "1.0.0"
+description = "FiveM and RedM (CfxLua) support: a Lua engine of its own (completion, documentation, inspections, refactorings, a formatter), natives of the right game and side, client/server awareness, the Cfx runtime API, state bags, events, fxmanifest, NUI, magic values, Asset Escrow and built-in documentation."
 authors = ["SensityTech"]
 homepage = "https://github.com/SensityTech/OpenIDEA-CfxLUA"
 license = "Apache-2.0"
-change-notes = "0.1.3 — big projects no longer crash the plugin at start: they are indexed in slices while you work."
+change-notes = """
+1.0.0 — first stable release.
+
+The Lua support of the JetBrains plugin this project comes from is now in the plugin itself, without lua-language-server:
+- completion of members, names, expected values, methods to define again, require paths and documentation tags; postfix and live templates
+- documentation on hover, parameter info, inlay hints, Go to Declaration, Find Usages
+- inspections with their quick fixes, type safety once turned on, intentions
+- rename of a local, of a global or a member across the project, of a file with its requires and its manifest
+- a formatter, semantic colours, gutter markers, colour swatches, hovers on controls, hashes, events and state bag keys
+
+Without a language server for Lua, turn off the Syntax errors inspection of OpenIDEA (Settings › Editor › Inspections): its parser does not know CfxLua.
+
+Every feature with its picture: https://github.com/SensityTech/OpenIDEA-CfxLUA/blob/v1.0.0/CHANGELOG.md
+"""
 categories = ["frameworks", "linters", "tools"]
 engines.openidea = "^1.4"
 wasm = "dist/plugin.wasm"
