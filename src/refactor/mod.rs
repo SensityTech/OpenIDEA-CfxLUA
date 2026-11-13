@@ -26,11 +26,11 @@ pub fn is_library(natives: &Natives, name: &str) -> bool {
 /// The families a project of that many Lua files gives the host.
 pub fn families(lua_files: usize) -> &'static [Family] {
     if lua_files <= EVERY_FAMILY {
-        &[Family::Class, Family::Global, Family::Member]
+        &[Family::Class, Family::Cfx, Family::Global, Family::Member]
     } else if lua_files <= GLOBALS_TOO {
-        &[Family::Class, Family::Global]
+        &[Family::Class, Family::Cfx, Family::Global]
     } else {
-        &[Family::Class]
+        &[Family::Class, Family::Cfx]
     }
 }
 
@@ -38,7 +38,7 @@ pub fn families(lua_files: usize) -> &'static [Family] {
 /// does not fit is left out whole, the members first.
 pub fn kept(mut anchors: Vec<Anchor>, lua_files: usize, room: usize) -> Vec<Anchor> {
     let given = families(lua_files);
-    anchors.retain(|anchor| given.contains(&anchor.family));
+    anchors.retain(|anchor| given.contains(&anchor.family) && anchor.key.len() <= edges::KEY_LIMIT);
     let room = room.min(MOST_IN_A_FILE);
     for family in [Family::Member, Family::Global] {
         if anchors.len() > room {

@@ -1,3 +1,4 @@
+pub mod anchors;
 pub mod ast;
 pub mod checks;
 pub mod db;

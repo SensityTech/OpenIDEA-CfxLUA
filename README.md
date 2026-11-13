@@ -327,7 +327,7 @@ does, it keeps these equivalents:
 | Not done yet | Instead |
 |---|---|
 | Hover on the directives of a manifest | Documentation in completion, **CfxLua: Show Documentation**, the tool window |
-| Rename and Find Usages | Go to Definition lists every match |
+| Rename and Find Usages of NUI callbacks and messages | Go to Definition lists every match |
 | Creating files (New Resource) | One **New** template per file |
 | Opening links from the tool window | URLs are shown with a copy button |
 | Opening the tool window from a command | **CfxLua: Show Documentation** shows the entry in the tool window and sums it up in a notification |

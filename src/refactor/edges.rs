@@ -13,13 +13,15 @@ use crate::ty::{SELF, Ty, psi, resolve};
 use std::rc::Rc;
 
 /// The host refuses a key longer than this.
-const KEY_LIMIT: usize = 1024;
+pub const KEY_LIMIT: usize = 1024;
 const GLOBALS: &str = "_G";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Family {
     /// A class or an alias named in a comment.
     Class,
+    /// A name of the Cfx runtime written in a string: an event, a state bag key.
+    Cfx,
     /// A global variable or function.
     Global,
     /// A member of a table or of a class the file itself names.
@@ -88,10 +90,19 @@ fn comments(docs: Node, out: &mut Vec<Anchor>) {
     }
 }
 
-fn in_order(mut out: Vec<Anchor>) -> Vec<Anchor> {
-    out.sort_by_key(|anchor| (anchor.start, anchor.end));
-    out.dedup_by_key(|anchor| (anchor.start, anchor.end));
+/// Sorted by position, without two anchors of the same range and key: a place may carry several keys.
+pub fn in_order(mut out: Vec<Anchor>) -> Vec<Anchor> {
+    out.sort_by(|a, b| (a.start, a.end, &a.key).cmp(&(b.start, b.end, &b.key)));
+    out.dedup();
     out
+}
+
+/// The inside of the string literal written at `start`, when it spells its text as it is: no escape, not empty.
+pub fn literal_name(src: &Source, start: usize) -> Option<(usize, usize)> {
+    let tok = src.toks.get(src.toks.binary_search_by_key(&start, |tok| tok.start).ok()?)?;
+    let (from, to) = tok.content_range(&src.text);
+    let as_is = tok.is_string() && from < to && tok.raw_value(&src.text) == tok.string_value(&src.text);
+    as_is.then_some((from, to))
 }
 
 impl Reading<'_> {
@@ -195,8 +206,7 @@ impl Reading<'_> {
         }
         let key = if node.is(N::TableField) { node.expr() } else { psi::key_expr(node) }?;
         let token = key.first_token().filter(|_| psi::is_string(key))?;
-        let (start, end) = self.src.toks.get(self.src.tok_of(token.index()))?.content_range(&self.src.text);
-        (self.src.text.get(start..end) == Some(name)).then_some((start, end))
+        literal_name(self.src, token.start()).filter(|(start, end)| self.src.text.get(*start..*end) == Some(name))
     }
 
     fn global(&mut self, node: Node) {

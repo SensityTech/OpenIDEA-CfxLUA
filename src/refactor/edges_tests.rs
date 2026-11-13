@@ -242,11 +242,11 @@ fn the_name_at_a_place_is_read_as_the_whole_file_reads_it() {
 #[test]
 fn a_project_gives_a_family_whole_or_not_at_all() {
     use super::{MOST_IN_A_PROJECT, families, kept};
-    assert_eq!(families(3), [Family::Class, Family::Global, Family::Member]);
-    assert_eq!(families(600), [Family::Class, Family::Global, Family::Member]);
-    assert_eq!(families(601), [Family::Class, Family::Global]);
-    assert_eq!(families(1200), [Family::Class, Family::Global]);
-    assert_eq!(families(1201), [Family::Class]);
+    assert_eq!(families(3), [Family::Class, Family::Cfx, Family::Global, Family::Member]);
+    assert_eq!(families(600), [Family::Class, Family::Cfx, Family::Global, Family::Member]);
+    assert_eq!(families(601), [Family::Class, Family::Cfx, Family::Global]);
+    assert_eq!(families(1200), [Family::Class, Family::Cfx, Family::Global]);
+    assert_eq!(families(1201), [Family::Class, Family::Cfx]);
     let text = "---@class Shop\nShop = { stock = 1 }\nprint(Shop.stock)\n";
     let all = || anchors(&Source::new(text), &library);
     let families_of = |lua_files: usize, room: usize| {
@@ -279,11 +279,11 @@ fn anchors_of_a_real_project() {
         natives.catalog(set);
     }
     let listed = std::fs::read_to_string(list).expect("the list");
-    let mut per_file: Vec<[usize; 3]> = Vec::new();
-    let mut keys: [std::collections::HashSet<String>; 3] = Default::default();
-    let mut spread: [std::collections::HashMap<String, (usize, std::collections::HashSet<usize>)>; 3] =
+    let mut per_file: Vec<[usize; 4]> = Vec::new();
+    let mut keys: [std::collections::HashSet<String>; 4] = Default::default();
+    let mut spread: [std::collections::HashMap<String, (usize, std::collections::HashSet<usize>)>; 4] =
         Default::default();
-    let mut depths: [Vec<usize>; 3] = Default::default();
+    let mut depths: [Vec<usize>; 4] = Default::default();
     let (mut bytes, mut spent) = (0, std::time::Duration::ZERO);
     for line in listed.lines().filter(|line| line.ends_with(".lua")) {
         let Ok(text) = std::fs::read_to_string(std::path::Path::new(&root).join(line)) else { continue };
@@ -295,7 +295,7 @@ fn anchors_of_a_real_project() {
         let found = anchors(&src, &|name| is_library(&natives, name));
         spent += started.elapsed();
         bytes += text.len();
-        let mut counts = [0; 3];
+        let mut counts = [0; 4];
         for anchor in found {
             counts[anchor.family as usize] += 1;
             let owner =
@@ -316,7 +316,7 @@ fn anchors_of_a_real_project() {
     sorted.sort_unstable();
     let at = |share: usize| sorted.get(sorted.len() * share / 100).copied().unwrap_or(0);
     eprintln!("{} files, {} KB, anchors read in {spent:?}", per_file.len(), bytes >> 10);
-    for (family, name) in ["classes", "globals", "members"].iter().enumerate() {
+    for (family, name) in ["classes", "cfx names", "globals", "members"].iter().enumerate() {
         let most = per_file.iter().map(|counts| counts[family]).max().unwrap_or(0);
         eprintln!("  {name}: {} anchors, {} keys, {most} in one file at most", total(family), keys[family].len());
     }
@@ -330,9 +330,9 @@ fn anchors_of_a_real_project() {
         all.iter().filter(|count| **count > 4096).count(),
         all.iter().filter(|count| **count > 1000).count()
     );
-    let without_members: usize = total(0) + total(1);
+    let without_members: usize = total(0) + total(1) + total(2);
     eprintln!("  classes and globals alone: {without_members} anchors");
-    for (family, name) in ["classes", "globals", "members"].iter().enumerate() {
+    for (family, name) in ["classes", "cfx names", "globals", "members"].iter().enumerate() {
         let mut uses: Vec<(usize, usize)> =
             spread[family].values().map(|(count, files)| (*count, files.len())).collect();
         uses.sort_unstable_by(|a, b| b.cmp(a));

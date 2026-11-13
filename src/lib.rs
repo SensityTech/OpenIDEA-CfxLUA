@@ -1499,9 +1499,19 @@ impl DocumentIndexer for DevKit {
         let ws = self.workspace_for(&path);
         let ws = &self.workspaces[ws];
         let (root, lua_files) = (ws.root.clone(), ws.files().filter(|file| file.kind == FileKind::Lua).count());
-        // The classes of comments are all a big project gives: its code is not parsed for them.
-        let found = if refactor::families(lua_files).contains(&refactor::edges::Family::Global) {
-            refactor::edges::anchors(&Source::new(&d.text), &|name| refactor::is_library(&self.natives, name))
+        // A big project gives the classes of its comments and its Cfx names: the code of a file is parsed
+        // only when it may write an event or a state bag key.
+        let shared = refactor::families(lua_files).contains(&refactor::edges::Family::Global);
+        let cfx = d.text.contains("Event") || statebags::sites::may_hold_bags(&d.text);
+        let found = if shared || cfx {
+            let src = Source::new(&d.text);
+            let mut found = match shared {
+                true => refactor::edges::anchors(&src, &|name| refactor::is_library(&self.natives, name)),
+                false => refactor::edges::of_comments(&d.text),
+            };
+            found.extend(events::anchors::anchors(&src));
+            found.extend(statebags::anchors::anchors(&src));
+            refactor::edges::in_order(found)
         } else {
             refactor::edges::of_comments(&d.text)
         };
@@ -2093,6 +2103,22 @@ mod tests {
             "in the columns the IDE counts, natives left out"
         );
         assert_eq!(kit.anchored["/project"].total, 5);
+        let names = "TriggerServerEvent('shop:buy', 1)\nLocalPlayer.state.fuel = 2\nAddStateBagChangeHandler('fuel', nil, Refuel)\n";
+        let edges = indexed(&mut kit, SHOP_CLIENT, names);
+        let found: Vec<(&str, Range)> =
+            edges.references.iter().map(|anchor| (anchor.key.as_str(), anchor.range)).collect();
+        assert_eq!(
+            found,
+            [
+                ("cfx.event#shop:buy", on(0, 20, 28)),
+                ("cfx.statebag:player#fuel", on(1, 18, 22)),
+                ("cfx.statebag:entity#fuel", on(2, 26, 30)),
+                ("cfx.statebag:global#fuel", on(2, 26, 30)),
+                ("cfx.statebag:player#fuel", on(2, 26, 30)),
+                ("lua.global#Refuel", on(2, 38, 44)),
+            ],
+            "an event by its name, a key by its bag; a bag of an unknown kind stands for each kind"
+        );
         let fewer = indexed(&mut kit, SHOP_CLIENT, "Shop = {}\n");
         assert_eq!((fewer.references.len(), kit.anchored["/project"].total), (1, 1), "a file counts once");
         let manifest = "fx_version 'cerulean'\ngame 'gta5'\nclient_script 'client/*.lua'\n";
@@ -2210,6 +2236,22 @@ mod tests {
         assert!(matches!(kit.resolve_code_action(&typed, rename.clone()), Err(Error::Cancelled)));
         let told: Vec<String> = host.notifications().into_iter().map(|told| told.body).collect();
         assert!(told.iter().any(|told| told.contains("too many places")), "{told:?}");
+    }
+
+    #[test]
+    fn a_big_project_gives_the_indexer_its_classes_and_its_cfx_names_only() {
+        let host = openidea_plugin::mock::MockHost::install();
+        for file in 0..1_201 {
+            host.add_file(&format!("res/client/file{file}.lua"), "print(1)\n");
+        }
+        let mut kit = shop_resource(&host);
+        let text = "---@class Shop\nShop = { stock = 1 }\nTriggerEvent('shop:open')\nGlobalState.open = true\n";
+        let document = indexing::Document { path: SHOP_CLIENT.to_owned(), text: text.to_owned(), symbols: Vec::new() };
+        let keys: Vec<String> = kit.index(&document).references.into_iter().map(|anchor| anchor.key).collect();
+        assert_eq!(keys, ["lua.class#Shop", "cfx.event#shop:open", "cfx.statebag:global#open"]);
+        let plain = indexing::Document { text: "---@class Stock\nStock = {}\n".to_owned(), ..document };
+        let keys: Vec<String> = kit.index(&plain).references.into_iter().map(|anchor| anchor.key).collect();
+        assert_eq!(keys, ["lua.class#Stock"], "read from the comments alone");
     }
 
     #[test]

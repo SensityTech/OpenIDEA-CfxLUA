@@ -1,3 +1,4 @@
+pub mod anchors;
 mod hover;
 pub mod sites;
 

@@ -142,6 +142,11 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   search. OpenIDEA keeps 200,000 names for a project: a project of more than 600 Lua files gives its classes and
   its globals, one of more than 1,200 its classes only, and Find Usages lists the occurrences of the word for the
   rest. Go to Declaration is unchanged.
+- **Find Usages and Rename of events and state bag keys.** An event name written in a string to one of the
+  runtime's event functions (`TriggerEvent`, `RegisterNetEvent`, `AddEventHandler`…) and a state bag key
+  (`LocalPlayer.state.fuel`, `state:set('fuel', …)`, `AddStateBagChangeHandler('fuel', …)`) are found across the
+  project by Find Usages, whatever the size of the project, and OpenIDEA's Rename renames them from a string,
+  with its preview. A name that is computed, concatenated or given to a helper of the project is not listed.
 - **Rename a local.** Alt+Enter on a local, a parameter, a loop variable, a local function or a label offers
   **Rename '…'**: it asks the new name and rewrites the declaration, every use, the `---@param` that documents a
   parameter and the `goto`s of a label. A keyword or a name that is not an identifier is asked again, with the
