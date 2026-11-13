@@ -134,6 +134,14 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   file, replaces `resource_manifest_version` with `fx_version 'cerulean'` and declares `game 'gta5'` when no game is
   declared, in one action that one undo reverts. It is not offered when a `fxmanifest.lua` already stands beside the
   file.
+- **Find Usages of classes, globals and table members, without lua-language-server.** OpenIDEA's Find Usages
+  gathers across the project the uses of a class or an alias named in annotations, of a global variable or
+  function, and of a member reached through names (`Config.Debug`, `Shop:open()`, a field of a table assigned to
+  a global, `self` in a method), where it listed every occurrence of the word. A local named like a global, a
+  comment or a string no longer counts. Natives, the runtime and the standard library are left to the text
+  search. OpenIDEA keeps 200,000 names for a project: a project of more than 600 Lua files gives its classes and
+  its globals, one of more than 1,200 its classes only, and Find Usages lists the occurrences of the word for the
+  rest. Go to Declaration is unchanged.
 - **Hover on magic values, hash literals, events and state bag keys**, as in the JetBrains plugin. A number a native
   takes as a control, a blip, a marker… shows what it stands for; a hash literal shows its signed, unsigned and
   hexadecimal values; an event name shows the page of the built-in event or, for an event of the project, who

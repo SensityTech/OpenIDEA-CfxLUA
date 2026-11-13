@@ -14,13 +14,16 @@
 // on stderr what the host logs, the lines of the plugin included.
 // `--type <text>` is what the edit types on a new last line, `GetEnt` by default: the completion is asked at its
 // end and its first entries are printed.
+// `--index`, with `--project`, gives each Lua file of the project to the document indexer of the plugin, as the
+// IDE does once it has listed the project, then asks at places of the file what Find Usages would gather there.
 // Built like scripts/openidea-start-check.rs, as an example of OpenIDEA's `ide-host` crate:
 //
 //   cp scripts/openidea-editor-check.rs <openidea>/crates/ide-host/examples/cfxlua_editor_check.rs
 //   cargo run --release --locked -p ide-host --example cfxlua_editor_check -- \
-//       [--patient] [--log] [--project <folder>] [--type <text>] <package.oiplugin> <file.lua> [word]
+//       [--patient] [--log] [--project <folder>] [--index] [--type <text>] <package.oiplugin> <file.lua> [word]
 
 use ide_core::{Pos, Range, TextEdit};
+use ide_host::plugins::navigation::{MAX_DOCUMENT_BYTES, Snapshot};
 use ide_host::plugins::{Consent, PluginEvent, PluginHost, PluginWorkspace};
 use ide_plugin::{HostError, Invocation, Limits, ProviderDocument, WorkbenchEvent};
 use std::collections::BTreeMap;
@@ -30,8 +33,8 @@ use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-const USAGE: &str = "usage: cfxlua_editor_check [--patient] [--log] [--project <folder>] [--type <text>] \
-                     <package.oiplugin> <file.lua> [word]";
+const USAGE: &str = "usage: cfxlua_editor_check [--patient] [--log] [--project <folder>] [--index] \
+                     [--type <text>] <package.oiplugin> <file.lua> [word]";
 /// How many entries of the completion are printed.
 const SHOWN: usize = 12;
 /// More event batches than any project needs: a scan that never ends stops the check instead of hanging it.
@@ -97,6 +100,7 @@ fn main() -> ExitCode {
         let logs = tracing_subscriber::fmt().with_writer(std::io::stderr).with_ansi(false).with_target(false);
         let _ = logs.with_max_level(tracing::Level::INFO).try_init();
     }
+    let indexed = args.iter().position(|a| a == "--index").map(|at| args.remove(at)).is_some();
     let typing = match args.iter().position(|a| a == "--type") {
         Some(at) if at + 1 < args.len() => {
             args.remove(at);
@@ -130,7 +134,8 @@ fn main() -> ExitCode {
     };
     let dir = std::env::temp_dir().join(format!("cfxlua-editor-check-{}", std::process::id()));
     let word = args.get(2).map(String::as_str);
-    let result = check(&dir, limits, project.as_deref(), Path::new(package), Path::new(file), word, &typing);
+    let asked = Asked { project: project.as_deref(), indexed, word, typing: &typing };
+    let result = check(&dir, limits, Path::new(package), Path::new(file), &asked);
     let _ = std::fs::remove_dir_all(&dir);
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -225,15 +230,70 @@ fn read_project(host: &PluginHost, plugin: &str, scan: &Scan) -> Result<(), Stri
     }
 }
 
-fn check(
-    dir: &Path,
-    limits: Limits,
-    project: Option<&Path>,
-    package: &Path,
-    file: &Path,
-    word: Option<&str>,
-    typing: &str,
-) -> Result<(), String> {
+/// The Lua files under a folder, hidden folders and `node_modules` left out.
+fn lua_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let (path, name) = (entry.path(), entry.file_name().to_string_lossy().into_owned());
+        if name.starts_with('.') || name == "node_modules" {
+            continue;
+        }
+        if path.is_dir() {
+            lua_files(&path, out);
+        } else if path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("lua")) {
+            out.push(path);
+        }
+    }
+}
+
+/// Gives each Lua file of the project to the document indexer, then asks at places of the file what Find Usages
+/// would gather there. Numbers only, and what the host answers when it refuses a file.
+fn index_project(host: &PluginHost, root: &Path, file: &Path, lines: &[&str]) -> Result<(), String> {
+    let root = dunce::canonicalize(root).map_err(|e| format!("{}: {e}", root.display()))?;
+    let file = dunce::canonicalize(file).map_err(|e| format!("{}: {e}", file.display()))?;
+    let mut files = Vec::new();
+    lua_files(&root, &mut files);
+    files.sort();
+    let (mut given, mut slowest, start) = (0, Duration::ZERO, Instant::now());
+    let mut refused: BTreeMap<String, usize> = BTreeMap::new();
+    for path in &files {
+        let Ok(text) = std::fs::read_to_string(path) else { continue };
+        if text.len() > MAX_DOCUMENT_BYTES {
+            continue;
+        }
+        let invocation = Invocation { workspace_root: Some(root.clone()), ..Default::default() };
+        let snapshot = Snapshot { path, version: None, text: &text, symbols: &[], scope: "" };
+        let asked = Instant::now();
+        match host.index_navigation(&root, snapshot, invocation) {
+            Ok(()) => given += 1,
+            Err(e) => *refused.entry(e.to_string()).or_default() += 1,
+        }
+        slowest = slowest.max(asked.elapsed());
+    }
+    println!("index: {} files, {given} indexed in {:?} (slowest {slowest:?})", files.len(), start.elapsed());
+    for (why, count) in &refused {
+        println!("  refused {count}: {why}");
+    }
+    let most_files = std::cell::Cell::new(0);
+    sweep("usages", "places", &names(lines), Duration::MAX, |at| {
+        let found = host.indexed_symbol_at(&root, &file, at, None)?;
+        most_files.set(most_files.get().max(found.files.len()));
+        Some(found.files.iter().map(|anchors| anchors.ranges.len()).sum())
+    });
+    println!("  in {} files at most", most_files.get());
+    Ok(())
+}
+
+/// What the check is asked for besides the package and the file.
+struct Asked<'a> {
+    project: Option<&'a Path>,
+    indexed: bool,
+    word: Option<&'a str>,
+    typing: &'a str,
+}
+
+fn check(dir: &Path, limits: Limits, package: &Path, file: &Path, asked: &Asked) -> Result<(), String> {
+    let Asked { project, indexed, word, typing } = *asked;
     let scan = Arc::new(Scan::default());
     let seen = scan.clone();
     let deadline = limits.edit_soft;
@@ -249,6 +309,10 @@ fn check(
     };
     let host = PluginHost::new(dir.to_path_buf(), Arc::new(sink), limits).map_err(|e| e.to_string())?;
     let published = Published::default();
+    if indexed {
+        // An indexer runs in a trusted project only.
+        host.set_project_policy(Arc::new(|_| true));
+    }
     if let Some(root) = project {
         host.set_workspace(Some(Arc::new(Opened(root.to_path_buf(), published.clone()))));
     }
@@ -422,6 +486,9 @@ fn check(
     ask(500, "code actions", &|| host.provide_code_actions(&typed, Range::point(at)).len());
     let coloured = ask(600, "tokens", &|| host.provide_semantic_tokens(&typed).len());
 
+    if let (true, Some(root)) = (indexed, project) {
+        index_project(&host, root, file, &lines)?;
+    }
     let info = host.info_of(&installed.id).map_err(|e| e.to_string())?;
     println!("{} {}: {:?}, {:?}", info.id, info.version, info.status, info.stats);
     if tokens.is_empty() {

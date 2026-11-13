@@ -18,6 +18,7 @@ pub mod natives;
 pub mod nui;
 pub mod perf;
 pub mod project;
+pub mod refactor;
 pub mod runtime;
 pub mod server;
 pub mod settings;
@@ -36,6 +37,7 @@ use lua::Source;
 use natives::Natives;
 use openidea_plugin::file_actions::{FileAction, FileActions, FileOperation};
 use openidea_plugin::hover::{Hover, HoverProvider};
+use openidea_plugin::indexing::{self, DocumentIndexer, Edges};
 use openidea_plugin::inlay_hints::{InlayHint, InlayHints, InlayKind};
 use openidea_plugin::language_features::{
     ColorInfo, DocumentSymbol, FoldRange, FormatOptions, LanguageFeatures, Parameter, ParameterLabel, Signature,
@@ -166,6 +168,14 @@ pub struct DevKit {
     indexing: bool,
     focus: Option<(usize, String)>,
     status_for: Option<String>,
+    /// How many anchors each file of a project gave the indexer of the IDE, by the root of the project.
+    anchored: std::collections::HashMap<String, Anchored>,
+}
+
+#[derive(Default)]
+struct Anchored {
+    files: std::collections::HashMap<String, usize>,
+    total: usize,
 }
 
 impl Default for DevKit {
@@ -189,6 +199,7 @@ impl Default for DevKit {
             indexing: false,
             focus: None,
             status_for: None,
+            anchored: Default::default(),
         }
     }
 }
@@ -1381,7 +1392,44 @@ impl InlayHints for DevKit {
     }
 }
 
-register_plugin!(DevKit, providers, views, language_features, hover, inlay_hints, injections, file_actions);
+impl DocumentIndexer for DevKit {
+    /// Asked for every Lua file of a project, then for each one that changes, under the budget of a command.
+    fn index(&mut self, d: &indexing::Document) -> Edges {
+        self.natives.freeze(true);
+        if !self.settings.enabled() {
+            self.settings.reset();
+            return Edges::default();
+        }
+        let path = slash(&d.path);
+        let lua = project::file_kind(&path) == FileKind::Lua && !project::is_escrowed(&d.text);
+        if !lua || d.text.len() > MAX_INDEXED {
+            return Edges::default();
+        }
+        let ws = self.workspace_for(&path);
+        let ws = &self.workspaces[ws];
+        let (root, lua_files) = (ws.root.clone(), ws.files().filter(|file| file.kind == FileKind::Lua).count());
+        // The classes of comments are all a big project gives: its code is not parsed for them.
+        let found = if refactor::families(lua_files).contains(&refactor::edges::Family::Global) {
+            refactor::edges::anchors(&Source::new(&d.text), &|name| refactor::is_library(&self.natives, name))
+        } else {
+            refactor::edges::of_comments(&d.text)
+        };
+        let given = self.anchored.entry(root).or_default();
+        let others = given.total - given.files.get(&path).copied().unwrap_or(0);
+        let kept = refactor::kept(found, lua_files, refactor::MOST_IN_A_PROJECT.saturating_sub(others));
+        given.total = others + kept.len();
+        given.files.insert(path, kept.len());
+        let lines = text::LineIndex::new(&d.text);
+        let mut cursor = lines.cursor(&d.text);
+        let anchor = |found: refactor::edges::Anchor| indexing::Anchor {
+            key: found.key,
+            range: cursor.range(found.start, found.end),
+        };
+        Edges { references: kept.into_iter().map(anchor).collect(), ..Edges::default() }
+    }
+}
+
+register_plugin!(DevKit, providers, views, language_features, hover, inlay_hints, injections, file_actions, indexing);
 
 // The semantic tokens are exported here rather than by `register_plugin!`, to send the names of
 // `TOKEN_NAMES` in place of the SDK's.
@@ -1927,6 +1975,45 @@ mod tests {
         assert_eq!(hash.range, Some(Range::new(Position::new(7, 12), Position::new(7, 19))));
         let name = kit.hover(&typed, Position::new(7, 7)).expect("the hover of a local");
         assert!(name.markdown.starts_with("```lua\nlocal car"), "the type engine still answers: {}", name.markdown);
+    }
+
+    #[test]
+    fn the_names_of_a_file_are_given_to_the_indexer_of_the_ide() {
+        let host = openidea_plugin::mock::MockHost::install();
+        let mut kit = shop_resource(&host);
+        let indexed = |kit: &mut DevKit, path: &str, text: &str| {
+            kit.index(&indexing::Document { path: path.to_owned(), text: text.to_owned(), symbols: Vec::new() })
+        };
+        let text = "---@class Shop\nShop = { stock = 1 }\nlocal s = 'é' .. Shop.stock\nprint(GetPlayerPed(-1), s)\n";
+        let edges = indexed(&mut kit, SHOP_CLIENT, text);
+        assert!(edges.definitions.is_empty() && edges.aliases.is_empty() && edges.markers.is_empty());
+        let found: Vec<(&str, Range)> =
+            edges.references.iter().map(|anchor| (anchor.key.as_str(), anchor.range)).collect();
+        let on = |line: u32, from: u32, to: u32| Range::new(Position::new(line, from), Position::new(line, to));
+        assert_eq!(
+            found,
+            [
+                ("lua.class#Shop", on(0, 10, 14)),
+                ("lua.global#Shop", on(1, 0, 4)),
+                ("lua.member:Shop#stock", on(1, 9, 14)),
+                ("lua.global#Shop", on(2, 17, 21)),
+                ("lua.member:Shop#stock", on(2, 22, 27)),
+            ],
+            "in the columns the IDE counts, natives left out"
+        );
+        assert_eq!(kit.anchored["/project"].total, 5);
+        let fewer = indexed(&mut kit, SHOP_CLIENT, "Shop = {}\n");
+        assert_eq!((fewer.references.len(), kit.anchored["/project"].total), (1, 1), "a file counts once");
+        let manifest = "fx_version 'cerulean'\ngame 'gta5'\nclient_script 'client/*.lua'\n";
+        assert!(indexed(&mut kit, "/project/res/fxmanifest.lua", manifest).references.is_empty());
+        assert!(indexed(&mut kit, SHOP_SERVER, &"Shop = 1\n".repeat(MAX_INDEXED / 9 + 1)).references.is_empty());
+        assert!(indexed(&mut kit, SHOP_SERVER, "FXAP\u{1}Shop = 1").references.is_empty(), "an escrowed file");
+        assert_eq!(kit.anchored["/project"].total, 1);
+        // What the editor asks next is still answered about the document it edits.
+        let typed = lua(SHOP_CLIENT, 2, "local shop = 1\nprint(shop)\n");
+        assert!(kit.hover(&typed, Position::new(1, 7)).is_some());
+        indexed(&mut kit, SHOP_SERVER, "Other = 1\n");
+        assert!(kit.hover(&typed, Position::new(1, 7)).is_some(), "the indexer does not take its place");
     }
 
     #[test]
