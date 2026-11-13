@@ -142,6 +142,11 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
   search. OpenIDEA keeps 200,000 names for a project: a project of more than 600 Lua files gives its classes and
   its globals, one of more than 1,200 its classes only, and Find Usages lists the occurrences of the word for the
   rest. Go to Declaration is unchanged.
+- **Rename a local.** Alt+Enter on a local, a parameter, a loop variable, a local function or a label offers
+  **Rename '…'**: it asks the new name and rewrites the declaration, every use, the `---@param` that documents a
+  parameter and the `goto`s of a label. A keyword or a name that is not an identifier is asked again, with the
+  reason. The warning on a local that hides another offers it as its **Rename** fix, as in the JetBrains plugin.
+  (Without a language server, OpenIDEA's own Rename does not rename an identifier a plugin indexes.)
 - **Hover on magic values, hash literals, events and state bag keys**, as in the JetBrains plugin. A number a native
   takes as a control, a blip, a marker… shows what it stands for; a hash literal shows its signed, unsigned and
   hexadecimal values; an event name shows the page of the built-in event or, for an event of the project, who

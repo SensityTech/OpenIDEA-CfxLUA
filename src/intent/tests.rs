@@ -144,7 +144,8 @@ fn a_parameter_and_a_local_get_their_annotation() {
     assert_eq!(applied("local na<caret>me = 'x'", "Create type annotation"), "---@type string\nlocal name = 'x'");
     assert_eq!(applied("local count = <caret>1", "Create type annotation"), "---@type number\nlocal count = 1");
     assert_eq!(applied("local what<caret>", "Create type annotation"), "---@type any\nlocal what");
-    assert!(titles("---@type string\nlocal na<caret>me = 'x'").is_empty());
+    let annotated = titles("---@type string\nlocal na<caret>me = 'x'");
+    assert_eq!(annotated, ["Rename 'name'…"], "nothing is left to offer but its rename");
 }
 
 #[test]

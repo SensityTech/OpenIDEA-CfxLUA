@@ -1,4 +1,5 @@
 pub mod edges;
+pub mod rename;
 
 use crate::natives::{NativeSet, Natives};
 use crate::runtime::stubs::runtime;

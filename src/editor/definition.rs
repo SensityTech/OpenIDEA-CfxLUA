@@ -87,7 +87,7 @@ fn location(cx: &Cx, named: Named) -> Option<Location> {
 }
 
 /// The label a `goto` jumps to: the one of that name in the blocks around it, inside its function.
-fn label<'a>(goto: Node<'a>, name: &str) -> Option<Node<'a>> {
+pub(crate) fn label<'a>(goto: Node<'a>, name: &str) -> Option<Node<'a>> {
     let blocks = goto.ancestors().take_while(|node| !node.is(N::FuncBody));
     let mut labels = blocks.flat_map(|block| block.children_of(N::LabelStat));
     labels.find(|label| label.token(T::Id).is_some_and(|id| id.text() == name))

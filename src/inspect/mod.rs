@@ -129,7 +129,9 @@ fn locals(src: &Source, unused: bool, shadowed: bool, out: &mut Vec<Problem>) {
         if let Some(hidden) = scopes.hidden(decl).filter(|_| shadowed) {
             let line = src.lines.line_of(tokens.start(hidden.name as usize)) + 1;
             let message = format!("Local name shadowed, '{name}' was previously defined on line {line}");
-            out.push(Problem::new(SHADOWED.code, Severity::Warning, at.0, at.1, message));
+            let shadowing = Problem::new(SHADOWED.code, Severity::Warning, at.0, at.1, message);
+            let rename = crate::refactor::rename::fix(src, at.0, |_| "Rename".to_owned());
+            out.push(rename.into_iter().fold(shadowing, Problem::fix));
         }
     }
 }

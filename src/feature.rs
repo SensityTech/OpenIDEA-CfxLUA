@@ -103,11 +103,13 @@ pub struct Fix {
     pub other: Vec<(String, Vec<TextEdit>)>,
     /// The name the file of the document takes first, in its folder: the edits are then made in that file.
     pub rename: Option<String>,
+    /// What the fix is asked again with once it is chosen: its edits are computed then, after a question.
+    pub asked: Option<String>,
 }
 
 impl Fix {
     pub fn new(title: impl Into<String>) -> Self {
-        Self { title: title.into(), preferred: false, edits: Vec::new(), other: Vec::new(), rename: None }
+        Self { title: title.into(), preferred: false, edits: Vec::new(), other: Vec::new(), rename: None, asked: None }
     }
 
     pub fn replace(mut self, start: usize, end: usize, text: impl Into<String>) -> Self {
@@ -126,6 +128,11 @@ impl Fix {
 
     pub fn renaming(mut self, name: impl Into<String>) -> Self {
         self.rename = Some(name.into());
+        self
+    }
+
+    pub fn asking(mut self, data: impl Into<String>) -> Self {
+        self.asked = Some(data.into());
         self
     }
 }

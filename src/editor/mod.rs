@@ -273,6 +273,7 @@ impl Feature for EditorFeature {
         });
         found.extend(annotations.unwrap_or_default());
         found.extend(crate::intent::surrounds(src, start, end));
+        found.extend(crate::refactor::rename::fix(src, start, |name| format!("Rename '{name}'…")));
         found.into_iter().map(|fix| Intention { fix, kind: "refactor" }).collect()
     }
 

@@ -64,7 +64,7 @@ pub struct Named {
 }
 
 /// The token of one of the kinds `wanted` that holds the byte `at`, or that ends there.
-pub(super) fn token_at(tokens: &Tokens, at: usize, wanted: impl Fn(T) -> bool) -> Option<usize> {
+pub(crate) fn token_at(tokens: &Tokens, at: usize, wanted: impl Fn(T) -> bool) -> Option<usize> {
     let holds = |index: &usize| wanted(tokens.kind(*index)) && tokens.start(*index) <= at && at <= tokens.end(*index);
     let before = at.checked_sub(1).and_then(|before| tokens.at(before));
     tokens.at(at).into_iter().chain(before).find(holds)

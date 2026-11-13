@@ -1001,10 +1001,21 @@ impl Providers for DevKit {
                     kind: Some(kind.to_owned()),
                     preferred: fix.preferred,
                     edits,
-                    data: None,
+                    data: fix.asked,
                 }
             })
             .collect()
+    }
+
+    /// Asked once an action without edits is chosen, under the budget of a command: a question may be asked.
+    fn resolve_code_action(&mut self, d: &Document, action: CodeAction) -> Result<CodeAction, Error> {
+        let Some(data) = action.data.as_deref() else { return Ok(action) };
+        let ws = self.prepare(d).ok_or(Error::Cancelled)?;
+        let (doc, _) = self.last.as_ref().ok_or(Error::Cancelled)?;
+        let mut ask = |question: &str, value: &str| host::input(question, Some(value)).ok().flatten();
+        let edits = refactor::rename::asked(&doc.src, data, &mut ask).ok_or(Error::Cancelled)?;
+        let own = edits.into_iter().map(|(start, end, text)| doc.edit(start, end, text)).collect();
+        Ok(CodeAction { edits: vec![(self.native_path(ws, &doc.path), own)], ..action })
     }
 }
 
@@ -2017,6 +2028,48 @@ mod tests {
     }
 
     #[test]
+    fn a_local_is_renamed_by_an_action_that_asks_its_new_name() {
+        let host = openidea_plugin::mock::MockHost::install();
+        let mut kit = shop_resource(&host);
+        let text = "local count = 0\nlocal function show(count)\n    print(count)\nend\nshow(count)\n";
+        let typed = lua(SHOP_CLIENT, 2, text);
+        let on_use = Range::new(Position::new(4, 7), Position::new(4, 7));
+        let actions = kit.code_actions(&typed, on_use);
+        let rename = actions.iter().find(|action| action.title == "Rename 'count'…").expect("the rename");
+        assert_eq!(rename.kind.as_deref(), Some("refactor"));
+        assert!(rename.edits.is_empty() && rename.data.is_some(), "resolved once it is chosen");
+        host.answer_next_prompt(Some(&["total"]));
+        let resolved = kit.resolve_code_action(&typed, rename.clone()).expect("the edits");
+        let [(path, edits)] = resolved.edits.as_slice() else { panic!("the edits of one file") };
+        assert_eq!(path, SHOP_CLIENT);
+        assert_eq!(
+            applied(text, edits),
+            "local total = 0\nlocal function show(count)\n    print(count)\nend\nshow(total)\n",
+            "the parameter of the same name is another local"
+        );
+        assert!(matches!(kit.resolve_code_action(&typed, rename.clone()), Err(Error::Cancelled)), "dismissed");
+        // The warning on the parameter that hides the local offers the same rename.
+        let on_parameter = Range::new(Position::new(1, 21), Position::new(1, 21));
+        let fixes = kit.code_actions(&typed, on_parameter);
+        let fix = fixes.iter().find(|action| action.title == "Rename").expect("the fix of the shadowed name");
+        assert_eq!(fix.kind.as_deref(), Some("quickfix"));
+        host.answer_next_prompt(Some(&["shown"]));
+        let resolved = kit.resolve_code_action(&typed, fix.clone()).expect("the edits");
+        assert_eq!(
+            applied(text, &resolved.edits[0].1),
+            "local count = 0\nlocal function show(shown)\n    print(shown)\nend\nshow(count)\n"
+        );
+        let plain = actions.iter().find(|action| action.data.is_none()).cloned();
+        if let Some(plain) = plain {
+            assert_eq!(
+                kit.resolve_code_action(&typed, plain.clone()),
+                Ok(plain),
+                "an action with its edits is left as it is"
+            );
+        }
+    }
+
+    #[test]
     fn an_intention_is_offered_where_the_caret_stands() {
         let host = openidea_plugin::mock::MockHost::install();
         let mut kit = shop_resource(&host);
@@ -2024,7 +2077,7 @@ mod tests {
         let on_name = Position::new(0, 17);
         let actions = kit.code_actions(&typed, Range::new(on_name, on_name));
         let titles: Vec<&str> = actions.iter().map(|action| action.title.as_str()).collect();
-        assert_eq!(titles, ["Create return annotation", "Create LuaDoc"]);
+        assert_eq!(titles, ["Create return annotation", "Create LuaDoc", "Rename 'total'…"]);
         assert!(actions.iter().all(|action| action.kind.as_deref() == Some("refactor")));
         let above = TextEdit {
             range: Range::new(Position::new(0, 0), Position::new(0, 0)),
