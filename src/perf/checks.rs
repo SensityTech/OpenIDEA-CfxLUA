@@ -57,8 +57,8 @@ pub fn problems(p: &Perf, opts: &Options) -> Vec<Problem> {
         repeated_natives(&lp, opts, &mut out);
         per_frame_spam(&lp, &mut out);
     }
-    for call in 0..ast.exprs.len() {
-        if !matches!(ast.exprs[call].kind, ExprKind::Call { .. }) {
+    for (call, expr) in ast.exprs.iter().enumerate() {
+        if !matches!(expr.kind, ExprKind::Call { .. }) {
             continue;
         }
         player_ped_minus_one(p, opts, call, &mut out);
