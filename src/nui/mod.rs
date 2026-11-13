@@ -1,6 +1,6 @@
 mod answer;
 mod bridge;
-mod build;
+pub(crate) mod build;
 mod js;
 mod lua;
 mod manifest;

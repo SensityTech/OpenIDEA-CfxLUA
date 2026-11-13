@@ -19,6 +19,7 @@ pub mod nui;
 pub mod perf;
 pub mod project;
 pub mod runtime;
+pub mod server;
 pub mod settings;
 pub mod statebags;
 pub mod syntax;
