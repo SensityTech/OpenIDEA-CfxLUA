@@ -16,11 +16,14 @@
 // end and its first entries are printed.
 // `--index`, with `--project`, gives each Lua file of the project to the document indexer of the plugin, as the
 // IDE does once it has listed the project, then asks at places of the file what Find Usages would gather there.
+// `--set <key>=<value>`, with `--project` and as many times as needed, gives the plugin the value of one of its
+// settings as the settings page of the IDE would: it is read as JSON, or as a string when it is none.
 // Built like scripts/openidea-start-check.rs, as an example of OpenIDEA's `ide-host` crate:
 //
 //   cp scripts/openidea-editor-check.rs <openidea>/crates/ide-host/examples/cfxlua_editor_check.rs
 //   cargo run --release --locked -p ide-host --example cfxlua_editor_check -- \
-//       [--patient] [--log] [--project <folder>] [--index] [--type <text>] <package.oiplugin> <file.lua> [word]
+//       [--patient] [--log] [--project <folder>] [--index] [--set <key>=<value>] [--type <text>] \
+//       <package.oiplugin> <file.lua> [word]
 
 use ide_core::{Pos, Range, TextEdit};
 use ide_host::plugins::navigation::{MAX_DOCUMENT_BYTES, Snapshot};
@@ -34,7 +37,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 const USAGE: &str = "usage: cfxlua_editor_check [--patient] [--log] [--project <folder>] [--index] \
-                     [--type <text>] <package.oiplugin> <file.lua> [word]";
+                     [--set <key>=<value>] [--type <text>] <package.oiplugin> <file.lua> [word]";
 /// How many entries of the completion are printed.
 const SHOWN: usize = 12;
 /// More event batches than any project needs: a scan that never ends stops the check instead of hanging it.
@@ -51,8 +54,11 @@ const KEYWORDS: [&str; 22] = [
 /// How many problems the plugin last published: errors, warnings, infos, hints, and those shown faded.
 type Published = Arc<Mutex<Option<[usize; 5]>>>;
 
+/// The values the user gave to settings of the plugin.
+type Settings = serde_json::Map<String, serde_json::Value>;
+
 /// One open project, with no editor on it: what the plugin reads comes from the disk.
-struct Opened(PathBuf, Published);
+struct Opened(PathBuf, Published, Settings);
 
 impl PluginWorkspace for Opened {
     fn projects(&self) -> Vec<PathBuf> {
@@ -84,6 +90,9 @@ impl PluginWorkspace for Opened {
         }
         Ok(())
     }
+    fn plugin_settings(&self, _: &str, _: Option<&Path>) -> Settings {
+        self.2.clone()
+    }
 }
 
 /// What the plugin tells the IDE while it reads a project.
@@ -101,6 +110,17 @@ fn main() -> ExitCode {
         let _ = logs.with_max_level(tracing::Level::INFO).try_init();
     }
     let indexed = args.iter().position(|a| a == "--index").map(|at| args.remove(at)).is_some();
+    let mut settings = Settings::new();
+    while let Some(at) = args.iter().position(|a| a == "--set") {
+        args.remove(at);
+        let pair = (at < args.len()).then(|| args.remove(at));
+        let Some((key, value)) = pair.as_deref().and_then(|pair| pair.split_once('=')) else {
+            eprintln!("{USAGE}");
+            return ExitCode::from(2);
+        };
+        let value = serde_json::from_str(value).unwrap_or_else(|_| serde_json::Value::String(value.to_owned()));
+        settings.insert(key.to_owned(), value);
+    }
     let typing = match args.iter().position(|a| a == "--type") {
         Some(at) if at + 1 < args.len() => {
             args.remove(at);
@@ -134,7 +154,7 @@ fn main() -> ExitCode {
     };
     let dir = std::env::temp_dir().join(format!("cfxlua-editor-check-{}", std::process::id()));
     let word = args.get(2).map(String::as_str);
-    let asked = Asked { project: project.as_deref(), indexed, word, typing: &typing };
+    let asked = Asked { project: project.as_deref(), indexed, settings: &settings, word, typing: &typing };
     let result = check(&dir, limits, Path::new(package), Path::new(file), &asked);
     let _ = std::fs::remove_dir_all(&dir);
     match result {
@@ -288,12 +308,13 @@ fn index_project(host: &PluginHost, root: &Path, file: &Path, lines: &[&str]) ->
 struct Asked<'a> {
     project: Option<&'a Path>,
     indexed: bool,
+    settings: &'a Settings,
     word: Option<&'a str>,
     typing: &'a str,
 }
 
 fn check(dir: &Path, limits: Limits, package: &Path, file: &Path, asked: &Asked) -> Result<(), String> {
-    let Asked { project, indexed, word, typing } = *asked;
+    let Asked { project, indexed, settings, word, typing } = *asked;
     let scan = Arc::new(Scan::default());
     let seen = scan.clone();
     let deadline = limits.edit_soft;
@@ -314,7 +335,7 @@ fn check(dir: &Path, limits: Limits, package: &Path, file: &Path, asked: &Asked)
         host.set_project_policy(Arc::new(|_| true));
     }
     if let Some(root) = project {
-        host.set_workspace(Some(Arc::new(Opened(root.to_path_buf(), published.clone()))));
+        host.set_workspace(Some(Arc::new(Opened(root.to_path_buf(), published.clone(), settings.clone()))));
     }
     let unpacked = host.unpack_package(package).map_err(|e| e.to_string())?;
     let installed = host.install_from_dir(&unpacked, &Consent::all()).map_err(|e| e.to_string())?;
