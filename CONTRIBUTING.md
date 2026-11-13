@@ -118,8 +118,10 @@ revision until then, and opens an issue when a release cannot run the plugin.
 1. Set the version in `plugin.toml` (with its `change-notes`) and `Cargo.toml`, and move the `[Unreleased]` notes of
    `CHANGELOG.md` under it.
 2. Tag the commit `v<version>` and push the tag. The [Release](.github/workflows/release.yml) workflow tests, builds
-   and publishes the package file; the [Marketplace](.github/workflows/marketplace.yml) workflow then signs a copy and
-   updates the index on the `marketplace` release.
+   and publishes the package file, with the notes `CHANGELOG.md` has for that version (`scripts/release-notes.sh`:
+   a note links a picture of `assets/screenshots/` by its path in the repository); the
+   [Marketplace](.github/workflows/marketplace.yml) workflow then signs a copy and updates the index on the
+   `marketplace` release.
 
 Signing uses the repository secret `PLUGIN_SIGNING_KEY`: the content of the file `openidea-plugin keygen` writes, whose
 public key the index lists for the `sensity` publisher. Without the secret, a release goes on without the marketplace.
