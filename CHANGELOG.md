@@ -177,6 +177,11 @@ and the project uses [Semantic Versioning](https://semver.org/) (0.x while OpenI
 - **Enable FiveM / RedM support turned off, then on again,** left completion, hover, colours and every other
   editor feature of the plugin off until one of its commands was run or its tool window used: while it is off,
   the plugin now reads the setting again at each request of the editor.
+- **A statement that chains thousands of calls crashed the plugin** (`a:b():c()…`, 8,000 links in one statement).
+  Nothing is nested in such a statement, but its syntax tree has one level for each link, and the plugin ran out of
+  stack walking it. A file with a statement chained or nested more than 500 levels deep is now left unanalysed: one
+  warning on its first line says so, and **Reformat Code** answers that it does not format the file. Code written
+  by hand stays far below: the deepest statement of a 3,500-file project has 130 levels.
 
 ### Changed
 

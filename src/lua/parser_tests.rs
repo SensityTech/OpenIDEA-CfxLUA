@@ -315,6 +315,25 @@ fn deep_nesting_is_reported_not_overflowed() {
 }
 
 #[test]
+fn what_is_chained_is_as_deep_as_it_is_long() {
+    let depth = |src: &str| Tree::parse(src).depth();
+    assert_eq!(depth(""), 1, "the file alone");
+    let flat = depth("local a = b");
+    assert_eq!(
+        depth("local a = b\nlocal c = d\nprint(a, c)"),
+        depth("print(a, c)").max(flat),
+        "statements add nothing"
+    );
+    for (head, link) in [("local a = b", ".c"), ("local a = b", " + c"), ("local a = b", "[1]")] {
+        let chained = |links: usize| depth(&format!("{head}{}", link.repeat(links)));
+        assert_eq!(chained(1), flat + 1, "{link}");
+        assert_eq!(chained(50), flat + 50, "{link}");
+        assert_eq!(chained(5_000), flat + 5_000, "{link}: no bound, and no recursion to count it");
+    }
+    assert_eq!(depth(&format!("local a = b{}", ":c()".repeat(50))), flat + 100, "a call and its index");
+}
+
+#[test]
 fn a_function_left_open_between_brackets_ends_at_the_bracket() {
     let src = "AddEventHandler('x', function(a)\n  local b = a\n)\nprint(1)";
     let tree = Tree::parse(src);
@@ -350,6 +369,35 @@ fn node_lookup_by_offset() {
     assert_eq!(at("g").parent().map(Node::text), Some("g(2)"));
     assert_eq!(at("return").kind(), N::ReturnStat);
     assert_eq!(tree.node_at(src, src.len()).kind(), N::NameExpr);
+}
+
+/// How deep the trees of a real project go: the files `CFXLUA_LIST` names under `CFXLUA_PROJECT`. Numbers
+/// only: never a path, never text.
+#[test]
+#[ignore = "measurement: the depth of the trees of the project given in CFXLUA_PROJECT and CFXLUA_LIST"]
+fn depth_of_a_real_project() {
+    let (Ok(root), Ok(list)) = (std::env::var("CFXLUA_PROJECT"), std::env::var("CFXLUA_LIST")) else { return };
+    let listed = std::fs::read_to_string(list).expect("the list");
+    let mut depths: Vec<u32> = Vec::new();
+    for line in listed.lines() {
+        let Ok(text) = std::fs::read_to_string(std::path::Path::new(&root).join(line)) else { continue };
+        if text.len() <= crate::workspace::MAX_FILE {
+            depths.push(Tree::parse(&text).depth());
+        }
+    }
+    depths.sort_unstable();
+    let over = |limit: u32| depths.iter().filter(|depth| **depth > limit).count();
+    eprintln!(
+        "{} files, deepest {}, median {}, over 50: {}, over 100: {}, over 200: {}, over 400: {}, over 1000: {}",
+        depths.len(),
+        depths.last().copied().unwrap_or(0),
+        depths.get(depths.len() / 2).copied().unwrap_or(0),
+        over(50),
+        over(100),
+        over(200),
+        over(400),
+        over(1000)
+    );
 }
 
 #[test]

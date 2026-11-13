@@ -8,6 +8,12 @@ use std::any::Any;
 use std::cell::{OnceCell, RefCell};
 use std::rc::Rc;
 
+/// Past this depth a text is read as one that is not Lua. The parser bounds what is nested, not what is
+/// chained: `a.b.c` is as deep as it is long, every reader of the tree walks it down, and the stack a plugin
+/// has in the host gives way at about 2,500 levels (measured on a chain of indexes). Code written by hand
+/// stays far below: 130 levels at most in a project of 3,500 files.
+pub const MAX_TREE_DEPTH: u32 = 500;
+
 pub struct Source {
     pub text: String,
     pub all: Vec<Token>,
@@ -20,6 +26,7 @@ pub struct Source {
     docs: OnceCell<Tree>,
     scopes: OnceCell<Scopes>,
     models: RefCell<Vec<Rc<dyn Any>>>,
+    deep: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -74,7 +81,11 @@ pub struct Call {
 
 impl Source {
     pub fn new(text: &str) -> Self {
-        let fine = lex(text);
+        let fine = Rc::new(lex(text));
+        let tree = Tree::of(text, fine.clone());
+        if tree.depth() > MAX_TREE_DEPTH {
+            return Self { deep: true, ..Self::plain(text) };
+        }
         let (all, held) = coarse(text, &fine);
         let mut toks = Vec::with_capacity(all.len());
         let mut code_of = Vec::with_capacity(all.len() + 1);
@@ -93,12 +104,13 @@ impl Source {
             all,
             toks,
             pair,
-            fine: Some(Rc::new(fine)),
+            fine: Some(fine),
             code,
-            tree: OnceCell::new(),
+            tree: OnceCell::from(tree),
             docs: OnceCell::new(),
             scopes: OnceCell::new(),
             models: RefCell::default(),
+            deep: false,
         }
     }
 
@@ -115,10 +127,16 @@ impl Source {
             docs: OnceCell::new(),
             scopes: OnceCell::new(),
             models: RefCell::default(),
+            deep: false,
         }
     }
 
-    /// The syntax tree, parsed once; a source that is not Lua has an empty one.
+    /// Whether the text is Lua whose tree is deeper than `MAX_TREE_DEPTH`: it is read as one that is not Lua.
+    pub fn too_deep(&self) -> bool {
+        self.deep
+    }
+
+    /// The syntax tree, parsed with the source; a source that is not Lua has an empty one.
     pub fn tree(&self) -> &Tree {
         self.tree.get_or_init(|| match &self.fine {
             Some(fine) => Tree::of(&self.text, fine.clone()),
@@ -514,6 +532,23 @@ fn match_brackets(src: &str, toks: &[Token]) -> Vec<Option<usize>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_text_chained_too_deep_is_read_as_one_that_is_not_lua() {
+        let chain = |links: usize| format!("local z = obj{}\nprint(z)", ".field".repeat(links));
+        let under = Source::new(&chain(400));
+        assert!(!under.too_deep() && !under.toks.is_empty() && under.tree().depth() <= MAX_TREE_DEPTH);
+        assert!(under.root().descendants().count() > 400);
+        for text in [chain(600), chain(100_000), format!("local x = 1{}", " + 1".repeat(600))] {
+            let over = Source::new(&text);
+            assert!(over.too_deep(), "{} bytes", text.len());
+            assert!(over.toks.is_empty() && over.all.is_empty() && over.pair.is_empty(), "no token to walk either");
+            assert_eq!(over.root().descendants().count(), 0);
+            assert_eq!(over.docs().descendants().count(), 0);
+            assert_eq!(over.text, text, "the text itself is kept");
+        }
+        assert!(!Source::plain(&chain(600)).too_deep(), "a text that is not Lua is not measured");
+    }
 
     #[test]
     fn a_model_is_built_once_and_kept_with_its_source() {

@@ -23,7 +23,16 @@ impl Feature for SyntaxFeature {
     }
 }
 
+pub const TOO_DEEP: &str = "CfxTooDeep";
+
 pub fn check(src: &Source) -> Vec<Problem> {
+    if src.too_deep() {
+        let line = src.text.lines().next().map_or(0, str::len);
+        let limit = crate::lua::syntax::MAX_TREE_DEPTH;
+        let message =
+            format!("CfxLua does not analyse this file: a statement chains or nests more than {limit} levels");
+        return vec![Problem::new(TOO_DEEP, Severity::Warning, 0, line, message)];
+    }
     let tree = Tree::new(src);
     let scopes = Scopes::new(src, &tree);
     let stmts = tree.statements();
@@ -325,6 +334,21 @@ mod tests {
     }
 
     const CONST: &str = "CfxLua does not reject it but ignores or corrupts the assignment";
+
+    #[test]
+    fn a_file_chained_too_deep_says_that_it_is_not_analysed() {
+        let text = format!("local a = b{}\nlocal x =", ".c".repeat(600));
+        let src = Source::new(&text);
+        let found = check(&src);
+        assert_eq!(found.len(), 1, "nothing else is read, not even the statement that does not end");
+        assert_eq!((found[0].code, found[0].severity), (TOO_DEEP, Severity::Warning));
+        assert_eq!((found[0].start, found[0].end), (0, text.find('\n').unwrap()), "on the first line");
+        assert_eq!(
+            found[0].message,
+            "CfxLua does not analyse this file: a statement chains or nests more than 500 levels"
+        );
+        assert!(problems(&format!("local a = b{}", ".c".repeat(400))).is_empty());
+    }
 
     #[test]
     fn what_the_parser_cannot_read() {

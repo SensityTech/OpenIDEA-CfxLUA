@@ -288,6 +288,16 @@ impl Tree {
         !self.errors.is_empty()
     }
 
+    /// How many nodes stand around the deepest one, itself included. The parser bounds what is nested, not
+    /// what is chained: a sum or a chain of calls is as deep as it is long.
+    pub fn depth(&self) -> u32 {
+        let mut depths: Vec<u32> = Vec::with_capacity(self.nodes.len());
+        for node in &self.nodes {
+            depths.push(if node.parent == NONE { 1 } else { depths[node.parent as usize] + 1 });
+        }
+        depths.into_iter().max().unwrap_or(0)
+    }
+
     pub fn errors<'a>(&'a self, src: &'a str) -> impl Iterator<Item = (Node<'a>, &'a str)> {
         self.errors.iter().map(move |(id, message)| (self.node(src, *id), &**message))
     }

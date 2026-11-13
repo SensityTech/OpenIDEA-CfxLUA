@@ -1095,6 +1095,11 @@ impl LanguageFeatures for DevKit {
             return Err(Error::Failed(format!("CfxLua does not format a file over {} KB", MAX_INDEXED >> 10)));
         }
         let edits = |cx: &Ctx, features: &[Box<dyn Feature>]| {
+            if cx.doc.src.too_deep() {
+                return Err(Error::Failed(
+                    "CfxLua does not format this file: a statement is chained too deep".to_owned(),
+                ));
+            }
             let range = range.map(|range| (cx.doc.offset(range.start), cx.doc.offset(range.end)));
             let mut out = Vec::new();
             for feature in features {
@@ -1696,6 +1701,39 @@ mod tests {
     }
 
     #[test]
+    fn a_statement_chained_too_deep_stops_the_analysis_of_its_file_not_the_plugin() {
+        let host = openidea_plugin::mock::MockHost::install();
+        let mut kit = shop_resource(&host);
+        // One level a link for an index or a sum, two for a call: nothing is nested in any of these.
+        for (version, text) in [
+            format!("local z = obj{}\nprint(z)\n", ".field".repeat(40_000)),
+            format!("local y = obj{}\nprint(y)\n", ":next(1)".repeat(40_000)),
+            format!("local x = 1{}\nprint(x)\n", " + 1".repeat(40_000)),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let deep = lua(SHOP_CLIENT, 10 + version as u64, &text);
+            let last = Position::new(1, 6);
+            assert!(kit.hover(&deep, last).is_none());
+            assert!(kit.completion(&deep, last, None).iter().all(|item| item.label != "z"));
+            assert!(kit.code_actions(&deep, Range::new(last, last)).is_empty());
+            kit.line_markers(&deep);
+            let published = host.diagnostics().remove(SHOP_CLIENT).expect("the problems of the document");
+            let told: Vec<&str> = published.iter().filter_map(|found| found.code.as_deref()).collect();
+            assert_eq!(told, [syntax::TOO_DEEP], "one problem says why nothing else is");
+            assert_eq!(
+                published[0].range,
+                Range { start: Position::new(0, 0), end: Position::new(0, text.find('\n').unwrap() as u32) }
+            );
+            let refused = kit.format(&deep, None, FormatOptions { tab_size: 4, insert_spaces: true });
+            assert!(refused.is_err(), "and Reformat Code says it too");
+        }
+        let fine = lua(SHOP_CLIENT, 20, &format!("local z = obj{}\nprint(z)\n", ".field".repeat(300)));
+        assert!(kit.hover(&fine, Position::new(1, 6)).is_some(), "a long chain under the limit is read as before");
+    }
+
+    #[test]
     fn what_an_inspection_finds_is_published_and_fixed_from_the_editor() {
         let host = openidea_plugin::mock::MockHost::install();
         let mut kit = shop_resource(&host);
@@ -1938,9 +1976,10 @@ mod tests {
             stage("lexer", &mut || fine = Some(lua::token::lex(&typed)));
             stage("tokens of the features", &mut || _ = lua::lexer::coarse(&typed, fine.as_ref().unwrap()));
             let mut src = None;
-            stage("source (lexer, tokens, brackets, lines)", &mut || src = Some(Source::new(&typed)));
+            stage("source (lexer, tree and its depth, tokens, brackets, lines)", &mut || {
+                src = Some(Source::new(&typed))
+            });
             let src = src.unwrap();
-            stage("tree", &mut || _ = src.tree());
             stage("scopes", &mut || _ = src.scopes());
             stage("documentation comments", &mut || _ = src.docs());
             stage("events model", &mut || _ = events::ast::parse(&src));

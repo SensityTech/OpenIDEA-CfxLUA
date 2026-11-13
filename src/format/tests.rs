@@ -365,24 +365,36 @@ fn many_edits_are_joined_into_fewer_that_write_the_same() {
 #[test]
 fn a_line_is_as_deep_as_it_is_long() {
     // Nothing is nested in these: the tree of a sum, of a chain or of an index has one level for each link.
-    let long = [
-        format!("local x = 1{}", " + 1".repeat(20_000)),
-        format!("local y = obj{}", ":next(1)".repeat(20_000)),
-        format!("local z = obj{}", ".field".repeat(20_000)),
-        format!("{}local b = 1", "local a\n".repeat(20_000)),
-    ];
-    for text in &long {
+    let chained = |levels: usize| {
+        [
+            format!("local x = 1{}", " + 1".repeat(levels)),
+            format!("local y = obj{}", ":next(1)".repeat(levels / 2)),
+            format!("local z = obj{}", ".field".repeat(levels)),
+        ]
+    };
+    let written = [format!("{}local b = 1", "local a\n".repeat(20_000))];
+    for text in chained(480).iter().chain(&written) {
+        let src = Source::new(text);
+        assert!(!src.too_deep(), "{} bytes", text.len());
         for style in [style(), every_option()] {
-            assert_eq!(format(&Source::new(text), &style, None), Ok(Vec::new()), "written as it is formatted");
+            assert_eq!(format(&src, &style, None), Ok(Vec::new()), "written as it is formatted");
         }
     }
+    // Chained deeper than a source reads, the text is not Lua: nothing of it is moved.
+    for text in chained(20_000) {
+        let src = Source::new(&format!("local  spaced=1\n{text}"));
+        assert!(src.too_deep(), "{} bytes", text.len());
+        assert_eq!(format(&src, &every_option(), None), Ok(Vec::new()));
+    }
     // Each line of a sum is indented from the line the sum starts on, a level at a time.
-    let lines = |count: usize| format!("local x = 1{}", "\n+ 1".repeat(count));
-    let short = formatted(&Source::new(&lines(200)), &style());
+    let sums = |count: usize, lines: usize| format!("local x = 1{}\n", "\n+ 1".repeat(lines)).repeat(count);
+    let short = formatted(&Source::new(&sums(1, 200)), &style());
     assert!(short.starts_with("local x = 1\n        + 1\n        + 1\n"), "{}", &short[..60]);
     assert_eq!(formatted(&Source::new(&short), &style()), short);
-    let refused = format(&Source::new(&lines(8_000)), &style(), None);
-    assert_eq!(refused.map(|edits| edits.len()), Err(Unsettled), "more than a layout may do");
+    // A file of the longest sums a source reads is laid out, until there are too many of them.
+    let edits = |count: usize| format(&Source::new(&sums(count, 480)), &style(), None).map(|edits| edits.len());
+    assert_eq!(edits(50), Ok(50 * 480));
+    assert_eq!(edits(300), Err(Unsettled), "more than a layout may do");
 }
 
 #[test]
