@@ -18,12 +18,14 @@
 // IDE does once it has listed the project, then asks at places of the file what Find Usages would gather there.
 // `--set <key>=<value>`, with `--project` and as many times as needed, gives the plugin the value of one of its
 // settings as the settings page of the IDE would: it is read as JSON, or as a string when it is none.
+// `--command <id>`, with `--project`, runs that command of the plugin once the project is read, as from the window
+// of the project with no editor focused, and prints how long it took and what it notified.
 // Built like scripts/openidea-start-check.rs, as an example of OpenIDEA's `ide-host` crate:
 //
 //   cp scripts/openidea-editor-check.rs <openidea>/crates/ide-host/examples/cfxlua_editor_check.rs
 //   cargo run --release --locked -p ide-host --example cfxlua_editor_check -- \
-//       [--patient] [--log] [--project <folder>] [--index] [--set <key>=<value>] [--type <text>] \
-//       <package.oiplugin> <file.lua> [word]
+//       [--patient] [--log] [--project <folder>] [--index] [--set <key>=<value>] [--command <id>] \
+//       [--type <text>] <package.oiplugin> <file.lua> [word]
 
 use ide_core::{Pos, Range, TextEdit};
 use ide_host::plugins::navigation::{MAX_DOCUMENT_BYTES, Snapshot};
@@ -37,7 +39,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 const USAGE: &str = "usage: cfxlua_editor_check [--patient] [--log] [--project <folder>] [--index] \
-                     [--set <key>=<value>] [--type <text>] <package.oiplugin> <file.lua> [word]";
+                     [--set <key>=<value>] [--command <id>] [--type <text>] <package.oiplugin> <file.lua> \
+                     [word]";
 /// How many entries of the completion are printed.
 const SHOWN: usize = 12;
 /// More event batches than any project needs: a scan that never ends stops the check instead of hanging it.
@@ -100,6 +103,8 @@ impl PluginWorkspace for Opened {
 struct Scan {
     slices: AtomicUsize,
     ended: AtomicBool,
+    /// The title and the body of each notification.
+    notified: Mutex<Vec<(String, String)>>,
 }
 
 fn main() -> ExitCode {
@@ -121,6 +126,17 @@ fn main() -> ExitCode {
         let value = serde_json::from_str(value).unwrap_or_else(|_| serde_json::Value::String(value.to_owned()));
         settings.insert(key.to_owned(), value);
     }
+    let command = match args.iter().position(|a| a == "--command") {
+        Some(at) if at + 1 < args.len() => {
+            args.remove(at);
+            Some(args.remove(at))
+        }
+        Some(_) => {
+            eprintln!("{USAGE}");
+            return ExitCode::from(2);
+        }
+        None => None,
+    };
     let typing = match args.iter().position(|a| a == "--type") {
         Some(at) if at + 1 < args.len() => {
             args.remove(at);
@@ -154,7 +170,8 @@ fn main() -> ExitCode {
     };
     let dir = std::env::temp_dir().join(format!("cfxlua-editor-check-{}", std::process::id()));
     let word = args.get(2).map(String::as_str);
-    let asked = Asked { project: project.as_deref(), indexed, settings: &settings, word, typing: &typing };
+    let command = command.as_deref();
+    let asked = Asked { project: project.as_deref(), indexed, settings: &settings, command, word, typing: &typing };
     let result = check(&dir, limits, Path::new(package), Path::new(file), &asked);
     let _ = std::fs::remove_dir_all(&dir);
     match result {
@@ -250,6 +267,27 @@ fn read_project(host: &PluginHost, plugin: &str, scan: &Scan) -> Result<(), Stri
     }
 }
 
+/// Runs a command of the plugin as from the window of the project, no editor focused: how long it takes, then
+/// what it notifies.
+fn run_command(host: &PluginHost, plugin: &str, root: &Path, command: &str, scan: &Scan) -> Result<(), String> {
+    let root = dunce::canonicalize(root).map_err(|e| format!("{}: {e}", root.display()))?;
+    let invocation = Invocation { client: Some("main".into()), workspace_root: Some(root), ..Default::default() };
+    let before = scan.notified.lock().map(|notified| notified.len()).unwrap_or(0);
+    let start = Instant::now();
+    let result = host.run_command(plugin, command, None, invocation);
+    let took = start.elapsed();
+    let notified = scan.notified.lock().map(|notified| notified[before..].to_vec()).unwrap_or_default();
+    let bytes: usize = notified.iter().map(|(title, body)| title.len() + body.len()).sum();
+    println!("command: {command} in {took:?}, {} notifications, {bytes} bytes", notified.len());
+    for (title, body) in &notified {
+        println!("  {title}");
+        for line in body.lines() {
+            println!("    {line}");
+        }
+    }
+    result.map(|_| ()).map_err(|e| format!("{command}: {e}"))
+}
+
 /// The Lua files under a folder, hidden folders and `node_modules` left out.
 fn lua_files(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
@@ -309,12 +347,13 @@ struct Asked<'a> {
     project: Option<&'a Path>,
     indexed: bool,
     settings: &'a Settings,
+    command: Option<&'a str>,
     word: Option<&'a str>,
     typing: &'a str,
 }
 
 fn check(dir: &Path, limits: Limits, package: &Path, file: &Path, asked: &Asked) -> Result<(), String> {
-    let Asked { project, indexed, settings, word, typing } = *asked;
+    let Asked { project, indexed, settings, command, word, typing } = *asked;
     let scan = Arc::new(Scan::default());
     let seen = scan.clone();
     let deadline = limits.edit_soft;
@@ -325,6 +364,11 @@ fn check(dir: &Path, limits: Limits, package: &Path, file: &Path, asked: &Asked)
         // The plugin tells its tool window to list again what the first scan found.
         PluginEvent::ViewMessage { message, .. } if message.contains("\"refresh\"") => {
             seen.ended.store(true, Ordering::Relaxed);
+        }
+        PluginEvent::Notification { title, body, .. } => {
+            if let Ok(mut notified) = seen.notified.lock() {
+                notified.push((title, body));
+            }
         }
         _ => {}
     };
@@ -339,8 +383,11 @@ fn check(dir: &Path, limits: Limits, package: &Path, file: &Path, asked: &Asked)
     }
     let unpacked = host.unpack_package(package).map_err(|e| e.to_string())?;
     let installed = host.install_from_dir(&unpacked, &Consent::all()).map_err(|e| e.to_string())?;
-    if project.is_some() {
+    if let Some(root) = project {
         read_project(&host, &installed.id, &scan)?;
+        if let Some(command) = command {
+            run_command(&host, &installed.id, root, command, &scan)?;
+        }
     }
     let text = std::fs::read_to_string(file).map_err(|e| format!("{}: {e}", file.display()))?.replace("\r\n", "\n");
     let lines: Vec<&str> = text.split('\n').collect();
